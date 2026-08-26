@@ -313,6 +313,10 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 const publicDir = path.resolve(__dirname, '..', '..', 'webapp', 'public');
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  next();
+});
 app.use('/', express.static(publicDir));
 
 const port = Number(process.env.PORT || 3000);
