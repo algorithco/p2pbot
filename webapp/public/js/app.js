@@ -115,16 +115,16 @@
 
   function bindChrome() {
     document.getElementById('tb-back').addEventListener('click', function () {
-      UI.haptic.light();
+      TG.haptic.light();
       if (App.backHandler) App.backHandler();
     });
     document.getElementById('tb-action').addEventListener('click', function () {
-      UI.haptic.tap();
+      TG.haptic.tap();
       if (App.actionHandler) App.actionHandler();
     });
     Array.prototype.forEach.call(document.querySelectorAll('.tab-btn'), function (btn) {
       btn.addEventListener('click', function () {
-        UI.haptic.tap();
+        TG.haptic.tap();
         go(btn.getAttribute('data-tab'));
       });
     });
@@ -148,7 +148,7 @@
 
     return UI.h('button', {
       class: 'deal-card',
-      onclick: function () { UI.haptic.light(); go('#/deal/' + deal.id); }
+      onclick: function () { TG.haptic.light(); go('#/deal/' + deal.id); }
     }, [
       UI.h('div', { class: 'row' }, [
         UI.h('div', { class: 'asset-glyph ' + am.cls, text: am.glyph }),
@@ -224,7 +224,7 @@
       UI.h('button', {
         class: 'fab-inline',
         'aria-label': 'New deal',
-        onclick: function () { UI.haptic.medium(); go('#/create'); }
+        onclick: function () { TG.haptic.medium(); go('#/create'); }
       }, [UI.h('span', { html: '<svg viewBox="0 0 24 24" width="26" height="26"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>' })])
     ].filter(Boolean));
 
@@ -232,7 +232,7 @@
       return UI.h('button', {
         class: App.state.filter === key ? 'active' : '',
         onclick: function () {
-          UI.haptic.tap();
+          TG.haptic.tap();
           App.state.filter = key;
           Array.prototype.forEach.call(seg.children, function (b) { b.classList.remove('active'); });
           seg.children[['active', 'done', 'all'].indexOf(key)].classList.add('active');
@@ -457,7 +457,7 @@
           return UI.h('button', {
             class: 'choice-card' + (w.role === key ? ' selected' : ''),
             onclick: function () {
-              UI.haptic.tap();
+              TG.haptic.tap();
               w.role = key;
               Array.prototype.forEach.call(this.parentNode.children, function (c) { c.classList.remove('selected'); });
               this.classList.add('selected');
@@ -508,7 +508,7 @@
             UI.h('div', { class: 'chip-row' }, ['10', '50', '100', '500'].map(function (v) {
               return UI.h('button', {
                 class: 'chip',
-                onclick: function () { w.amount = v; amountInput.value = v; updateFee(); UI.haptic.tap(); }
+                onclick: function () { w.amount = v; amountInput.value = v; updateFee(); TG.haptic.tap(); }
               }, [v]);
             }))
           ])
@@ -518,7 +518,7 @@
           return UI.h('button', {
             class: 'choice-card' + (w.asset === key ? ' selected' : ''),
             onclick: function () {
-              UI.haptic.tap();
+              TG.haptic.tap();
               w.asset = key;
               Array.prototype.forEach.call(this.parentNode.children, function (c) { c.classList.remove('selected'); });
               this.classList.add('selected');
@@ -550,7 +550,7 @@
           dlRow.appendChild(UI.h('button', {
             class: 'chip' + (w.deadlineH === o.h ? ' active' : ''),
             onclick: function () {
-              UI.haptic.tap();
+              TG.haptic.tap();
               w.deadlineH = o.h;
               Array.prototype.forEach.call(dlRow.children, function (c) { c.classList.remove('active'); });
               this.classList.add('active');
@@ -604,7 +604,7 @@
           UI.h('button', {
             class: 'btn btn-primary',
             onclick: function () {
-              if (validate(w.step)) { UI.haptic.light(); w.step++; renderStep(); }
+              if (validate(w.step)) { TG.haptic.light(); w.step++; renderStep(); }
             }
           }, ['Continue'])
         ].filter(Boolean)));
@@ -748,7 +748,7 @@
       }
       actions.push(UI.h('button', {
         class: 'btn btn-soft',
-        onclick: function () { UI.haptic.light(); go('#/deal/' + deal.id + '/chat'); }
+        onclick: function () { TG.haptic.light(); go('#/deal/' + deal.id + '/chat'); }
       }, ['💬 Open deal chat']));
       actions.push(UI.h('button', {
         class: 'btn btn-ghost',
@@ -994,7 +994,7 @@
       themeSeg.appendChild(UI.h('button', {
         class: getThemeMode() === pair[0] ? 'active' : '',
         onclick: function () {
-          UI.haptic.tap();
+          TG.haptic.tap();
           applyThemeMode(pair[0]);
           Array.prototype.forEach.call(themeSeg.children, function (b) { b.classList.remove('active'); });
           this.classList.add('active');
@@ -1026,7 +1026,7 @@
         UI.h('button', {
           class: 'list-item',
           onclick: function () {
-            UI.haptic.tap();
+            TG.haptic.tap();
             connValue.textContent = 'Checking…';
             Api.info()
               .then(function (d) {
@@ -1143,7 +1143,7 @@
             var chatId = sel.value === 'custom' ? customWrap.querySelector('input').value.trim() : sel.value;
             var text = msgTa.value.trim();
             if (!chatId || !text) { UI.toast('Recipient and message required', 'err'); return; }
-            UI.haptic.medium();
+            TG.haptic.medium();
             Api.notify(chatId, text)
               .then(function () {
                 TG.haptic.success();
