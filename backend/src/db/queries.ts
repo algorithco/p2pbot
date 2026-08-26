@@ -29,8 +29,8 @@ export async function ensureTables() {
 
     CREATE TABLE IF NOT EXISTS deals (
       id SERIAL PRIMARY KEY,
-      buyer_id INTEGER,
-      seller_id INTEGER,
+      buyer_id BIGINT,
+      seller_id BIGINT,
       buyer_telegram_id BIGINT,
       seller_telegram_id BIGINT,
       asset TEXT,
@@ -73,6 +73,10 @@ export async function ensureTables() {
   await ensureColumn('deals', 'resolved_at TIMESTAMPTZ');
   await ensureColumn('deals', 'updated_at TIMESTAMPTZ');
   await ensureColumn("deals", "confirmations JSONB DEFAULT '{}'::jsonb");
+
+  // Telegram IDs exceed 32-bit range — widen legacy INTEGER id columns to BIGINT.
+  await pool.query('ALTER TABLE deals ALTER COLUMN buyer_id TYPE BIGINT');
+  await pool.query('ALTER TABLE deals ALTER COLUMN seller_id TYPE BIGINT');
 }
 
 export async function saveNotification(chatId: number, message: string) {
