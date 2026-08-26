@@ -53,6 +53,12 @@
     return d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   };
 
+  UI.fmtTime = function (iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  };
+
   UI.timeAgo = function (iso) {
     var d = new Date(iso);
     if (isNaN(d.getTime())) return '';
