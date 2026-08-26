@@ -12,6 +12,8 @@
         var v = attrs[k];
         if (v === null || v === undefined || v === false) return;
         if (k === 'class') el.className = v;
+        else if (k === 'text') el.textContent = v;
+        else if (k === 'html') el.innerHTML = v;
         else if (k.slice(0, 2) === 'on' && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
         else if (k === 'dataset') Object.assign(el.dataset, v);
         else el.setAttribute(k, v === true ? '' : String(v));
