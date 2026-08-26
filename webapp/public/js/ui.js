@@ -88,6 +88,25 @@
     return s.slice(0, head) + '…' + s.slice(-tail);
   };
 
+  /** raw 0:hex -> user-friendly non-bounceable (UQ…) base64url */
+  UI.toFriendly = function (raw) {
+    try {
+      var parts = String(raw).split(':');
+      if (parts.length !== 2 || !/^[0-9a-fA-F]{64}$/.test(parts[1])) return String(raw || '');
+      var wc = parseInt(parts[0], 10);
+      var bytes = [0x51, wc < 0 ? 255 : wc];
+      for (var i = 0; i < 64; i += 2) bytes.push(parseInt(parts[1].substr(i, 2), 16));
+      var bin = '';
+      for (var j = 0; j < bytes.length; j++) bin += String.fromCharCode(bytes[j]);
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    } catch (e) { return String(raw || ''); }
+  };
+
+  UI.shortAddr = function (a) {
+    a = String(a || '');
+    return a.length > 12 ? a.slice(0, 6) + '…' + a.slice(-4) : a;
+  };
+
   /* ---------- Domain meta ---------- */
 
   var STATUSES = {
