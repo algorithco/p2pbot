@@ -1,0 +1,12 @@
+{
+  "name": "escrow-webapp",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "start": "npx http-server public -p 8080 -c-1 --silent",
+    "build": "echo 'no build needed for static webapp'"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
