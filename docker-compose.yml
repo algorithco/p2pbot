@@ -1,0 +1,54 @@
+# P2P escrow bot — full stack (Postgres + backend/bot/API).
+#
+# Prerequisites:
+#   1. cp backend/.env.example backend/.env   (then fill in BOT_TOKEN, etc.)
+#   2. docker compose up --build
+#
+# The backend listens on PORT 3000 inside the container and is published on
+# host port 3000. DATABASE_URL is overridden here so the app always reaches
+# Postgres via the internal service hostname; values in backend/.env are used
+# for everything else (BOT_TOKEN, TON_* keys, ...). `environment:` wins over
+# `env_file:`.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: escrow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-escrow_password}
+      POSTGRES_DB: escrow
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U escrow -d escrow"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - backend/.env
+    environment:
+      # Inside the compose network the DB host is the service name, not localhost.
+      DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:-escrow_password}@postgres:5432/escrow
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # Any HTTP response (even 401 when API_KEY is set) proves the server is up.
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/info',r=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  pgdata:

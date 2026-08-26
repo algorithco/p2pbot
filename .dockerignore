@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.env
+webapp/node_modules
+contracts/output
+*.log
+.git
+.DS_Store
+Thumbs.db
