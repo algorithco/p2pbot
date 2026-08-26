@@ -12,6 +12,9 @@
       apiOk: null,
       createdLinks: {}
     },
+    navStack: [],
+    currentHash: null,
+    _navBack: false,
     cleanupFns: [],
     backHandler: null,
     actionHandler: null,
@@ -46,6 +49,11 @@
     App.actionHandler = null;
 
     var hash = location.hash || '#/home';
+    if (App._navBack) { App._navBack = false; App.navStack.pop(); }
+    else if (App.currentHash && App.currentHash !== hash) App.navStack.push(App.currentHash);
+    if (App.navStack.length > 25) App.navStack.shift();
+    App.currentHash = hash;
+
     var matched = null, m = null;
     for (var i = 0; i < ROUTES.length; i++) {
       m = hash.match(ROUTES[i].re);
@@ -68,7 +76,8 @@
   }
 
   function navBack(fallbackHash) {
-    if (history.length > 1) history.back();
+    var prev = App.navStack.length ? App.navStack[App.navStack.length - 1] : null;
+    if (prev && prev !== (location.hash || '#/home')) { App._navBack = true; go(prev); }
     else go(fallbackHash || '#/home');
   }
 
@@ -373,7 +382,8 @@
         })
         .catch(function (err) {
           TG.haptic.error();
-          TG.main.hideProgress();
+          TG.main.hide();
+          renderStep();
           UI.toast(err.status === 0 ? 'Network unreachable' : ('Failed: ' + err.message), 'err');
         });
     }
@@ -600,12 +610,10 @@
         ].filter(Boolean)));
       } else {
         box.appendChild(UI.h('div', { class: 'btn-row' }, [
-          UI.h('button', { class: 'btn btn-ghost', onclick: wizBack }, ['Back'])
-        ]));
-        if (TG.available) TG.main.show('🔒 Create Escrow', submit);
-        else box.appendChild(UI.h('div', { class: 'btn-row' }, [
+          UI.h('button', { class: 'btn btn-ghost', onclick: wizBack }, ['Back']),
           UI.h('button', { class: 'btn btn-primary', onclick: submit }, ['🔒 Create Escrow'])
         ]));
+        if (TG.available) TG.main.show('🔒 Create Escrow', submit);
       }
     }
 
@@ -646,7 +654,7 @@
         .then(function (deal) {
           if (!deal) {
             box.innerHTML = '';
-            box.appendChild(emptyState('🔍', 'Deal not found', 'This deal does not exist or was removed.', 'Back to Deals'));
+            box.appendChild(emptyState('🔍', 'Deal not found', 'This deal does not exist or was removed.', 'Back to Deals', '#/home'));
             return;
           }
           render(deal);
@@ -914,7 +922,7 @@
     Api.deal(id).then(function (deal) {
       box.innerHTML = '';
       if (!deal) {
-        box.appendChild(emptyState('😕', 'Deal not found', 'The invite may be invalid or expired.', 'Go Home'));
+        box.appendChild(emptyState('😕', 'Deal not found', 'The invite may be invalid or expired.', 'Go Home', '#/home'));
         return;
       }
       var am = UI.assetMeta(deal.asset);
@@ -949,7 +957,7 @@
       }
     }).catch(function () {
       box.innerHTML = '';
-      box.appendChild(emptyState('📡', 'Could not load deal', 'Check your connection and try again.', 'Go Home'));
+      box.appendChild(emptyState('📡', 'Could not load deal', 'Check your connection and try again.', 'Go Home', '#/home'));
     });
   }
 
@@ -1165,6 +1173,11 @@
   /* ================= Boot ================= */
 
   function boot() {
+    window.addEventListener('error', function (e) {
+      try { UI.toast('Error: ' + (e.message || 'unknown'), 'err'); } catch (x) { /* ignore */ }
+    });
+    console.log('[TonEscrow] build v3 — ' + new Date().toISOString());
+
     TG.init();
     App.state.user = TG.user();
     App.state.meId = Number(TG.user() && TG.user().id) || 0;
