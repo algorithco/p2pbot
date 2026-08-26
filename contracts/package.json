@@ -1,0 +1,28 @@
+{
+  "name": "escrow-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tact smart contracts for the P2P escrow Telegram bot (TON)",
+  "scripts": {
+    "build": "tact --config tact.config.json",
+    "test": "jest --runInBand"
+  },
+  "devDependencies": {
+    "@tact-lang/compiler": "^1.5.3",
+    "@ton/core": "^0.53.0",
+    "@ton/sandbox": "^0.20.0",
+    "@ton/test-utils": "^0.4.2",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.30",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "typescript": "^5.4.5"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": [
+      "<rootDir>/tests"
+    ]
+  }
+}
