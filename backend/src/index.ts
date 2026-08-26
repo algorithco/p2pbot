@@ -103,8 +103,35 @@ app.get('/api/notifications', requireAdmin, asyncHandler(async (_req, res) => {
 }));
 
 // Public: webapp boot info (feeBps lets the frontend show exact fees)
+const ADDR_RE = /^(EQ|UQ)[A-Za-z0-9_-]{46}$|^0:-1?[0-9a-fA-F]{64}$/;
+function resolvePaymentAddress(): string | null {
+  if (config.walletAddress && ADDR_RE.test(config.walletAddress.trim())) return config.walletAddress.trim();
+  if (config.adminAddress && ADDR_RE.test(config.adminAddress.trim())) return config.adminAddress.trim();
+  return null;
+}
+
+// TON Connect dapp manifest (dynamic origin so tunnels/dev hosts just work)
+app.get('/tonconnect-manifest.json', (req, res) => {
+  const host = req.get('host') || 'localhost';
+  const proto = host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
+  const origin = `${proto}://${host}`;
+  res.setHeader('Cache-Control', 'no-cache');
+  res.json({
+    url: origin,
+    name: 'TonEscrow',
+    iconUrl: `${origin}/icon.svg`,
+    termsOfUseUrl: origin,
+    privacyPolicyUrl: origin
+  });
+});
+
 app.get('/api/info', (_req, res) => {
-  res.json({ adminTelegramIds: config.adminTelegramIds, feeBps: config.feeBps });
+  res.json({
+    adminTelegramIds: config.adminTelegramIds,
+    feeBps: config.feeBps,
+    paymentAddress: resolvePaymentAddress(),
+    network: config.tonNetwork
+  });
 });
 
 // Deals belonging to the caller (must come before /api/deals/:id)
@@ -179,7 +206,7 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
     feeBps: config.feeBps,
     status: 'AWAITING_DEPOSIT',
     contractAddress: '',
-    paymentAddress: '',
+    paymentAddress: resolvePaymentAddress() || '',
     terms: terms || '',
     deadline: deadline ? new Date(deadline) : null,
   });

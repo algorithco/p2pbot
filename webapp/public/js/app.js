@@ -191,6 +191,56 @@
     ]);
   }
 
+  /* ================= Wallet ================= */
+
+  function walletPill() {
+    var btn = UI.h('button', {
+      class: 'wallet-pill',
+      onclick: function () {
+        UI.haptic.tap();
+        if (!Wallet.available()) { UI.toast('Wallet SDK still loading…'); return; }
+        if (Wallet.connected()) walletSheet();
+        else Wallet.connect().catch(function () { /* user closed modal */ });
+      }
+    }, ['🔌 Connect Wallet']);
+    var render = function () {
+      if (Wallet.connected()) {
+        btn.textContent = '👛 ' + UI.shortAddr(UI.toFriendly(Wallet.address()));
+        btn.classList.add('connected');
+      } else {
+        btn.textContent = '🔌 Connect Wallet';
+        btn.classList.remove('connected');
+      }
+    };
+    Wallet.onStatus(function () { render(); });
+    setTimeout(render, 800);
+    return btn;
+  }
+
+  function walletSheet() {
+    var friendly = UI.toFriendly(Wallet.address());
+    var content = UI.h('div', {}, [
+      UI.h('h3', { text: 'Your wallet' }),
+      UI.h('p', { class: 'sub', text: (Wallet.walletName() || 'Connected') + ' · tap address to copy' }),
+      UI.h('button', {
+        class: 'addr-pill',
+        style: 'margin-bottom:12px',
+        onclick: function () { UI.copy(friendly, 'Wallet address copied'); }
+      }, [
+        UI.h('span', { class: 'mono', text: UI.truncate(friendly, 10, 8) }),
+        UI.h('span', { class: 'small muted', text: 'copy' })
+      ]),
+      UI.h('button', {
+        class: 'btn btn-danger',
+        onclick: function () {
+          UI.haptic.medium();
+          Wallet.disconnect().then(function () { UI.sheetClose(); UI.toast('Wallet disconnected'); });
+        }
+      }, ['Disconnect'])
+    ]);
+    UI.sheetOpen(content);
+  }
+
   /* ================= Home ================= */
 
   function viewHome() {
@@ -216,7 +266,8 @@
         ]) : null,
       UI.h('div', { class: 'hero' }, [
         UI.h('h1', { text: 'Hey, ' + name + ' 👋' }),
-        UI.h('p', { text: 'Lock funds in escrow and trade P2P with confidence.' })
+        UI.h('p', { text: 'Lock funds in escrow and trade P2P with confidence.' }),
+        UI.h('div', { class: 'row', style: 'margin-top:12px' }, [walletPill()])
       ]),
       stats,
       seg,
@@ -631,6 +682,57 @@
 
   var CHAIN_STATUS = { 0: 'Awaiting deposit', 1: 'Deposited', 2: 'Released', 3: 'Refunded' };
 
+  function paySheet(deal, payTo, am) {
+    var amountInput = UI.h('input', {
+      class: 'input',
+      type: 'text',
+      inputmode: 'decimal',
+      value: UI.fmtAmount(deal.amount)
+    });
+    var payBtn = UI.h('button', { class: 'btn btn-primary', onclick: doPay }, ['Approve & Pay']);
+
+    UI.sheetOpen(UI.h('div', {}, [
+      UI.h('h3', { text: 'Pay with wallet' }),
+      UI.h('p', { class: 'sub', text: 'Enter the amount, then approve the transaction in your connected wallet.' }),
+      UI.h('div', { class: 'card review-rows', style: 'padding:6px 14px;margin-bottom:14px' }, [
+        UI.h('div', { class: 'rrow' }, [
+          UI.h('span', { class: 'k', text: 'To' }),
+          UI.h('span', { class: 'v mono', text: UI.truncate(UI.toFriendly(payTo), 8, 6) })
+        ]),
+        UI.h('div', { class: 'rrow' }, [
+          UI.h('span', { class: 'k', text: 'Deal' }),
+          UI.h('span', { class: 'v', text: '#' + deal.id })
+        ])
+      ]),
+      UI.h('div', { class: 'field' }, [UI.h('label', { text: 'Amount (' + am.symbol + ')' }), amountInput]),
+      payBtn
+    ]));
+
+    function doPay() {
+      var amt = parseFloat(String(amountInput.value).replace(',', '.'));
+      if (!isFinite(amt) || amt <= 0) { UI.toast('Enter a valid amount', 'err'); return; }
+      UI.haptic.medium();
+      payBtn.setAttribute('disabled', '');
+      payBtn.textContent = 'Waiting for wallet…';
+
+      Wallet.pay(payTo, amt)
+        .then(function (res) {
+          TG.haptic.success();
+          UI.toast('Payment sent — awaiting confirmation', 'ok');
+          var proof = (res && res.boc) ? UI.truncate(res.boc, 16, 8) : 'wallet transfer';
+          return Api.sendChat(deal.id, App.state.meId, '💰 Paid ' + UI.fmtAmount(amt) + ' ' + am.symbol + ' to escrow from wallet. Proof: ' + proof);
+        })
+        .then(function () { UI.sheetClose(); })
+        .catch(function (err) {
+          TG.haptic.error();
+          var msg = (err && err.message === 'wallet_sdk_unavailable') ? 'Wallet SDK unavailable' : 'Payment cancelled or failed';
+          UI.toast(msg, 'err');
+          payBtn.removeAttribute('disabled');
+          payBtn.textContent = 'Approve & Pay';
+        });
+    }
+  }
+
   function viewDeal(id) {
     setTabbar(true);
     setTopbar('Deal #' + id, {
@@ -794,8 +896,37 @@
         }
       }
 
+      var payTo = (deal.payment_address && String(deal.payment_address).length > 10)
+        ? deal.payment_address
+        : ((deal.contract_address && String(deal.contract_address).length > 10) ? deal.contract_address : null);
+
+      var paySection = null;
+      if (payTo) {
+        var canPay = iAmBuyer && String(deal.status).toUpperCase() === 'AWAITING_DEPOSIT' && am.symbol === 'TON';
+        paySection = UI.h('div', {}, [
+          UI.h('div', { class: 'section-title', text: 'Payment' }),
+          UI.h('div', { class: 'card', style: 'padding:12px' }, [
+            UI.h('button', {
+              class: 'addr-pill',
+              onclick: function () { UI.copy(UI.toFriendly(payTo), 'Payment address copied'); }
+            }, [
+              UI.h('span', { class: 'mono', text: UI.truncate(UI.toFriendly(payTo), 10, 8) }),
+              UI.h('span', { class: 'small muted', text: 'tap to copy' })
+            ]),
+            UI.h('div', { class: 'field-hint', style: 'margin-top:8px', text: 'Deposit address for this deal. Send exactly ' + UI.fmtAmount(deal.amount) + ' ' + am.symbol + '.' }),
+            canPay ? UI.h('button', {
+              class: 'btn btn-primary',
+              style: 'margin-top:10px',
+              onclick: function () { UI.haptic.medium(); paySheet(deal, payTo, am); }
+            }, ['💳 Pay ' + UI.fmtAmount(deal.amount) + ' ' + am.symbol + ' from wallet']) : null,
+            (canPay && !Wallet.available()) ? UI.h('div', { class: 'field-hint', style: 'margin-top:6px', text: 'Wallet SDK is loading — reopen this screen if it does not appear.' }) : null
+          ].filter(Boolean))
+        ]);
+      }
+
       box.appendChild(head);
       box.appendChild(timeline);
+      if (paySection) box.appendChild(paySection);
       box.appendChild(UI.h('div', { class: 'section-title', text: 'Parties' }));
       box.appendChild(UI.h('div', { class: 'parties', style: 'margin-bottom:12px' }, [
         party('Buyer', deal.buyer_telegram_id, iAmBuyer),
@@ -1026,7 +1157,26 @@
         UI.h('button', {
           class: 'list-item',
           onclick: function () {
-            TG.haptic.tap();
+            UI.haptic.tap();
+            if (Wallet.connected()) { walletSheet(); return; }
+            if (!Wallet.available()) { UI.toast('Wallet SDK still loading…'); return; }
+            Wallet.connect().catch(function () { /* modal closed */ });
+          }
+        }, [
+          UI.h('div', { class: 'li-icon', text: '👛' }),
+          UI.h('div', { class: 'li-main' }, [
+            UI.h('b', { text: 'Wallet' }),
+            UI.h('span', { text: 'Tonkeeper · MyTonWallet · @wallet' })
+          ]),
+          UI.h('span', {
+            class: 'li-value',
+            text: Wallet.connected() ? UI.shortAddr(UI.toFriendly(Wallet.address())) : 'Connect'
+          })
+        ]),
+        UI.h('button', {
+          class: 'list-item',
+          onclick: function () {
+            UI.haptic.tap();
             connValue.textContent = 'Checking…';
             Api.info()
               .then(function (d) {

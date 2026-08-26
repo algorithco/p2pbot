@@ -719,6 +719,20 @@ body[data-theme-mode="light"] .toast { background: #1d2733; color: #fff; }
 }
 .fab-inline:active { transform: scale(.9); }
 
+/* ---------------- Wallet ---------------- */
+.wallet-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  font-size: 13.5px; font-weight: 700;
+  color: var(--link);
+  transition: transform .15s var(--ease), border-color .2s;
+}
+.wallet-pill:active { transform: scale(.96); }
+.wallet-pill.connected { border-color: var(--success); color: var(--success); }
+
 @media (min-width: 480px) {
   body { font-size: 15.5px; }
   .deal-head .amt { font-size: 34px; }
