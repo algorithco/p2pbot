@@ -500,6 +500,7 @@ select.input option { background: var(--surface); color: var(--text); }
   font-weight: 800; font-size: 15px; color: #fff;
   margin-bottom: 8px;
 }
+img.avatar { object-fit: cover; }
 .av-0 { background: linear-gradient(135deg,#f6a13c,#e05c3c); }
 .av-1 { background: linear-gradient(135deg,#3ec58f,#1d8f77); }
 .av-2 { background: linear-gradient(135deg,#5a9bf6,#3f5fd8); }

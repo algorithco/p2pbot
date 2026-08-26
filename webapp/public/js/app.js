@@ -996,7 +996,9 @@
 
     var root = UI.h('div', {}, [
       UI.h('div', { class: 'card profile-card' }, [
-        UI.h('div', { class: 'avatar ' + UI.avatarClass(u.id), text: initial }),
+        u.photo_url
+          ? UI.h('img', { class: 'avatar ' + UI.avatarClass(u.id), src: u.photo_url, alt: '' })
+          : UI.h('div', { class: 'avatar ' + UI.avatarClass(u.id), text: initial }),
         UI.h('h2', { text: u.first_name ? u.first_name + (u.last_name ? ' ' + u.last_name : '') : 'Guest' }),
         UI.h('div', { class: 'pid', text: (u.username ? '@' + u.username + ' · ' : '') + 'ID ' + (u.id || '—') })
       ]),
