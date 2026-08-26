@@ -13,8 +13,8 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS deals (
   id SERIAL PRIMARY KEY,
-  buyer_id INTEGER,
-  seller_id INTEGER,
+  buyer_id BIGINT,
+  seller_id BIGINT,
   buyer_telegram_id BIGINT,
   seller_telegram_id BIGINT,
   asset TEXT,
