@@ -9,8 +9,14 @@ export function createApi() {
   const app = express();
   app.use(express.json({ limit: '256kb' }));
 
-  // Health (no auth)
+  // Health (no auth) — lightweight, does NOT spam Telegram DC when no session
   app.get('/health', async (_req, res) => {
+    const hasSession = !!(config.sessionString || (() => {
+      try { return require('fs').existsSync(require('path').resolve(process.cwd(), 'sessions/ubot.session.enc')); } catch { return false; }
+    })());
+    if (!hasSession) {
+      return res.json({ ok: true, authorized: false, me: null, apiIdConfigured: !!config.apiId, reason: 'no_session' });
+    }
     let authorized = false;
     let me: unknown = null;
     try {
@@ -21,9 +27,11 @@ export function createApi() {
         me = { username: fetched.username, id: String(fetched.id) };
       }
     } catch (e) {
-      logger.warn('health check error', e);
+      // Do not spam warn on expected not_authorized
+      const msg = String((e as Error).message || e);
+      if (!msg.includes('not_authorized')) logger.warn('health check error', e);
     }
-    res.json({ ok: true, authorized, me, apiIdConfigured: !!config.apiId });
+    res.json({ ok: true, authorized, me, apiIdConfigured: !!config.apiId, hasSession });
   });
 
   // Internal auth
