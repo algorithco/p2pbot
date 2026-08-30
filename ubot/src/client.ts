@@ -12,39 +12,57 @@ export function getClient(): TelegramClient | null {
 }
 
 export async function ensureClient(): Promise<TelegramClient> {
-  if (client && (await client.checkAuthorization())) return client;
+  if (client) {
+    try {
+      if (await client.checkAuthorization()) return client;
+    } catch {
+      // fall through to reconnect
+    }
+  }
   if (connectPromise) return connectPromise;
   connectPromise = (async () => {
     const sessionStr = loadEncryptedSession() || '';
-    const stringSession = new StringSession(sessionStr);
-
+    if (!sessionStr) {
+      throw new Error('not_authorized: UBOT_SESSION_STRING empty — run npm run login:qr (teleproto) or login-telethon.py');
+    }
     if (!config.apiId || !config.apiHash) {
       throw new Error('API_ID / API_HASH not configured — set in ubot/.env');
     }
 
+    const stringSession = new StringSession(sessionStr);
     const c = new TelegramClient(stringSession, config.apiId, config.apiHash, {
-      connectionRetries: 5,
-      retryDelay: 2000,
-      autoReconnect: true,
+      connectionRetries: 1,
+      retryDelay: 1000,
+      autoReconnect: false, // avoid spam when session invalid; healthcheck will retry on demand
     });
 
-    logger.info('Connecting TelegramClient...');
-    await c.connect();
-
-    const authorized = await c.checkAuthorization();
-    if (!authorized) {
-      logger.warn('Userbot not authorized — need to run npm run login to generate session');
-      // Do not throw; let API report not_authorized
-    } else {
-      const me = await c.getMe();
-      logger.info(`Userbot connected as ${(me as unknown as { username?: string })?.username || (me as unknown as { id: number })?.id}`);
-      // Persist session (may have been updated)
-      try {
-        const saved = (c.session as StringSession).save() as unknown as string;
-        if (saved && saved !== sessionStr) saveEncryptedSession(saved);
-      } catch {}
+    logger.info('Connecting TelegramClient (teleproto)...');
+    try {
+      await c.connect();
+    } catch (e) {
+      logger.warn('Telegram connect failed (will retry on next request)', e);
+      throw new Error(`telegram_connect_failed: ${String((e as Error).message || e)}`);
     }
 
+    let authorized = false;
+    try {
+      authorized = await c.checkAuthorization();
+    } catch (e) {
+      logger.warn('checkAuthorization failed', e);
+      await c.disconnect().catch(() => undefined);
+      throw new Error(`not_authorized: ${(e as Error).message}`);
+    }
+    if (!authorized) {
+      logger.warn('Userbot not authorized — session invalid/expired, regenerate via npm run login:qr');
+      await c.disconnect().catch(() => undefined);
+      throw new Error('not_authorized: session invalid');
+    }
+    const me = await c.getMe();
+    logger.info(`Userbot connected as ${(me as unknown as { username?: string })?.username || (me as unknown as { id: number })?.id}`);
+    try {
+      const saved = (c.session as StringSession).save() as unknown as string;
+      if (saved && saved !== sessionStr) saveEncryptedSession(saved);
+    } catch {}
     client = c;
     return c;
   })();
