@@ -1,7 +1,7 @@
-# P2P escrow bot — micro-architecture (7 services)
+# P2P escrow bot — micro-architecture (8 services, cloudflared everywhere)
 #  frontend (webapp nginx :8080 -> backend :3000) | backend (API-only :3000, bot)
 #  signer (W5 :3001) | ubot (:3002) | utradebot (:3003) | postgres (:5432)
-#  cloudflared (tunnels ONLY frontend :80 -> public HTTPS for TON Connect + bot)
+#  cloudflared (frontend :80) + cloudflared-backend (backend :3000) -> public HTTPS
 #
 # Prerequisites:
 #   1. cp backend/.env.example backend/.env       # BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL, FRONTEND_URL
@@ -146,11 +146,10 @@ services:
           cpus: "0.3"
           memory: 128M
 
-  # Cloudflared — tunnels frontend (and optionally backend) to public HTTPS.
-  # Uses quick tunnel by default (no account, random trycloudflare.com, URL in logs).
-  # For production/stability use named tunnel: set CLOUDFLARE_TUNNEL_TOKEN and switch command.
-  # This setup tunnels ONLY frontend (webapp) — backend API is reachable via frontend's /api proxy,
-  # so wallet + Mini App work via single public URL. Add backend tunnel below if you need direct API URL.
+  # Cloudflared — tunnels everywhere (frontend + backend) to public HTTPS
+  # Both use quick tunnel (random trycloudflare.com, URL in logs) — wallet can use either.
+  # Frontend tunnel: Mini App + /api proxy (single public URL for dapp)
+  # Backend tunnel: direct API https://xxx.trycloudflare.com/api/* (alternative)
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
@@ -172,23 +171,20 @@ services:
     # environment:
     #   - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
 
-  # Optional: direct backend tunnel (uncomment for cloudflared everywhere)
-  # This would give a second public URL https://xxx.trycloudflare.com for raw API
-  # Currently disabled — frontend's /api proxy already exposes backend via single public URL (simpler)
-  # cloudflared-backend:
-  #   image: cloudflare/cloudflared:latest
-  #   restart: unless-stopped
-  #   command: tunnel --url http://backend:3000 --no-autoupdate
-  #   depends_on:
-  #     backend:
-  #       condition: service_healthy
-  #   networks:
-  #     - escrow-net
-  #   logging:
-  #     driver: json-file
-  #     options:
-  #       max-size: "10m"
-  #       max-file: "3"
+  cloudflared-backend:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --url http://backend:3000 --no-autoupdate
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - escrow-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   ubot:
     build:
