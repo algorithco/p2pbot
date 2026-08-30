@@ -24,7 +24,8 @@ Copy `.env.example` to `.env`. Names match `src/config.ts` exactly.
 | `TON_API_ENDPOINT` | derived from `TON_NETWORK` | Optional verbatim override, e.g. `https://toncenter.com/api/v2/jsonRPC` |
 | `TON_NETWORK` | `mainnet` | `testnet` or `mainnet`; selects the matching toncenter endpoint |
 | `TONCENTER_API_KEY` | empty | Optional API key for toncenter (recommended in prod) |
-| `MNEMONIC` | empty | 24-word deployer wallet phrase. **Hot-wallet risk — leave empty unless needed** |
+| `SIGNER_URL` | `http://signer:3001` | URL of the isolated W5 signer microservice |
+| `SIGNER_API_KEY` | empty | Must match `SIGNER_API_KEY` in `signer/.env` (32+ chars) |
 | `ESCROW_CONTRACT_CODE_HEX` | empty | Compiled Escrow code hex (see contracts/README.md) |
 | `JETTON_MASTER_ADDRESS` | unset | Jetton master used for jetton deals |
 | `USDT_JETTON_ADDRESS` | empty | Canonical USDT jetton address on TON |
@@ -34,7 +35,7 @@ Copy `.env.example` to `.env`. Names match `src/config.ts` exactly.
 | `FEE_PERCENTAGE` | `1` | Legacy percent alias; prefer `FEE_BPS` |
 | `MIN_CONFIRMATIONS` | `3` | Confirmations before a deposit is trusted |
 | `ADMIN_ADDRESS` | empty | On-chain arbiter/admin address |
-| `WALLET_ADDRESS` | empty | Bot wallet address (set when running without mnemonic) |
+| `WALLET_ADDRESS` | empty | W5 signer address (auto-derived from signer; set manually to override) |
 | `REQUIRE_ONCHAIN` | `false` | `true` = refuse to operate without deployed contract |
 | `WEBAPP_URL` | empty | Public HTTPS Mini App URL (menu button + join links) |
 | `API_KEY` | unset | Shared API secret; **unset = all protected routes are open** |

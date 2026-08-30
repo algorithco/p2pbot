@@ -1,20 +1,18 @@
 /**
- * Deploys Escrow contracts from the bot hot wallet.
+ * Deploys Escrow contracts via the isolated W5 signer microservice.
  *
- * Guards: refuses to run without MNEMONIC, a compiled code BOC
- * (ESCROW_CONTRACT_CODE_HEX) and admin/fee addresses — every failure mode
- * throws a descriptive `deploy_not_configured: …` error.
+ * Guards: refuses to run without signer (SIGNER_URL + SIGNER_API_KEY), a
+ * compiled code BOC (ESCROW_CONTRACT_CODE_HEX) and admin/fee addresses —
+ * every failure mode throws a descriptive `deploy_not_configured: …` error.
  *
  * Deployment body: the Deployable trait expects Deploy{queryId}, i.e.
  * op = 0x00000000 (u32) followed by queryId (u64).
  */
 import { Address, Cell, toNano } from '@ton/core';
-import { internal } from '@ton/ton';
-import { mnemonicToPrivateKey } from '@ton/crypto';
-import { client, getWallet } from './tonClient';
 import { config } from '../config';
 import { ESCROW_CODE_HEX, deployBody, Escrow } from '../contracts/wrappers/Escrow';
 import { computeJettonWalletAddress } from './jettonUtils';
+import { getSignerAddress, deployEscrowViaSigner } from './signerClient';
 
 /**
  * Defensive import of ../utils/money (owned by a parallel workstream; may not
@@ -70,8 +68,8 @@ export async function deployEscrowContract(
   sellerJettonWallet?: Address,
   feeJettonWallet?: Address,
 ): Promise<string> {
-  if (!Array.isArray(config.mnemonic) || config.mnemonic.length < 12) {
-    throw new Error('deploy_not_configured: MNEMONIC missing or too short');
+  if (!config.signerUrl) {
+    throw new Error('deploy_not_configured: SIGNER_URL missing — set SIGNER_URL (e.g. http://signer:3001) and SIGNER_MNEMONIC in signer/.env');
   }
   const codeHex = config.escrowContractCodeHex || ESCROW_CODE_HEX;
   if (!codeHex) {
@@ -92,6 +90,14 @@ export async function deployEscrowContract(
 
   let jettonMaster: Address | null = null;
   let contractJettonWallet: Address | null = null;
+  // Resolve deployer (signer) address for jetton wallet derivation + Escrow owner
+  let signerAddr: Address;
+  try {
+    signerAddr = Address.parse(await getSignerAddress());
+  } catch (e) {
+    throw new Error(`deploy_not_configured: signer unavailable (${String(e)}) — check signer service and SIGNER_API_KEY`);
+  }
+
   if (assetType === 1) {
     const masterStr = config.jettonMasterAddress || config.usdtJettonAddress;
     if (!masterStr) {
@@ -99,9 +105,7 @@ export async function deployEscrowContract(
     }
     jettonMaster = Address.parse(masterStr);
     try {
-      // Best-effort derivation via get_wallet_address; null when RPC is down.
-      const walletForOwnerCheck = await getWallet();
-      contractJettonWallet = await computeJettonWalletAddress(jettonMaster, walletForOwnerCheck.address);
+      contractJettonWallet = await computeJettonWalletAddress(jettonMaster, signerAddr);
     } catch {
       contractJettonWallet = null;
     }
@@ -109,8 +113,6 @@ export async function deployEscrowContract(
       throw new Error('deploy_not_configured: could not derive contract jetton wallet address (RPC unreachable?)');
     }
   }
-
-  const wallet = await getWallet();
 
   const escrow = Escrow.create({
     dealId,
@@ -124,26 +126,24 @@ export async function deployEscrowContract(
     deadline,
     jettonMaster,
     contractJettonWallet,
-    owner: wallet.address,
+    owner: signerAddr,
     code,
   });
 
-  // Manual deployment: wallet transfer carrying the Deploy{queryId} body.
-  const keyPair = await mnemonicToPrivateKey(config.mnemonic);
-  const provider = client.provider(wallet.address, null);
-  const seqno = await wallet.getSeqno(provider);
+  // Delegate signing/sending to signer microservice
+  const deployBodyCell = deployBody(0n);
+  const stateInit = escrow.init;
+  if (!stateInit) throw new Error('deploy_not_configured: escrow init missing (code?)');
 
-  await wallet.sendTransfer(provider, {
-    seqno,
-    secretKey: keyPair.secretKey,
-    messages: [
-      internal({
-        to: escrow.address,
-        value: toNano('0.12'),
-        bounce: false,
-        body: deployBody(0n),
-      }),
-    ],
+  const codeBoc = stateInit.code.toBoc().toString('base64');
+  const dataBoc = stateInit.data.toBoc().toString('base64');
+  const bodyBoc = deployBodyCell.toBoc().toString('base64');
+
+  await deployEscrowViaSigner({
+    escrowAddress: escrow.address.toString(),
+    escrowStateInit: { codeBoc, dataBoc },
+    value: '0.12',
+    bodyBoc,
   });
 
   return escrow.address.toString();

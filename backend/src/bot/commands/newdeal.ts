@@ -63,9 +63,9 @@ export function registerNewDeal(bot: Bot) {
       deadline,
     });
 
-    // 2) On-chain deployment ONLY in explicit on-chain mode with signing material present.
+    // 2) On-chain deployment ONLY in explicit on-chain mode with signer configured.
     let contractAddress = '';
-    if (config.requireOnchain && config.mnemonic.length > 0 && config.escrowContractCodeHex) {
+    if (config.requireOnchain && config.signerUrl && config.escrowContractCodeHex) {
       try {
         const buyerRow = await getUserByTelegramId(ctx.from!.id);
         contractAddress = await deployEscrowContract(
@@ -87,7 +87,7 @@ export function registerNewDeal(bot: Bot) {
         contractAddress = '';
       }
     } else if (config.requireOnchain) {
-      logger.warn(`Deal #${deal.id}: REQUIRE_ONCHAIN=true but mnemonic/ESCROW_CONTRACT_CODE_HEX missing — staying off-chain`);
+      logger.warn(`Deal #${deal.id}: REQUIRE_ONCHAIN=true but signer/ESCROW_CONTRACT_CODE_HEX missing — staying off-chain (check SIGNER_URL)`);
     }
 
     // 3) Off-chain fallback: deposits go to the custodial wallet address.

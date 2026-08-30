@@ -7,7 +7,9 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL!,
   tonApiEndpoint: process.env.TON_API_ENDPOINT || 'https://tonapi.io',
   tonNetwork: process.env.TON_NETWORK || 'mainnet',
-  mnemonic: process.env.MNEMONIC ? process.env.MNEMONIC.split(' ') : [],
+  // Signer microservice (W5 wallet) — holds SIGNER_MNEMONIC isolated
+  signerUrl: process.env.SIGNER_URL || 'http://signer:3001',
+  signerApiKey: process.env.SIGNER_API_KEY || '',
   escrowContractCodeHex: process.env.ESCROW_CONTRACT_CODE_HEX || '',
   jettonMasterAddress: process.env.JETTON_MASTER_ADDRESS,
   jettonWalletCodeHash: (() => {

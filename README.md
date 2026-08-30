@@ -88,10 +88,10 @@ instance: `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL`. For production add
 | ✅ | Deal lifecycle tracked off-chain (create → deposit → confirm → release/refund) |
 | ✅ | Telegram Mini App UI |
 | ✅ | One-time join links + per-deal chat |
+| ✅ | W5 signer microservice (`signer/`) — isolated `SIGNER_MNEMONIC` (24 words) |
 | ⚠️ | Compile the Tact contract and deploy it (see [contracts/README.md](contracts/README.md)) |
 | ⚠️ | Set `REQUIRE_ONCHAIN=true` once deployed to enforce on-chain mode |
-| ⚠️ | Fund the deployer wallet (`MNEMONIC`) with TON for gas |
-| ❌ | On-chain release/refund send path is stubbed until the wallet is configured |
+| ⚠️ | Fund the W5 deployer wallet (`SIGNER_MNEMONIC` in `signer/.env`, V5R1) with TON for gas |
 | ❌ | Jetton master verification pending (`USDT_JETTON_ADDRESS` not yet validated on-chain) |
 
 ## Security notes

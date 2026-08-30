@@ -57,9 +57,9 @@ clone or CI without network).
 2. [ ] `npm test` passes with real BOC present (tests actually run).
 3. [ ] Choose network; set backend `TON_NETWORK=testnet|mainnet` +
       `TON_API_ENDPOINT`/`TONCENTER_API_KEY`.
-4. [ ] Create/fund the deployer wallet; paste its 24-word phrase into
-      `MNEMONIC` (hot-wallet risk — keep balance minimal) and confirm
-      `WALLET_ADDRESS` matches.
+4. [ ] Create/fund the W5 deployer wallet; paste its 24-word phrase into
+       `SIGNER_MNEMONIC` in `signer/.env` (hot-wallet risk — keep balance minimal,
+       never in `backend/.env`) and confirm `signer` `/address` matches `WALLET_ADDRESS`.
 5. [ ] Set `ESCROW_CONTRACT_CODE_HEX` from the compiled BOC.
 6. [ ] Configure addresses: `ADMIN_ADDRESS`, `FEE_ADDRESS`,
       `FEE_BPS`, `MIN_CONFIRMATIONS`.

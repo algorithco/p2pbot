@@ -1,5 +1,6 @@
 /**
- * Shared TON RPC client + bot wallet accessors.
+ * Shared TON RPC client (read-only).
+ * Signing is handled exclusively by the isolated signer microservice (signer:3001).
  *
  * Endpoint resolution:
  *  1. An explicitly-provided TON_API_ENDPOINT env var wins verbatim. We check
@@ -9,8 +10,7 @@
  *  2. Otherwise the proper toncenter jsonRPC URL is derived from TON_NETWORK.
  * Optional TONCENTER_API_KEY is passed through TonClient's apiKey option.
  */
-import { TonClient, WalletContractV4 } from '@ton/ton';
-import { mnemonicToPrivateKey } from '@ton/crypto';
+import { TonClient } from '@ton/ton';
 import { config } from '../config';
 
 const TONCENTER_MAINNET = 'https://toncenter.com/api/v2/jsonRPC';
@@ -29,22 +29,16 @@ export const client = new TonClient({
   apiKey: process.env.TONCENTER_API_KEY || undefined,
 });
 
-let cachedWallet: WalletContractV4 | null = null;
-
-/** Bot hot wallet (V4) derived from MNEMONIC; throws when unconfigured. */
-export async function getWallet(): Promise<WalletContractV4> {
-  let w = cachedWallet;
-  if (!w) {
-    if (!Array.isArray(config.mnemonic) || config.mnemonic.length < 12) {
-      throw new Error('wallet_not_configured: MNEMONIC missing or too short');
-    }
-    const key = await mnemonicToPrivateKey(config.mnemonic);
-    w = WalletContractV4.create({ publicKey: key.publicKey, workchain: 0 });
-    cachedWallet = w;
-  }
-  return w;
+/**
+ * @deprecated Direct wallet access removed. Use signerClient.getSignerAddress()
+ * Wallet keys now live only in signer service (SIGNER_MNEMONIC). This stub
+ * is kept for backward-compat error messages.
+ */
+export async function getWallet(): Promise<never> {
+  throw new Error('wallet_not_configured: MNEMONIC removed — use signer microservice (SIGNER_URL). Set SIGNER_MNEMONIC in signer/.env');
 }
 
 export async function getWalletAddress(): Promise<string> {
-  return (await getWallet()).address.toString();
+  const { getSignerAddress } = await import('./signerClient');
+  return getSignerAddress();
 }
