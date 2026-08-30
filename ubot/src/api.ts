@@ -9,29 +9,14 @@ export function createApi() {
   const app = express();
   app.use(express.json({ limit: '256kb' }));
 
-  // Health (no auth) — lightweight, does NOT spam Telegram DC when no session
+  // Health (no auth) — does NOT connect to Telegram DC to avoid spam; just reports config
   app.get('/health', async (_req, res) => {
     const hasSession = !!(config.sessionString || (() => {
       try { return require('fs').existsSync(require('path').resolve(process.cwd(), 'sessions/ubot.session.enc')); } catch { return false; }
     })());
-    if (!hasSession) {
-      return res.json({ ok: true, authorized: false, me: null, apiIdConfigured: !!config.apiId, reason: 'no_session' });
-    }
-    let authorized = false;
-    let me: unknown = null;
-    try {
-      const c = await ensureClient();
-      authorized = await c.checkAuthorization();
-      if (authorized) {
-        const fetched = await c.getMe() as unknown as { username?: string; id: unknown };
-        me = { username: fetched.username, id: String(fetched.id) };
-      }
-    } catch (e) {
-      // Do not spam warn on expected not_authorized
-      const msg = String((e as Error).message || e);
-      if (!msg.includes('not_authorized')) logger.warn('health check error', e);
-    }
-    res.json({ ok: true, authorized, me, apiIdConfigured: !!config.apiId, hasSession });
+    // Do not call ensureClient() here — that would spam DC when session invalid
+    // Health just reports if session is configured, not if it's authorized
+    res.json({ ok: true, authorized: false, me: null, apiIdConfigured: !!config.apiId, hasSession, reason: hasSession ? 'has_session_not_verified' : 'no_session' });
   });
 
   // Internal auth
