@@ -22,6 +22,8 @@ ENV PORT=3000
 
 WORKDIR /app/backend
 
+RUN addgroup -S backend && adduser -S backend -G backend
+
 COPY backend/package*.json ./
 RUN npm ci --omit=dev || npm install --omit=dev
 
@@ -31,7 +33,11 @@ COPY --from=build /app/backend/dist ./dist
 # i.e. /app/webapp/public in this image.
 COPY webapp/public /app/webapp/public
 
+RUN chown -R backend:backend /app
+
 EXPOSE 3000
+
+USER backend
 
 # Health checking is handled by docker-compose (node http one-liner).
 HEALTHCHECK NONE
