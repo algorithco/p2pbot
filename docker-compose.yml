@@ -172,22 +172,23 @@ services:
     # environment:
     #   - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
 
-  # Direct backend tunnel — cloudflared everywhere (exposes backend API directly)
-  # This gives a second public URL https://xxx.trycloudflare.com for raw API (besides frontend's /api proxy)
-  cloudflared-backend:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --url http://backend:3000 --no-autoupdate
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - escrow-net
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+  # Optional: direct backend tunnel (uncomment for cloudflared everywhere)
+  # This would give a second public URL https://xxx.trycloudflare.com for raw API
+  # Currently disabled — frontend's /api proxy already exposes backend via single public URL (simpler)
+  # cloudflared-backend:
+  #   image: cloudflare/cloudflared:latest
+  #   restart: unless-stopped
+  #   command: tunnel --url http://backend:3000 --no-autoupdate
+  #   depends_on:
+  #     backend:
+  #       condition: service_healthy
+  #   networks:
+  #     - escrow-net
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
 
   ubot:
     build:
