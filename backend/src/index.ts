@@ -134,31 +134,30 @@ function resolvePaymentAddress(): string | null {
   return null;
 }
 
-// TON Connect dapp manifest — uses public frontend URL when behind cloudflared/nginx
-// Priority: 1) WEBAPP_URL/FRONTEND_URL env (explicit cloudflare URL), 2) X-Forwarded-* from proxy, 3) Host header
+// TON Connect dapp manifest — dynamic per-request origin (supports both localhost and cloudflare)
+// Returns the origin of the incoming request so wallet sees matching url whichever way you access:
+//  - http://localhost:8080/tonconnect-manifest.json → https is NOT forced, returns http://localhost:8080
+//  - https://xxx.trycloudflare.com/tonconnect-manifest.json → returns that https origin
+// WEBAPP_URL/FRONTEND_URL is only used for bot setChatMenuButton, not for manifest url mismatch.
 app.get('/tonconnect-manifest.json', (req, res) => {
-  // If WEBAPP_URL is set to https://<cloudflare>, use it directly (bot and manifest share same public URL)
-  const configured = (config.webappUrl || config.frontendUrl || '').trim().replace(/\/+$/, '');
+  const host = (req.get('x-forwarded-host') || req.get('host') || 'localhost').split(',')[0].trim() || 'localhost';
+  const forwardedProto = (req.get('x-forwarded-proto') || '').split(',')[0].trim();
+  // If WEBAPP_URL is explicitly set and request host matches it, prefer it (for bot consistency), else use request host
   let origin: string;
-  if (configured && /^https?:\/\//i.test(configured)) {
-    try {
-      origin = new URL(configured).origin;
-    } catch {
-      origin = configured;
-    }
-  } else {
-    // Derive from request (supports cloudflared: X-Forwarded-Proto https + Host xxx.trycloudflare.com)
-    const host = (req.get('x-forwarded-host') || req.get('host') || 'localhost').split(',')[0].trim() || 'localhost';
-    const forwardedProto = (req.get('x-forwarded-proto') || '').split(',')[0].trim();
-    const proto =
-      forwardedProto === 'https' || forwardedProto === 'http'
-        ? forwardedProto
-        : host.startsWith('localhost') || host.startsWith('127.0.0.1')
-          ? 'http'
-          : 'https';
-    origin = `${proto}://${host}`;
+  const proto =
+    forwardedProto === 'https' || forwardedProto === 'http'
+      ? forwardedProto
+      : host.startsWith('localhost') || host.startsWith('127.0.0.1')
+        ? 'http'
+        : 'https';
+  // Always derive from request to avoid mismatch when accessing via different host (localhost vs cloudflare)
+  origin = `${proto}://${host}`;
+  // Log for debugging wallet issues
+  if (req.get('origin') || req.get('referer')) {
+    logger.info(`tonconnect-manifest requested via ${origin} (host=${host}, x-forwarded-proto=${forwardedProto}, referer=${req.get('referer')})`);
   }
   res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.json({
     url: origin,
     name: 'TonEscrow',
