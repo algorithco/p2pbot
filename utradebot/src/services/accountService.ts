@@ -1,6 +1,6 @@
-import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
-import { Api } from 'telegram';
+import { TelegramClient } from 'teleproto';
+import { StringSession } from 'teleproto/sessions';
+import { Api } from 'teleproto';
 import { config } from '../config';
 import logger from '../logger';
 import { decryptSession } from './sessionCrypto';
@@ -162,7 +162,7 @@ export async function attemptBuyerLogin(params: {
         if (!params.password) return { success: false, error: '2fa_required' };
         // Need to get password and check
         const pwdInfo = await client.invoke(new Api.account.GetPassword());
-        const { computeCheck } = await import('telegram/Password');
+        const { computeCheck } = await import('teleproto/Password');
         // @ts-ignore
         const check = await (computeCheck as unknown as (pwd: unknown, pw: string) => Promise<unknown>)(pwdInfo, params.password);
         await client.invoke(

@@ -1,4 +1,4 @@
-import { Api } from 'telegram';
+import { Api } from 'teleproto';
 import { ensureClient, withFloodWait } from './client';
 import logger from './logger';
 import { config } from './config';
@@ -95,7 +95,7 @@ export async function transferChannelOwnership(
   const newOwnerEntity = await client.getEntity(newOwnerUserId as string);
 
   // Need to compute password check via account.getPassword
-  const { Api: Api2 } = await import('telegram');
+  const { Api: Api2 } = await import('teleproto');
   // GramJS: to transfer ownership we need to use channels.editCreator
   // It requires password's SRP check: we can use client.invoke with account.getPassword then compute check via password helper
   // Simplified: let GramJS handle password via utils? We attempt direct invoke with password string if library supports it.
@@ -108,7 +108,7 @@ export async function transferChannelOwnership(
     // We try to compute check via @telegram's computeCheck if exists
     let check: unknown = null;
     try {
-      const { computeCheck } = await import('telegram/Password');
+      const { computeCheck } = await import('teleproto/Password');
       // @ts-ignore — computeCheck signature: (pwd, password) => Promise<...>
       check = await (computeCheck as unknown as (pwd: unknown, pw: string) => Promise<unknown>)(passwordInfo, pwd);
     } catch {
@@ -117,27 +117,27 @@ export async function transferChannelOwnership(
     }
 
     const inputUser = newOwnerEntity as unknown as Api.InputUser;
-    // Build EditCreator request
+    // Build EditCreator request (cast to any — teleproto typings may miss it, but MTProto supports it)
     if (check) {
       await withFloodWait(() =>
         client.invoke(
-          new Api2.channels.EditCreator({
+          new (Api2.channels as unknown as { EditCreator: new (p: unknown) => unknown }).EditCreator({
             channel: channelEntity as unknown as Api.InputChannel,
             userId: inputUser as unknown as Api.InputUser,
             password: check as unknown as Api.InputCheckPasswordSRP,
-          })
+          } as never) as unknown as any
         )
       );
     } else {
       // Try without explicit password check — some forks accept password param as string (will fail with PASSWORD_HASH_INVALID if wrong)
       await withFloodWait(() =>
         client.invoke(
-          new Api.channels.EditCreator({
+          new (Api.channels as unknown as { EditCreator: new (p: unknown) => unknown }).EditCreator({
             channel: channelEntity as unknown as Api.InputChannel,
             userId: inputUser as unknown as Api.InputUser,
             // @ts-ignore — older typings expect InputCheckPasswordSRP
             password: pwd as unknown as Api.InputCheckPasswordSRP,
-          })
+          } as never) as unknown as any
         )
       );
     }

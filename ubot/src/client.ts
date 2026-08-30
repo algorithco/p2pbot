@@ -1,5 +1,5 @@
-import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
+import { TelegramClient } from 'teleproto';
+import { StringSession } from 'teleproto/sessions';
 import { config } from './config';
 import logger from './logger';
 import { loadEncryptedSession, saveEncryptedSession } from './sessionManager';
