@@ -20,17 +20,30 @@ contract exists.
                     ┌──────────────┼──────────────────┐
                     ▼              ▼                  ▼
               ┌──────────┐   ┌──────────────┐   ┌──────────────────┐
-              │ Postgres │   │ blockchain   │   │ Escrow.tact      │
-              │ (deals,  │   │ listener +   │◄─►│ (on TON: deposit,│
-              │ msgs,    │   │ deployer     │   │  release/refund) │
-              │ links)   │   │ wallet       │   └──────────────────┘
+              │ Postgres │   │ signer (W5)  │   │ Escrow.tact      │
+              │ (deals,  │   │ V5R1 wallet  │◄─►│ (on TON: deposit,│
+              │ msgs,    │   │ microservice │   │  release/refund) │
+              │ links,   │   │ :3001        │   └──────────────────┘
+              │ trades)  │   └──────────────┘
+              └──────────┘         │
+                    ┌──────────────┼──────────────────┐
+                    ▼              ▼                  ▼
+              ┌──────────┐   ┌──────────────┐   ┌──────────────────┐
+              │  ubot    │   │  utradebot   │   │  Mini App        │
+              │ :3002    │   │  :3003       │   │  (webapp/)       │
+              │ channel/ │   │  account     │   └──────────────────┘
+              │ group    │   │  sale escrow │
+              │ takeover │   │              │
               └──────────┘   └──────────────┘
+  escrow-net (bridge) isolates signer/ubot/utradebot; only backend:3000 published
 ```
 
-- **backend/** — TypeScript: bot commands, REST API (`src/index.ts`), deal
-  ledger in Postgres (`src/db/schema.sql`), TON client/listener/deployer.
+- **backend/** — grammY bot + Express API + TON listener/deployer (via `signer`).
+- **signer/** — isolated W5 (V5R1) Wallet microservice (`SIGNER_MNEMONIC` 24 words in `signer/.env`), internal `http://signer:3001`, `x-api-key` auth.
+- **ubot/** — Telegram userbot (GramJS) for channel/group takeover (`channels.editCreator`, `channels.editAdmin`, `messages.migrateChat`), `API_ID`/`API_HASH`/`TWO_FA_PASSWORD` in `ubot/.env`.
+- **utradebot/** — account sale escrow: holds `StringSession`/`phone+code` trades, revokes seller, buyer code handoff, `auth.LogOut` (see `utradebot/README.md`).
 - **contracts/** — `Escrow.tact` smart contract, wrappers and sandbox tests.
-- **webapp/** — static Mini App (plain HTML/JS) served by the backend at `/`.
+- **webapp/** — static Mini App served by backend at `/`.
 
 ## Quickstart
 
@@ -52,23 +65,47 @@ contract exists.
    ```
 3. Open the Mini App at `http://localhost:3000` and talk to the bot.
 
-### B. Docker Compose
+### B. Docker Compose (robust, production-ready)
 
 ```bash
-cp backend/.env.example backend/.env   # edit it first
-docker compose up --build
+# 1) Configure every service (edit each .env, chmod 600)
+cp backend/.env.example backend/.env       # BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL, API_KEY, WEBAPP_URL
+cp signer/.env.example signer/.env         # SIGNER_MNEMONIC (24 words), SIGNER_API_KEY, TON_NETWORK, TONCENTER_API_KEY
+cp ubot/.env.example ubot/.env             # API_ID, API_HASH, TWO_FA_PASSWORD, UBOT_SESSION_STRING, ENCRYPTION_KEY, UBOT_API_KEY
+cp utradebot/.env.example utradebot/.env   # UTRADE_BOT_TOKEN, API_ID, API_HASH, ENCRYPTION_KEY, DATABASE_URL (preset by compose)
+
+# 2) Optional: set host POSTGRES_PASSWORD (defaults to escrow_password)
+#    echo "POSTGRES_PASSWORD=strong_random_password" > .env
+
+# 3) Build & run (detached, healthchecks, restart policies, resource limits, logging)
+docker compose up --build -d
+docker compose ps          # all services healthy
+docker compose logs -f backend   # or signer / ubot / utradebot
+curl http://localhost:3000/api/info    # health probe
+curl http://localhost:3001/health      # signer (internal — expose ports in compose to reach from host)
+curl http://localhost:3002/health      # ubot
+curl http://localhost:3003/health      # utradebot
 ```
 
-Postgres starts with health checks; the backend waits for it, listens on
-**host port 3000** and persists data in the `pgdata` volume. Redis was removed
-— nothing in the codebase uses it.
+What the compose provides:
+
+- **Services:** `postgres:16-alpine`, `signer:3001` (W5), `backend:3000`, `ubot:3002`, `utradebot:3003` on shared bridge `escrow-net`.
+- **Security:** each service runs as non-root (`signer`, `backend`, `ubot`, `utrade` users), `.env` never baked into images (`env_file` at runtime), `ENCRYPTION_KEY` for sessions, `x-api-key` between services, logs redacted.
+- **Persistence:** named volumes `pgdata`, `ubot_sessions`, `utrade_sessions` (600 perms), healthchecks with `depends_on: condition: service_healthy` (backend waits for postgres+signer).
+- **Ops:** `restart: unless-stopped`, `deploy.resources.limits` (0.5–1 CPU, 512–768M), `logging: json-file` (`max-size: 10m`, `max-file: 3`), `HEALTHCHECK` per Dockerfile.
+- Only `backend:3000` is published to host by default; signer/ubot/utradebot are `expose` only (uncomment `ports` in compose to debug).
+- For TLS / Mini App HTTPS: put backend behind Caddy/nginx and set `WEBAPP_URL=https://your-domain` — Telegram requires public HTTPS.
 
 ## Environment
 
-All variables are documented in [`backend/.env.example`](backend/.env.example)
-(names match `backend/src/config.ts` exactly). Minimum for a working off-chain
-instance: `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL`. For production add
-`API_KEY` (32+ random chars), `WEBAPP_URL`, and the TON settings.
+All variables are documented per-service:
+
+- [`backend/.env.example`](backend/.env.example) — `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL`, `SIGNER_URL`, `SIGNER_API_KEY`, `API_KEY`, `WEBAPP_URL`, TON settings.
+- [`signer/.env.example`](signer/.env.example) — `SIGNER_MNEMONIC` (24 words, **never in backend**), `SIGNER_API_KEY`, `TON_NETWORK`, `TONCENTER_API_KEY`.
+- [`ubot/.env.example`](ubot/.env.example) — `API_ID`, `API_HASH`, `UBOT_SESSION_STRING`, `TWO_FA_PASSWORD`, `ENCRYPTION_KEY`, `UBOT_API_KEY`.
+- [`utradebot/.env.example`](utradebot/.env.example) — `UTRADE_BOT_TOKEN`, `API_ID`, `API_HASH`, `ENCRYPTION_KEY`, `DATABASE_URL`.
+
+Minimum for off-chain: `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL` (backend) + `SIGNER_MNEMONIC` in `signer` if you need on-chain. For production add `API_KEY`/`SIGNER_API_KEY`/`UBOT_API_KEY`/`UTRADE_API_KEY` (32+ chars each), `WEBAPP_URL`, `POSTGRES_PASSWORD`, and `ENCRYPTION_KEY` (64 hex).
 
 ## Webapp / Mini App hosting
 

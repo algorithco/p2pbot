@@ -1,14 +1,18 @@
-# P2P escrow bot — full stack (Postgres + backend/bot/API).
+# P2P escrow bot — full stack (Postgres + backend/bot/API + signer + ubot + utradebot)
 #
 # Prerequisites:
-#   1. cp backend/.env.example backend/.env   (then fill in BOT_TOKEN, etc.)
-#   2. docker compose up --build
+#   1. cp backend/.env.example backend/.env       # fill BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL etc.
+#   2. cp signer/.env.example signer/.env         # fill SIGNER_MNEMONIC (24 words), SIGNER_API_KEY
+#   3. cp ubot/.env.example ubot/.env             # fill API_ID, API_HASH, TWO_FA_PASSWORD
+#   4. cp utradebot/.env.example utradebot/.env   # fill UTRADE_BOT_TOKEN, API_ID/HASH, ENCRYPTION_KEY
+#   5. docker compose up --build -d
 #
-# The backend listens on PORT 3000 inside the container and is published on
-# host port 3000. DATABASE_URL is overridden here so the app always reaches
-# Postgres via the internal service hostname; values in backend/.env are used
-# for everything else (BOT_TOKEN, TON_* keys, ...). `environment:` wins over
-# `env_file:`.
+# For production TLS (Telegram Mini App requires HTTPS public URL):
+#   - Put backend behind Caddy/nginx (set WEBAPP_URL=https://your-domain)
+#   - Ensure POSTGRES_PASSWORD, SIGNER_API_KEY, UBOT_API_KEY, UTRADE_API_KEY are strong (32+ chars)
+#
+# All services run on internal network escrow-net; only backend:3000 is published.
+# Signer/ubot/utradebot expose health endpoints internally for depends_on + monitoring.
 
 services:
   postgres:
@@ -25,6 +29,45 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 10s
+    networks:
+      - escrow-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  signer:
+    build:
+      context: .
+      dockerfile: signer/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - signer/.env
+    expose:
+      - "3001"
+    # Uncomment to debug signer externally:
+    # ports:
+    #   - "3001:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    networks:
+      - escrow-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   backend:
     build:
@@ -34,21 +77,120 @@ services:
     env_file:
       - backend/.env
     environment:
-      # Inside the compose network the DB host is the service name, not localhost.
+      # Inside compose the DB host is the service name, not localhost.
       DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:-escrow_password}@postgres:5432/escrow
       PORT: "3000"
+      SIGNER_URL: http://signer:3001
     ports:
       - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
+      signer:
+        condition: service_healthy
     healthcheck:
-      # Any HTTP response (even 401 when API_KEY is set) proves the server is up.
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/info',r=>process.exit(0)).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 3s
       retries: 5
-      start_period: 20s
+      start_period: 30s
+    networks:
+      - escrow-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 768M
+
+  ubot:
+    build:
+      context: .
+      dockerfile: ubot/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ubot/.env
+    expose:
+      - "3002"
+    # Uncomment to debug ubot externally:
+    # ports:
+    #   - "3002:3002"
+    volumes:
+      - ubot_sessions:/app/ubot/sessions
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3002/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 20s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - escrow-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  utradebot:
+    build:
+      context: .
+      dockerfile: utradebot/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - utradebot/.env
+    environment:
+      # Ensure DB URL uses compose service hostname (env_file value may have localhost)
+      DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:-escrow_password}@postgres:5432/escrow
+    expose:
+      - "3003"
+    # Uncomment if you want internal API externally:
+    # ports:
+    #   - "3003:3003"
+    volumes:
+      - utrade_sessions:/app/utradebot/sessions
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 20s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - escrow-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
 volumes:
   pgdata:
+    driver: local
+  ubot_sessions:
+    driver: local
+  utrade_sessions:
+    driver: local
+
+networks:
+  escrow-net:
+    driver: bridge
+    name: escrow-net
