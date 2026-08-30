@@ -9,8 +9,19 @@ const SESSION_FILE = path.join(SESSIONS_DIR, 'ubot.session.enc');
 
 function getKey(): Buffer | null {
   if (!config.encryptionKey) return null;
+  // Enforce 32 bytes (64 hex chars) for aes-256-gcm; handle 64-byte (128 hex) by hashing
   try {
-    return Buffer.from(config.encryptionKey, 'hex');
+    const buf = Buffer.from(config.encryptionKey.trim(), 'hex');
+    if (buf.length === 32) return buf;
+    if (buf.length === 64) {
+      // Old key was 64 bytes (128 hex) — hash to 32 bytes for compatibility
+      return require('crypto').createHash('sha256').update(buf).digest();
+    }
+    if (buf.length !== 32) {
+      logger.warn(`ENCRYPTION_KEY invalid length ${buf.length} bytes (expected 32), encryption disabled`);
+      return null;
+    }
+    return buf;
   } catch {
     return null;
   }
@@ -30,9 +41,36 @@ export function encryptSession(plain: string): string {
 export function decryptSession(encB64: string): string {
   const key = getKey();
   if (!key) return encB64;
+  // Heuristic: plain StringSession (teleproto) starts with '1' and is long base64, not our iv+tag+enc
+  // If it looks like plain, skip decrypt attempt to avoid noisy warn every healthcheck
+  const trimmed = encB64.trim();
+  if (trimmed.startsWith('1') && trimmed.length > 50 && !trimmed.includes(' ')) {
+    // Try base64 decode; if it decodes to something that is not our encrypted format, treat as plain
+    // Our encrypted format is iv(12)+tag(16)+cipher, base64 length will be different, but plain StringSession is also base64
+    // To avoid false decrypt, check if decrypt would fail — we do a quick check: if trimmed is a valid StringSession, return plain
+    // StringSessions are base64 of auth key, typically ~200-300 chars, starting with '1'
+    // Encrypted sessions from encryptSession are also base64 but will decrypt to a StringSession starting with '1'
+    // We try decrypt, but on failure return plain without warn
+    try {
+      const buf = Buffer.from(trimmed, 'base64');
+      if (buf.length < 28) return trimmed;
+      const iv = buf.subarray(0, 12);
+      const tag = buf.subarray(12, 28);
+      const enc = buf.subarray(28);
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(tag);
+      const dec = Buffer.concat([decipher.update(enc), decipher.final()]);
+      const res = dec.toString('utf8');
+      if (res && res.length > 10) return res;
+      return trimmed;
+    } catch {
+      // Not encrypted or invalid tag — treat as plain without warn (expected for plain StringSession)
+      return trimmed;
+    }
+  }
   try {
-    const buf = Buffer.from(encB64, 'base64');
-    if (buf.length < 28) return encB64; // not encrypted? return as-is
+    const buf = Buffer.from(trimmed, 'base64');
+    if (buf.length < 28) return trimmed;
     const iv = buf.subarray(0, 12);
     const tag = buf.subarray(12, 28);
     const enc = buf.subarray(28);
@@ -40,10 +78,8 @@ export function decryptSession(encB64: string): string {
     decipher.setAuthTag(tag);
     const dec = Buffer.concat([decipher.update(enc), decipher.final()]);
     return dec.toString('utf8');
-  } catch (e) {
-    // If decryption fails, assume plain session
-    logger.warn('decryptSession failed, treating as plain', e);
-    return encB64;
+  } catch {
+    return trimmed;
   }
 }
 
