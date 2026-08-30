@@ -1,0 +1,23 @@
+# Build context is the REPO ROOT (see docker-compose.yml build.context)
+FROM node:20-alpine AS build
+WORKDIR /app/signer
+COPY signer/package*.json ./
+RUN npm ci || npm install
+COPY signer/tsconfig.json ./
+COPY signer/src ./src
+RUN npm run build
+
+FROM node:20-alpine
+ENV NODE_ENV=production
+ENV PORT=3001
+WORKDIR /app/signer
+RUN addgroup -S signer && adduser -S signer -G signer
+COPY signer/package*.json ./
+RUN npm ci --omit=dev || npm install --omit=dev
+COPY --from=build /app/signer/dist ./dist
+# Do NOT copy .env — injected via env_file at runtime
+EXPOSE 3001
+USER signer
+HEALTHCHECK --interval=15s --timeout=3s --retries=5 --start-period=20s \
+  CMD node -e "require('http').get('http://localhost:3001/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+CMD ["node", "dist/index.js"]

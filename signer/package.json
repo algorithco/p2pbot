@@ -1,0 +1,30 @@
+{
+  "name": "signer",
+  "version": "1.0.0",
+  "description": "TON W5 (V5R1) Wallet Signer microservice — isolated key management for escrow backend",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "info": "ts-node scripts/info.ts",
+    "deploy": "ts-node scripts/deploy.ts",
+    "send": "ts-node scripts/send.ts"
+  },
+  "dependencies": {
+    "@ton/core": "^0.63.1",
+    "@ton/crypto": "^3.3.0",
+    "@ton/ton": "^15.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.12",
+    "@types/express": "^4.17.17",
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.5.0"
+  }
+}
