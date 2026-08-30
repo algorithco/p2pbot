@@ -68,23 +68,45 @@ export async function startBot(): Promise<Bot> {
   registerBuyFlow(b);
   registerCodeHandler(b);
 
-  b.catch((err) => logger.error('utradebot error', err));
+  b.catch((err) => {
+    const msg = String((err as Error).message || err);
+    // Suppress spam for placeholder token, log as warn
+    if (msg.includes('401') || msg.includes('Unauthorized')) {
+      logger.warn('utradebot: Telegram API 401 — check UTRADE_BOT_TOKEN (placeholder?)', msg.slice(0, 120));
+    } else {
+      logger.error('utradebot error', err);
+    }
+  });
 
-  await b.api.setMyCommands([
-    { command: 'start', description: 'Welcome & help' },
-    { command: 'sell', description: 'Sell Telegram account (StringSession or phone)' },
-    { command: 'buy', description: 'Buy account: /buy <tradeId>' },
-    { command: 'mytrades', description: 'List your trades' },
-    { command: 'setphone', description: 'Set phone for trade' },
-    { command: 'setbuyer', description: 'Bind buyer to trade' },
-    { command: 'help', description: 'Show all commands' },
-  ]);
+  // Skip setMyCommands for placeholder token to avoid 401 spam
+  const isPlaceholder = !config.botToken || config.botToken.includes('123456:ABC') || config.botToken.includes('change_me') || config.botToken.length < 20;
+  if (isPlaceholder) {
+    logger.warn('UTRADE_BOT_TOKEN is placeholder/invalid — bot polling disabled, HTTP API only. Set real token from @BotFather to enable Telegram.');
+  } else {
+    try {
+      await b.api.setMyCommands([
+        { command: 'start', description: 'Welcome & help' },
+        { command: 'sell', description: 'Sell Telegram account (StringSession or phone)' },
+        { command: 'buy', description: 'Buy account: /buy <tradeId>' },
+        { command: 'mytrades', description: 'List your trades' },
+        { command: 'setphone', description: 'Set phone for trade' },
+        { command: 'setbuyer', description: 'Bind buyer to trade' },
+        { command: 'help', description: 'Show all commands' },
+      ]);
+    } catch (e) {
+      logger.warn('setMyCommands failed (non-fatal, check token)', e);
+    }
+  }
 
   bot = b;
-  void b.start({
-    onStart: (me) => {
-      logger.info(`utradebot @${me.username} started (id ${me.id})`);
-    },
-  });
+  if (!isPlaceholder) {
+    void b.start({
+      onStart: (me) => {
+        logger.info(`utradebot @${me.username} started (id ${me.id})`);
+      },
+    });
+  } else {
+    logger.warn('utradebot: Telegram polling disabled due to placeholder token');
+  }
   return b;
 }

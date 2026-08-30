@@ -58,12 +58,20 @@ async function main() {
     logger.error('utradebot: DB failed', e);
   }
 
-  // Bot
-  if (config.botToken) {
+  // Bot — skip placeholder token to avoid 401 spam
+  const isPlaceholder = !config.botToken || config.botToken.includes('123456:ABC') || config.botToken.includes('change_me') || config.botToken.length < 20;
+  if (isPlaceholder) {
+    logger.warn('UTRADE_BOT_TOKEN is placeholder/invalid — Telegram polling disabled, HTTP API only (set real token from @BotFather)');
+  } else if (config.botToken) {
     try {
       await startBot();
     } catch (e) {
-      logger.error('utradebot: bot failed to start', e);
+      const msg = String((e as Error).message || e);
+      if (msg.includes('401') || msg.includes('Unauthorized')) {
+        logger.warn('utradebot: Telegram 401 — token invalid, HTTP only', msg.slice(0, 120));
+      } else {
+        logger.error('utradebot: bot failed to start', e);
+      }
     }
   } else {
     logger.warn('UTRADE_BOT_TOKEN not set — bot polling disabled');
