@@ -1,6 +1,7 @@
-# P2P escrow bot — micro-architecture (6 services)
+# P2P escrow bot — micro-architecture (7 services)
 #  frontend (webapp nginx :8080 -> backend :3000) | backend (API-only :3000, bot)
 #  signer (W5 :3001) | ubot (:3002) | utradebot (:3003) | postgres (:5432)
+#  cloudflared (tunnels ONLY frontend :80 -> public HTTPS for TON Connect + bot)
 #
 # Prerequisites:
 #   1. cp backend/.env.example backend/.env       # BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL, FRONTEND_URL
@@ -87,10 +88,8 @@ services:
       DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:-escrow_password}@postgres:5432/escrow
       PORT: "3000"
       SIGNER_URL: http://signer:3001
-      # Frontend URL for CORS + bot menu button (micro-architecture: separate service)
-      FRONTEND_URL: http://localhost:8080
-      WEBAPP_URL: ${WEBAPP_URL:-http://localhost:8080}
       SERVE_STATIC: "false"
+      # WEBAPP_URL / FRONTEND_URL come from backend/.env (env_file) — set to https://<cloudflare> for TON Connect + bot
     ports:
       - "3000:3000"
     depends_on:
@@ -146,6 +145,31 @@ services:
         limits:
           cpus: "0.3"
           memory: 128M
+
+  # Cloudflared — tunnels ONLY frontend (webapp) to public HTTPS.
+  # - TON Connect manifest and bot menu button will use this public URL.
+  # - Quick tunnel (no token, random trycloudflare.com): default, logs show URL.
+  # - Named tunnel (stable): set CLOUDFLARE_TUNNEL_TOKEN in .env and uncomment `tunnel run` line.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # Quick tunnel — no config needed, URL printed in `docker compose logs cloudflared`
+    command: tunnel --url http://frontend:80 --no-autoupdate
+    # Named tunnel (stable URL) — uncomment and provide token:
+    # command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks:
+      - escrow-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Optional: if using named tunnel, ensure token is passed
+    # environment:
+    #   - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
 
   ubot:
     build:
