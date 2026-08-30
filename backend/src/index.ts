@@ -31,6 +31,8 @@ import {
 } from './auth/guard';
 
 const app = express();
+// Trust X-Forwarded-* from nginx/cloudflared (needed for https detection behind proxy)
+app.set('trust proxy', 1);
 
 /** CORS — micro-architecture: backend (3000) separate from frontend (8080 via nginx).
  * Allow WEBAPP_URL, FRONTEND_URL, and local dev origins. Falls back to allow-all in dev.
@@ -132,18 +134,37 @@ function resolvePaymentAddress(): string | null {
   return null;
 }
 
-// TON Connect dapp manifest (dynamic origin so tunnels/dev hosts just work)
+// TON Connect dapp manifest — uses public frontend URL when behind cloudflared/nginx
+// Priority: 1) WEBAPP_URL/FRONTEND_URL env (explicit cloudflare URL), 2) X-Forwarded-* from proxy, 3) Host header
 app.get('/tonconnect-manifest.json', (req, res) => {
-  const host = req.get('host') || 'localhost';
-  const proto = host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
-  const origin = `${proto}://${host}`;
+  // If WEBAPP_URL is set to https://<cloudflare>, use it directly (bot and manifest share same public URL)
+  const configured = (config.webappUrl || config.frontendUrl || '').trim().replace(/\/+$/, '');
+  let origin: string;
+  if (configured && /^https?:\/\//i.test(configured)) {
+    try {
+      origin = new URL(configured).origin;
+    } catch {
+      origin = configured;
+    }
+  } else {
+    // Derive from request (supports cloudflared: X-Forwarded-Proto https + Host xxx.trycloudflare.com)
+    const host = (req.get('x-forwarded-host') || req.get('host') || 'localhost').split(',')[0].trim() || 'localhost';
+    const forwardedProto = (req.get('x-forwarded-proto') || '').split(',')[0].trim();
+    const proto =
+      forwardedProto === 'https' || forwardedProto === 'http'
+        ? forwardedProto
+        : host.startsWith('localhost') || host.startsWith('127.0.0.1')
+          ? 'http'
+          : 'https';
+    origin = `${proto}://${host}`;
+  }
   res.setHeader('Cache-Control', 'no-cache');
   res.json({
     url: origin,
     name: 'TonEscrow',
     iconUrl: `${origin}/icon.svg`,
     termsOfUseUrl: origin,
-    privacyPolicyUrl: origin
+    privacyPolicyUrl: origin,
   });
 });
 
