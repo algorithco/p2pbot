@@ -197,7 +197,7 @@
     var btn = UI.h('button', {
       class: 'wallet-pill',
       onclick: function () {
-        UI.haptic.tap();
+        TG.haptic.tap();
         if (!Wallet.available()) { UI.toast('Wallet SDK still loading…'); return; }
         if (Wallet.connected()) walletSheet();
         else Wallet.connect().catch(function () { /* user closed modal */ });
@@ -233,7 +233,7 @@
       UI.h('button', {
         class: 'btn btn-danger',
         onclick: function () {
-          UI.haptic.medium();
+          TG.haptic.medium();
           Wallet.disconnect().then(function () { UI.sheetClose(); UI.toast('Wallet disconnected'); });
         }
       }, ['Disconnect'])
@@ -711,7 +711,7 @@
     function doPay() {
       var amt = parseFloat(String(amountInput.value).replace(',', '.'));
       if (!isFinite(amt) || amt <= 0) { UI.toast('Enter a valid amount', 'err'); return; }
-      UI.haptic.medium();
+      TG.haptic.medium();
       payBtn.setAttribute('disabled', '');
       payBtn.textContent = 'Waiting for wallet…';
 
@@ -917,7 +917,7 @@
             canPay ? UI.h('button', {
               class: 'btn btn-primary',
               style: 'margin-top:10px',
-              onclick: function () { UI.haptic.medium(); paySheet(deal, payTo, am); }
+              onclick: function () { TG.haptic.medium(); paySheet(deal, payTo, am); }
             }, ['💳 Pay ' + UI.fmtAmount(deal.amount) + ' ' + am.symbol + ' from wallet']) : null,
             (canPay && !Wallet.available()) ? UI.h('div', { class: 'field-hint', style: 'margin-top:6px', text: 'Wallet SDK is loading — reopen this screen if it does not appear.' }) : null
           ].filter(Boolean))
@@ -1157,7 +1157,7 @@
         UI.h('button', {
           class: 'list-item',
           onclick: function () {
-            UI.haptic.tap();
+            TG.haptic.tap();
             if (Wallet.connected()) { walletSheet(); return; }
             if (!Wallet.available()) { UI.toast('Wallet SDK still loading…'); return; }
             Wallet.connect().catch(function () { /* modal closed */ });
@@ -1176,7 +1176,7 @@
         UI.h('button', {
           class: 'list-item',
           onclick: function () {
-            UI.haptic.tap();
+            TG.haptic.tap();
             connValue.textContent = 'Checking…';
             Api.info()
               .then(function (d) {
