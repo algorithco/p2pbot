@@ -1,4 +1,4 @@
-import { Api } from 'telegram';
+import { Api } from 'teleproto';
 import { ensureClient, withFloodWait } from './client';
 import logger from './logger';
 import { transferChannelOwnership, promoteToAdmin, demoteAdmin } from './channelService';
