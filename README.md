@@ -6,95 +6,112 @@ an on-chain `Escrow` contract (Tact) when deployed, while the backend keeps a
 full off-chain deal ledger so the product is fully usable before any wallet or
 contract exists.
 
-## Architecture
+## Architecture — micro-architecture (6 services + Postgres)
 
 ```
- Telegram users (chat + Mini App)
-        │  Bot API / HTTPS
-        ▼
-┌──────────────────┐      ┌─────────────────────┐
-│  grammY bot      │◄────►│  Express API :3000  │◄── webapp/ served at /
-│  (/newdeal, ...) │      │  REST + static host │
-└──────────────────┘      └─────────────────────┘
-                                   │
-                    ┌──────────────┼──────────────────┐
-                    ▼              ▼                  ▼
-              ┌──────────┐   ┌──────────────┐   ┌──────────────────┐
-              │ Postgres │   │ signer (W5)  │   │ Escrow.tact      │
-              │ (deals,  │   │ V5R1 wallet  │◄─►│ (on TON: deposit,│
-              │ msgs,    │   │ microservice │   │  release/refund) │
-              │ links,   │   │ :3001        │   └──────────────────┘
-              │ trades)  │   └──────────────┘
-              └──────────┘         │
-                    ┌──────────────┼──────────────────┐
-                    ▼              ▼                  ▼
-              ┌──────────┐   ┌──────────────┐   ┌──────────────────┐
-              │  ubot    │   │  utradebot   │   │  Mini App        │
-              │ :3002    │   │  :3003       │   │  (webapp/)       │
-              │ channel/ │   │  account     │   └──────────────────┘
-              │ group    │   │  sale escrow │
-              │ takeover │   │              │
-              └──────────┘   └──────────────┘
-  escrow-net (bridge) isolates signer/ubot/utradebot; only backend:3000 published
+ Telegram users (chat + Mini App:8080)          Bot API
+        │  HTTPS (WEBAPP_URL)                    │
+        ▼                                        ▼
+┌──────────────────┐      ┌──────────────────────────┐
+│  frontend        │      │  backend :3000 (API-only)│
+│  webapp nginx    │─────►│  grammY bot + REST API   │
+│  :8080 -> :80    │ /api │  /api/*, /docs, /api/info│
+│  proxies /api    │      └──────────────────────────┘
+└──────────────────┘                 │
+                     ┌───────────────┼──────────────────┐
+                     ▼               ▼                  ▼
+               ┌──────────┐    ┌──────────────┐   ┌──────────────────┐
+               │ Postgres │    │ signer (W5)  │   │ Escrow.tact      │
+               │  :5432   │    │ V5R1 wallet  │◄─►│ (on TON: deposit,│
+               │ (deals,  │    │ microservice │   │  release/refund) │
+               │ msgs,    │    │ :3001        │   └──────────────────┘
+               │ trades)  │    └──────────────┘
+               └──────────┘          │
+                     ┌───────────────┼──────────────────┐
+                     ▼               ▼                  ▼
+               ┌──────────┐    ┌──────────────┐   ┌──────────────────┐
+               │  ubot    │    │  utradebot   │   │  (frontend docs) │
+               │ :3002    │    │  :3003       │   │  /docs + openapi │
+               │ channel/ │    │  account     │   └──────────────────┘
+               │ takeover │    │  sale escrow │
+               └──────────┘    └──────────────┘
+  escrow-net (bridge) isolates all; published: frontend :8080, backend :3000 (API)
 ```
 
-- **backend/** — grammY bot + Express API + TON listener/deployer (via `signer`).
-- **signer/** — isolated W5 (V5R1) Wallet microservice (`SIGNER_MNEMONIC` 24 words in `signer/.env`), internal `http://signer:3001`, `x-api-key` auth.
-- **ubot/** — Telegram userbot (GramJS) for channel/group takeover (`channels.editCreator`, `channels.editAdmin`, `messages.migrateChat`), `API_ID`/`API_HASH`/`TWO_FA_PASSWORD` in `ubot/.env`.
-- **utradebot/** — account sale escrow: holds `StringSession`/`phone+code` trades, revokes seller, buyer code handoff, `auth.LogOut` (see `utradebot/README.md`).
-- **contracts/** — `Escrow.tact` smart contract, wrappers and sandbox tests.
-- **webapp/** — static Mini App served by backend at `/`.
+- **frontend/** (`webapp/`) — **separate** nginx microservice (`nginx:alpine`, `:8080→:80`), serves static Mini App, **proxies `/api/*` → `http://backend:3000`** (micro-architecture, not same port). Telegram Web App requires `WEBAPP_URL`/`FRONTEND_URL` HTTPS in prod.
+- **backend/** — **API-only** (`SERVE_STATIC=false`) grammY bot + Express REST (`:3000`), TON listener/deployer via `signer`, docs at `/api/docs`, `/docs`, `/api/openapi.json`, health `/api/info`, CORS allows `FRONTEND_URL` + `localhost:8080`.
+- **signer/** — isolated W5 (V5R1) Wallet (`SIGNER_MNEMONIC` 24 words in `signer/.env`), internal `http://signer:3001`, `x-api-key`.
+- **ubot/** — Telegram userbot (`teleproto@1.229.0`, QR login) for channel/group takeover (`channels.editCreator`, `channels.editAdmin`, `messages.migrateChat`), `API_ID`/`API_HASH`/`TWO_FA_PASSWORD` in `ubot/.env`, `:3002`.
+- **utradebot/** — account sale escrow (`teleproto`), holds `StringSession`/`phone+code` trades, revokes seller, buyer code handoff, `auth.LogOut`, `:3003`.
+- **contracts/** — `Escrow.tact`, wrappers, sandbox tests.
 
 ## Quickstart
 
-### A. Local (npm)
+### A. Local (npm) — micro-architecture dev (frontend separate)
 
 1. Run a local PostgreSQL and create the database:
    ```sql
    CREATE USER escrow WITH PASSWORD 'escrow_password';
    CREATE DATABASE escrow OWNER escrow;
    ```
-2. Configure environment:
+2. Configure and run backend (API-only, `:3000`):
    ```bash
    cd backend
-   cp .env.example .env    # then edit BOT_TOKEN, ADMIN_TELEGRAM_IDS, ...
+   cp .env.example .env    # edit BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL, FRONTEND_URL=http://localhost:8080, SERVE_STATIC=false (or true for single-port dev)
    npm install
    npm run build
-   npm start               # serves API + Mini App on PORT (default 3000)
-   # or: npm run dev       # ts-node, no build step
+   npm start               # API + bot on http://localhost:3000 (docs at /api/docs, /docs)
+   # or: npm run dev       # ts-node
    ```
-3. Open the Mini App at `http://localhost:3000` and talk to the bot.
+3. In another terminal, run frontend (`:8080`, proxies /api → backend):
+   ```bash
+   cd webapp
+   npm install
+   npm start               # http-server public on http://localhost:8080 (or use nginx)
+   # Open Mini App at http://localhost:8080 and talk to bot (API via proxy or direct http://localhost:3000)
+   ```
+   For single-port dev without docker, set `SERVE_STATIC=true` and `FRONTEND_URL=http://localhost:3000` in `backend/.env`, then `http://localhost:3000` serves both.
 
-### B. Docker Compose (robust, production-ready)
+### B. Docker Compose — micro-architecture (robust, production-ready)
 
 ```bash
 # 1) Configure every service (edit each .env, chmod 600)
-cp backend/.env.example backend/.env       # BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL, API_KEY, WEBAPP_URL
+cp backend/.env.example backend/.env       # BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL, FRONTEND_URL=http://localhost:8080, WEBAPP_URL, API_KEY
 cp signer/.env.example signer/.env         # SIGNER_MNEMONIC (24 words), SIGNER_API_KEY, TON_NETWORK, TONCENTER_API_KEY
 cp ubot/.env.example ubot/.env             # API_ID, API_HASH, TWO_FA_PASSWORD, UBOT_SESSION_STRING, ENCRYPTION_KEY, UBOT_API_KEY
-cp utradebot/.env.example utradebot/.env   # UTRADE_BOT_TOKEN, API_ID, API_HASH, ENCRYPTION_KEY, DATABASE_URL (preset by compose)
+cp utradebot/.env.example utradebot/.env   # UTRADE_BOT_TOKEN, API_ID, API_HASH, ENCRYPTION_KEY
 
 # 2) Optional: set host POSTGRES_PASSWORD (defaults to escrow_password)
 #    echo "POSTGRES_PASSWORD=strong_random_password" > .env
 
-# 3) Build & run (detached, healthchecks, restart policies, resource limits, logging)
+# 3) Build & run (6 services, detached, healthchecks, resource limits)
 docker compose up --build -d
-docker compose ps          # all services healthy
-docker compose logs -f backend   # or signer / ubot / utradebot
-curl http://localhost:3000/api/info    # health probe
-curl http://localhost:3001/health      # signer (internal — expose ports in compose to reach from host)
-curl http://localhost:3002/health      # ubot
-curl http://localhost:3003/health      # utradebot
+docker compose ps          # all 6 healthy: postgres, signer, backend, frontend, ubot, utradebot
+docker compose logs -f backend   # or signer / frontend / ubot / utradebot
+
+# Frontend (Mini App) — separate microservice, Nginx proxies /api → backend
+curl http://localhost:8080/              # 200 HTML (Mini App)
+curl http://localhost:8080/api/info      # 200 via proxy (same as backend)
+
+# Backend API-only
+curl http://localhost:3000/api/info      # health
+curl http://localhost:3000/api/docs      # JSON docs
+curl http://localhost:3000/docs          # HTML docs (also via http://localhost:8080/docs)
+
+# Internal (expose only, uncomment ports in compose to reach from host)
+# curl http://localhost:3001/health  # signer
+# curl http://localhost:3002/health  # ubot
+# curl http://localhost:3003/health  # utradebot
 ```
 
 What the compose provides:
 
-- **Services:** `postgres:16-alpine`, `signer:3001` (W5), `backend:3000`, `ubot:3002`, `utradebot:3003` on shared bridge `escrow-net`.
-- **Security:** each service runs as non-root (`signer`, `backend`, `ubot`, `utrade` users), `.env` never baked into images (`env_file` at runtime), `ENCRYPTION_KEY` for sessions, `x-api-key` between services, logs redacted.
-- **Persistence:** named volumes `pgdata`, `ubot_sessions`, `utrade_sessions` (600 perms), healthchecks with `depends_on: condition: service_healthy` (backend waits for postgres+signer).
-- **Ops:** `restart: unless-stopped`, `deploy.resources.limits` (0.5–1 CPU, 512–768M), `logging: json-file` (`max-size: 10m`, `max-file: 3`), `HEALTHCHECK` per Dockerfile.
-- Only `backend:3000` is published to host by default; signer/ubot/utradebot are `expose` only (uncomment `ports` in compose to debug).
-- For TLS / Mini App HTTPS: put backend behind Caddy/nginx and set `WEBAPP_URL=https://your-domain` — Telegram requires public HTTPS.
+- **Services (6):** `postgres:5432`, `signer:3001` (W5), `backend:3000` **API-only** (`SERVE_STATIC=false`), **`frontend:80 → host 8080` (nginx, serves Mini App, proxies `/api` → `backend:3000`)**, `ubot:3002`, `utradebot:3003` on `escrow-net`.
+- **Micro-architecture:** each service independently buildable/scalable, isolated code/Dockerfile, separate ports (frontend `8080`, backend `3000`, signer `3001` internal, ubot `3002`, utradebot `3003`), healthchecks, `depends_on: service_healthy` (frontend waits for backend, backend for postgres+signer).
+- **Security:** each runs as non-root, `.env` never baked (`env_file` at runtime), `ENCRYPTION_KEY` + `x-api-key` between services, logs redacted, `CORS` allows `FRONTEND_URL`/`WEBAPP_URL`/`localhost:8080`.
+- **Persistence:** volumes `pgdata`, `ubot_sessions`, `utrade_sessions` (600 perms).
+- **Ops:** `restart: unless-stopped`, `deploy.resources.limits`, `logging: json-file` (`10m`/`3`), `HEALTHCHECK` per Dockerfile.
+- For TLS: put **frontend** + **backend** behind Caddy/nginx with `WEBAPP_URL=https://your-domain` + `FRONTEND_URL` same — Telegram requires HTTPS.
 
 ## Environment
 
@@ -107,15 +124,12 @@ All variables are documented per-service:
 
 Minimum for off-chain: `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL` (backend) + `SIGNER_MNEMONIC` in `signer` if you need on-chain. For production add `API_KEY`/`SIGNER_API_KEY`/`UBOT_API_KEY`/`UTRADE_API_KEY` (32+ chars each), `WEBAPP_URL`, `POSTGRES_PASSWORD`, and `ENCRYPTION_KEY` (64 hex).
 
-## Webapp / Mini App hosting
+## Webapp / Mini App hosting — micro-architecture
 
-- Telegram **requires a public HTTPS URL** for Mini Apps. Serve the app behind
-  TLS (Caddy/nginx/LB) and set `WEBAPP_URL=https://your-domain` — the bot menu
-  button ("Open App") only appears when `WEBAPP_URL` is set.
-- Deal cards deep-link into the app as `${WEBAPP_URL}?deal=<id>` and one-time
-  join links as `${WEBAPP_URL}?deal=<id>&join=<token>`.
-- The same static files are also served by the API itself at `/`, which is
-  what the Docker image ships.
+- **Frontend microservice** `webapp/` (`nginx:alpine`, `Dockerfile`, `nginx.conf`) serves `public/` on `:80` → host `:8080`, proxies `/api/*`, `/tonconnect-manifest.json`, `/docs` → `http://backend:3000`. Backend is **API-only** (`SERVE_STATIC=false`).
+- Telegram **requires a public HTTPS URL** for Mini Apps. In prod, put **frontend** behind TLS (Caddy/nginx/LB) and set `WEBAPP_URL=https://your-domain` + `FRONTEND_URL` same — the bot menu button ("Open App") only appears when `WEBAPP_URL` is set. Backend `CORS` allows `FRONTEND_URL`.
+- Deal cards deep-link into the app as `${WEBAPP_URL}?deal=<id>` and one-time join links as `${WEBAPP_URL}?deal=<id>&join=<token>`.
+- `webapp/public` is **not** copied into the backend image anymore (see `backend/Dockerfile`); for single-port dev set `SERVE_STATIC=true`.
 
 ## Status & roadmap
 

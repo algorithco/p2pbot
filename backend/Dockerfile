@@ -29,9 +29,8 @@ RUN npm ci --omit=dev || npm install --omit=dev
 
 COPY --from=build /app/backend/dist ./dist
 
-# index.ts serves the Mini App from ../../webapp/public relative to dist/,
-# i.e. /app/webapp/public in this image.
-COPY webapp/public /app/webapp/public
+# Backend is API-only microservice — frontend is separate (webapp:80 nginx).
+# No static webapp copy needed. For local dev without frontend, set SERVE_STATIC=true.
 
 RUN chown -R backend:backend /app
 

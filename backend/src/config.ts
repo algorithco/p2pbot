@@ -27,6 +27,8 @@ export const config = {
   adminAddress: process.env.ADMIN_ADDRESS || '',
   apiKey: process.env.API_KEY || undefined,
   webappUrl: process.env.WEBAPP_URL || '',
+  frontendUrl: process.env.FRONTEND_URL || process.env.WEBAPP_URL || 'http://localhost:8080',
+  serveStatic: process.env.SERVE_STATIC === 'true',
   toncenterApiKey: process.env.TONCENTER_API_KEY || '',
   requireOnchain: process.env.REQUIRE_ONCHAIN === 'true',
   walletAddress: process.env.WALLET_ADDRESS || '',

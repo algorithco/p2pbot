@@ -1,18 +1,24 @@
-# P2P escrow bot — full stack (Postgres + backend/bot/API + signer + ubot + utradebot)
+# P2P escrow bot — micro-architecture (6 services)
+#  frontend (webapp nginx :8080 -> backend :3000) | backend (API-only :3000, bot)
+#  signer (W5 :3001) | ubot (:3002) | utradebot (:3003) | postgres (:5432)
 #
 # Prerequisites:
-#   1. cp backend/.env.example backend/.env       # fill BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL etc.
-#   2. cp signer/.env.example signer/.env         # fill SIGNER_MNEMONIC (24 words), SIGNER_API_KEY
-#   3. cp ubot/.env.example ubot/.env             # fill API_ID, API_HASH, TWO_FA_PASSWORD
-#   4. cp utradebot/.env.example utradebot/.env   # fill UTRADE_BOT_TOKEN, API_ID/HASH, ENCRYPTION_KEY
+#   1. cp backend/.env.example backend/.env       # BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL, FRONTEND_URL
+#   2. cp signer/.env.example signer/.env         # SIGNER_MNEMONIC (24 words), SIGNER_API_KEY
+#   3. cp ubot/.env.example ubot/.env             # API_ID, API_HASH, TWO_FA_PASSWORD
+#   4. cp utradebot/.env.example utradebot/.env   # UTRADE_BOT_TOKEN, API_ID/HASH, ENCRYPTION_KEY
 #   5. docker compose up --build -d
+#   6. Frontend (Telegram Mini App) → http://localhost:8080
+#      Backend API (docs)         → http://localhost:3000/api/docs or /docs
 #
 # For production TLS (Telegram Mini App requires HTTPS public URL):
-#   - Put backend behind Caddy/nginx (set WEBAPP_URL=https://your-domain)
+#   - Put frontend+backend behind Caddy/nginx (set WEBAPP_URL=https://your-domain, FRONTEND_URL same)
 #   - Ensure POSTGRES_PASSWORD, SIGNER_API_KEY, UBOT_API_KEY, UTRADE_API_KEY are strong (32+ chars)
 #
-# All services run on internal network escrow-net; only backend:3000 is published.
-# Signer/ubot/utradebot expose health endpoints internally for depends_on + monitoring.
+# Micro-architecture: each service is independently buildable/scalable, isolated network escrow-net.
+#  - backend:3000 API-only (no static, SERVE_STATIC=false) — CORS allows frontend origin
+#  - frontend:80 nginx — serves webapp/public, proxies /api/* -> backend:3000
+#  - signer/ubot/utradebot: internal only (expose), health endpoints for monitoring
 
 services:
   postgres:
@@ -81,6 +87,10 @@ services:
       DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:-escrow_password}@postgres:5432/escrow
       PORT: "3000"
       SIGNER_URL: http://signer:3001
+      # Frontend URL for CORS + bot menu button (micro-architecture: separate service)
+      FRONTEND_URL: http://localhost:8080
+      WEBAPP_URL: ${WEBAPP_URL:-http://localhost:8080}
+      SERVE_STATIC: "false"
     ports:
       - "3000:3000"
     depends_on:
@@ -106,6 +116,36 @@ services:
         limits:
           cpus: "1"
           memory: 768M
+
+  frontend:
+    build:
+      context: .
+      dockerfile: webapp/Dockerfile
+    restart: unless-stopped
+    # Frontend is static — no env_file needed, but allow override via WEBAPP_URL if needed
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    networks:
+      - escrow-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 128M
 
   ubot:
     build:

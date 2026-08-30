@@ -32,14 +32,36 @@ import {
 
 const app = express();
 
-/** CORS restricted to the configured webapp origin (falls back to reflect-all on bad URL). */
-let corsOrigin: string | boolean = true;
-try {
-  if (config.webappUrl) corsOrigin = new URL(config.webappUrl).origin;
-} catch {
-  corsOrigin = true;
+/** CORS — micro-architecture: backend (3000) separate from frontend (8080 via nginx).
+ * Allow WEBAPP_URL, FRONTEND_URL, and local dev origins. Falls back to allow-all in dev.
+ */
+function buildAllowedOrigins(): string[] {
+  const origins = new Set<string>();
+  for (const u of [config.webappUrl, config.frontendUrl]) {
+    if (!u) continue;
+    try { origins.add(new URL(u).origin); } catch {}
+  }
+  // Local dev + docker internal
+  origins.add('http://localhost:8080');
+  origins.add('http://127.0.0.1:8080');
+  origins.add('http://frontend:80');
+  origins.add('http://frontend');
+  origins.add('http://localhost:3000');
+  return Array.from(origins);
 }
-app.use(cors({ origin: corsOrigin, credentials: false }));
+const allowedOrigins = buildAllowedOrigins();
+const corsOrigin: boolean | ((origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => void) =
+  allowedOrigins.length === 0
+    ? true
+    : (origin, cb) => {
+        if (!origin) return cb(null, true); // same-origin / curl / healthcheck
+        if (allowedOrigins.includes(origin)) return cb(null, true);
+        // Fallback: allow if WEBAPP_URL not set (dev)
+        if (!config.webappUrl && !config.frontendUrl) return cb(null, true);
+        return cb(null, false);
+      };
+// Use function form when we have a list, boolean otherwise (type any to avoid overload mismatch)
+app.use(cors({ origin: corsOrigin as never, credentials: false }));
 app.use(express.json({ limit: '256kb' }));
 app.use(identityAuth);
 
@@ -451,12 +473,31 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   }
 });
 
-const publicDir = path.resolve(__dirname, '..', '..', 'webapp', 'public');
-app.use((req, res, next) => {
-  res.setHeader('Cache-Control', 'no-cache');
-  next();
-});
-app.use('/', express.static(publicDir));
+// --- Micro-architecture: backend is API-only, frontend is separate nginx service (webapp:80 -> 8080) ---
+// For local dev without frontend, set SERVE_STATIC=true to re-enable static serving.
+if (config.serveStatic) {
+  const publicDir = path.resolve(__dirname, '..', '..', 'webapp', 'public');
+  app.use((req, res, next) => {
+    res.setHeader('Cache-Control', 'no-cache');
+    next();
+  });
+  app.use('/', express.static(publicDir));
+  logger.info('SERVE_STATIC=true — backend also serving webapp/public (dev fallback)');
+} else {
+  // API-only root — point to frontend and docs
+  app.get('/', (_req, res) => {
+    res.json({
+      service: 'escrow-backend',
+      mode: 'micro-architecture: API-only (frontend separate)',
+      frontend: config.frontendUrl,
+      docs: '/api/docs',
+      htmlDocs: '/docs',
+      openapi: '/api/openapi.json',
+      health: '/api/info',
+      note: 'Frontend (Telegram Mini App) runs as separate service webapp:80 -> host :8080, proxies /api to this backend',
+    });
+  });
+}
 
 const port = Number(process.env.PORT || 3000);
 let server: Server | null = null;
