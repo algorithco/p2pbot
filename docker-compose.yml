@@ -146,10 +146,11 @@ services:
           cpus: "0.3"
           memory: 128M
 
-  # Cloudflared — tunnels ONLY frontend (webapp) to public HTTPS.
-  # - TON Connect manifest and bot menu button will use this public URL.
-  # - Quick tunnel (no token, random trycloudflare.com): default, logs show URL.
-  # - Named tunnel (stable): set CLOUDFLARE_TUNNEL_TOKEN in .env and uncomment `tunnel run` line.
+  # Cloudflared — tunnels frontend (and optionally backend) to public HTTPS.
+  # Uses quick tunnel by default (no account, random trycloudflare.com, URL in logs).
+  # For production/stability use named tunnel: set CLOUDFLARE_TUNNEL_TOKEN and switch command.
+  # This setup tunnels ONLY frontend (webapp) — backend API is reachable via frontend's /api proxy,
+  # so wallet + Mini App work via single public URL. Add backend tunnel below if you need direct API URL.
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
@@ -170,6 +171,23 @@ services:
     # Optional: if using named tunnel, ensure token is passed
     # environment:
     #   - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+
+  # Direct backend tunnel — cloudflared everywhere (exposes backend API directly)
+  # This gives a second public URL https://xxx.trycloudflare.com for raw API (besides frontend's /api proxy)
+  cloudflared-backend:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --url http://backend:3000 --no-autoupdate
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - escrow-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   ubot:
     build:
