@@ -331,6 +331,118 @@ app.get('/api/status/:address', asyncHandler(async (req, res) => {
   }
 }));
 
+// --- API Documentation (self-describing) ------------------------------------
+const API_DOCS = {
+  name: 'TON Escrow Bot — REST API',
+  version: '1.0.0',
+  baseUrl: '/api',
+  auth: {
+    telegram: 'x-init-data (HMAC-SHA256 via BOT_TOKEN) + x-telegram-user-id — verified in src/auth/initData.ts, 24h window',
+    apiKey: 'x-api-key: <API_KEY> header or ?api_key= (timing-safe, see src/auth/guard.ts)',
+    devFallback: 'x-telegram-user-id only when BOT_TOKEN and API_KEY unset (never in prod)',
+    admin: 'Telegram id in ADMIN_TELEGRAM_IDS or any api-key caller',
+  },
+  rateLimits: 'create deal 10/min · join 20/min · chat post 60/min · notify 5/min (sliding window per IP+route)',
+  endpoints: [
+    { method: 'GET', path: '/api/info', auth: 'public', desc: 'Health + feeBps, paymentAddress, network, adminTelegramIds' },
+    { method: 'GET', path: '/tonconnect-manifest.json', auth: 'public', desc: 'TON Connect manifest (dynamic origin)' },
+    { method: 'GET', path: '/api/docs', auth: 'public', desc: 'This doc (JSON)' },
+    { method: 'GET', path: '/api/openapi.json', auth: 'public', desc: 'OpenAPI 3.0 spec (machine-readable)' },
+    { method: 'GET', path: '/docs', auth: 'public', desc: 'Human HTML docs (try it)' },
+    { method: 'GET', path: '/api/deals', auth: 'public', desc: 'List last 100 deals' },
+    { method: 'GET', path: '/api/deals/:id', auth: 'public', desc: 'Single deal by id' },
+    { method: 'GET', path: '/api/deals/mine', auth: 'Identity', desc: 'Deals where caller is buyer or seller (requires x-init-data or x-api-key)' },
+    { method: 'POST', path: '/api/deals', auth: 'Identity', desc: 'Create deal {sellerId, asset TON|USDT, amount, terms?, deadline?} — caller forced to one side, returns {deal, link} with one-time join link' },
+    { method: 'POST', path: '/api/deals/:id/join/:token', auth: 'Identity', desc: 'Consume one-time link, assign missing buyer/seller role' },
+    { method: 'GET', path: '/api/deals/:id/chat', auth: 'public', desc: 'Deal chat messages' },
+    { method: 'POST', path: '/api/deals/:id/chat', auth: 'Identity (party or admin)', desc: 'Post {content} — sender forced to caller, only party/admin' },
+    { method: 'POST', path: '/api/notify', auth: 'Admin', desc: 'Send bot message {chatId, message} — rate 5/min' },
+    { method: 'GET', path: '/api/notifications', auth: 'Admin', desc: 'Last 200 notifications' },
+    { method: 'POST', path: '/api/withdraw', auth: 'Admin', desc: 'Release (guarded DB → RELEASED; on-chain stub if REQUIRE_ONCHAIN=true without signer)' },
+    { method: 'POST', path: '/api/refund', auth: 'Admin', desc: 'Refund (guarded DB → REFUNDED)' },
+    { method: 'GET', path: '/api/status/:address', auth: 'public', desc: 'On-chain Escrow.getStatus() for address' },
+  ],
+  internalServices: {
+    signer: { url: 'http://signer:3001 (internal, NOT published)', endpoints: ['GET /health (open)', 'GET /address (x-api-key)', 'GET /info (x-api-key)', 'POST /send {to,value,comment?}', 'POST /send-batch {requests[]}', 'POST /deploy', 'POST /deploy-escrow {escrowAddress, escrowStateInit{codeBoc,dataBoc}, value, bodyBoc}'] },
+    ubot: { url: 'http://ubot:3002 (internal)', endpoints: ['GET /health (open)', 'GET /channel/:id, /channel/:id/admins (x-api-key)', 'POST /channel/:id/promote {userId,rights?,rank?}', 'POST /channel/:id/transfer {newOwnerId,password?}', 'POST /channel/:id/takeover {newOwnerId,password?}', 'POST /group/:id/promote|transfer|takeover', 'GET /group/:id/isBasic, POST /group/:id/migrate'] },
+    utradebot: { url: 'http://utradebot:3003 (internal)', endpoints: ['GET /health (open)', 'GET /api/trades/:id (x-api-key if set)', 'Telegram bot: /start, /sell, /buy, /mytrades, /setphone, /setbuyer, /help'] },
+  },
+  headers: {
+    'x-init-data': 'Telegram WebApp initData (required for Identity when not api-key)',
+    'x-telegram-user-id': 'Fallback when api-key/dev only',
+    'x-api-key': 'Shared secret if API_KEY set',
+    'x-signer-key / x-api-key (signer)': 'SIGNER_API_KEY',
+    'x-ubot-key / x-api-key (ubot)': 'UBOT_API_KEY',
+  },
+  notes: [
+    'Mini App served at / (webapp/public) with ?deal=<id>&join=<token> deep links; requires WEBAPP_URL=https://<public> for Telegram menu button',
+    'Postgres: deals, users, messages, deal_links, notifications + utrade_trades/utrade_events (shared volume pgdata)',
+    'See backend/README.md for full env table and auth legend',
+  ],
+};
+
+app.get('/api/docs', (_req, res) => {
+  res.json(API_DOCS);
+});
+
+app.get('/api/openapi.json', (req, res) => {
+  const host = req.get('host') || 'localhost:3000';
+  const scheme = host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
+  const servers = [{ url: `${scheme}://${host}` }];
+  // Minimal OpenAPI 3.0 from API_DOCS
+  const paths: Record<string, unknown> = {};
+  for (const ep of API_DOCS.endpoints) {
+    const p = ep.path.replace(/:(\w+)/g, '{$1}');
+    if (!paths[p]) paths[p] = {};
+    const m = ep.method.toLowerCase();
+    (paths[p] as Record<string, unknown>)[m] = {
+      summary: ep.desc,
+      tags: [ep.auth],
+      responses: { '200': { description: 'OK' } },
+    };
+  }
+  res.json({
+    openapi: '3.0.3',
+    info: { title: API_DOCS.name, version: API_DOCS.version },
+    servers,
+    paths,
+    components: { securitySchemes: { initData: { type: 'apiKey', in: 'header', name: 'x-init-data' }, apiKey: { type: 'apiKey', in: 'header', name: 'x-api-key' } } },
+  });
+});
+
+app.get('/docs', (_req, res) => {
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TON Escrow — API Docs</title><style>
+  *{box-sizing:border-box}body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0b0e14;color:#e6e8eb}
+  a{color:#6aa8ff}header{padding:24px 20px;border-bottom:1px solid #1f2533;background:#0f131d;position:sticky;top:0}
+  h1{margin:0;font-size:22px}h2{margin:28px 0 12px;font-size:18px;color:#8ab4ff}code{background:#1a2030;padding:2px 6px;border-radius:6px;font-size:13px}
+  .wrap{max-width:1080px;margin:0 auto;padding:20px}table{width:100%;border-collapse:collapse;background:#111827;border:1px solid #1f2533;border-radius:10px;overflow:hidden}
+  th,td{padding:10px 12px;border-bottom:1px solid #1f2533;text-align:left;font-size:14px}th{background:#0f131d;color:#8ab4ff}tr:last-child td{border-bottom:none}
+  .tag{padding:2px 8px;border-radius:999px;font-size:12px;background:#1a2030;border:1px solid #2a3550}
+  .auth-public{color:#7dd3a5}.auth-Identity{color:#f0c27a}.auth-Admin{color:#ff8a8a}
+  pre{white-space:pre-wrap;background:#0f131d;border:1px solid #1f2533;padding:14px;border-radius:10px;overflow:auto}
+  </style></head><body><header><div class="wrap"><h1>TON Escrow Bot — API Docs</h1><div style="opacity:.7;margin-top:6px">Base: <code>/api</code> · <a href="/api/docs">/api/docs</a> (JSON) · <a href="/api/openapi.json">/api/openapi.json</a> · <a href="/api/info">/api/info</a></div></div></header><div class="wrap">
+  <h2>Auth</h2><pre>${JSON.stringify(API_DOCS.auth, null, 2)}</pre>
+  <h2>Rate limits</h2><p><code>${API_DOCS.rateLimits}</code></p>
+  <h2>Endpoints</h2><table><thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead><tbody id="rows"></tbody></table>
+  <h2>Internal services (docker network escrow-net, not published)</h2><pre id="internal"></pre>
+  <h2>Headers</h2><pre id="headers"></pre>
+  <h2>Try</h2><p>Health: <code>curl http://localhost:3000/api/info</code> · Docs JSON: <code>curl http://localhost:3000/api/docs</code></p>
+  <pre id="try"></pre>
+  </div><script>
+  fetch('/api/docs').then(r=>r.json()).then(d=>{
+    const tbody=document.getElementById('rows');
+    for(const ep of d.endpoints){
+      const tr=document.createElement('tr');
+      tr.innerHTML='<td><code>'+ep.method+'</code></td><td><code>'+ep.path+'</code></td><td><span class="tag auth-'+ep.auth.split(/[ (]/)[0]+'">'+ep.auth+'</span></td><td>'+ep.desc+'</td>';
+      tbody.appendChild(tr);
+    }
+    document.getElementById('internal').textContent=JSON.stringify(d.internalServices,null,2);
+    document.getElementById('headers').textContent=JSON.stringify(d.headers,null,2);
+    document.getElementById('try').textContent='curl -H "x-api-key: $API_KEY" http://localhost:3000/api/deals/mine\\n\\n# with Telegram initData (Mini App):\\ncurl -H "x-init-data: $INIT_DATA" -H "x-telegram-user-id: 123" http://localhost:3000/api/deals';
+  }).catch(e=>{document.body.innerHTML+='<pre>'+e+'</pre>'});
+  </script></body></html>`);
+});
+
 // JSON 500 for anything that slipped past a handler.
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   logger.error('Unhandled API error', err);
