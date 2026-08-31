@@ -26,6 +26,7 @@ import {
   addEncryptedMessage,
 } from './services/dealService';
 import { depositComment, releaseComment } from './utils/comments';
+import { commentToPayloadB64, jettonTransferPayload } from './utils/tonPayload';
 import { isEncryptionEnabled } from './utils/encryption';
 import {
   identityAuth,
@@ -283,6 +284,23 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
   // Provide both webapp deep link and direct API join link
   const webappLink = `${baseUrl.replace(/\/$/, '')}/#/deal/${deal.id}/join/${linkToken}`;
   const apiLink = `${req.protocol}://${req.get('host')}/api/deals/${deal.id}/join/${linkToken}`;
+  const depositPayload = commentToPayloadB64(memo);
+  const releasePayload = commentToPayloadB64(outMemo);
+  let jettonPayload: string | null = null;
+  if (asset.toUpperCase() !== 'TON') {
+    try {
+      // For Jetton (USDT) deposits, buyer sends Jetton transfer with forward comment = memo
+      // Payload is the jetton transfer cell with forwardPayload containing memo
+      // We precompute a sample for display; actual amount/destination will be set by wallet
+      const mockDest = payAddr && payAddr.length > 10 ? Address.parse(payAddr) : Address.parse('EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJKZ');
+      jettonPayload = jettonTransferPayload({
+        amount: BigInt(Math.round(Number(amount) * 1e6)), // USDT 6 decimals mock for preview
+        destination: mockDest,
+        forwardComment: memo,
+        forwardTonAmount: BigInt(1000000), // 0.001 TON for forward
+      });
+    } catch { jettonPayload = null; }
+  }
   return res.json({
     deal,
     link: webappLink,
@@ -290,13 +308,16 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
     webappLink,
     depositComment: memo,
     depositMemo: memo,
+    depositPayload,
     releasePreview: outMemo,
+    releasePayload,
+    jettonPayload,
     paymentAddress: payAddr,
     encryption: isEncryptionEnabled() ? 'e2e-aes-256-gcm' : 'transport-only',
     instructions:
       asset.toUpperCase() === 'TON'
-        ? `Send ${amount} ${asset} to ${payAddr} with comment "${memo}" so bot detects your deposit. On release seller will receive with comment "${outMemo}".`
-        : `Send ${amount} ${asset} (Jetton) to ${payAddr} with forward comment "${memo}" — bot detects via forward payload. Release memo: "${outMemo}".`,
+        ? `Send ${amount} ${asset} to ${payAddr} with comment "${memo}" (payload ${depositPayload.slice(0, 24)}...) so bot detects your deposit. On release seller will receive "${outMemo}" (payload ${releasePayload.slice(0, 24)}...).`
+        : `Send ${amount} ${asset} (Jetton) to ${payAddr} with forward comment "${memo}" (payload ${depositPayload.slice(0, 24)}...) — bot detects via forward payload. Release memo: "${outMemo}".`,
   });
 }));
 
@@ -500,6 +521,51 @@ app.get('/api/balance/:address', asyncHandler(async (req, res) => {
   }
 }));
 
+// TON payload helpers — memo in ALL on-chain transactions (comment op 0, Jetton forward)
+// Public: encode a comment to TON Connect payload (base64 BOC) so buyer wallet always includes memo
+app.get('/api/ton/payload', asyncHandler(async (req, res) => {
+  const comment = String(req.query.comment || '').trim();
+  if (!comment) return res.status(400).json({ error: 'comment_required' });
+  if (comment.length > 120) return res.status(400).json({ error: 'comment_too_long', max: 120 });
+  const payload = commentToPayloadB64(comment);
+  return res.json({ comment, payload, format: 'base64', note: 'Use as TON Connect sendTransaction payload' });
+}));
+
+// Deal-specific TON payloads (deposit + release) — requires party or public for deposit preview
+app.get('/api/deals/:id/payload', asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const deal = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const memo = depositComment(dealId);
+  const outMemo = releaseComment({ id: dealId, amount: deal.amount, asset: deal.asset, terms: deal.terms });
+  const depositPayload = commentToPayloadB64(memo);
+  const releasePayload = commentToPayloadB64(outMemo);
+  let jettonPayload: string | null = null;
+  if (String(deal.asset).toUpperCase() !== 'TON') {
+    try {
+      const payAddr = String(deal.payment_address || resolvePaymentAddress() || 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJKZ');
+      jettonPayload = jettonTransferPayload({
+        amount: BigInt(Math.round(Number(deal.amount) * 1e6)),
+        destination: Address.parse(payAddr),
+        forwardComment: memo,
+        forwardTonAmount: BigInt(1000000),
+      });
+    } catch { jettonPayload = null; }
+  }
+  return res.json({
+    dealId,
+    asset: deal.asset,
+    amount: deal.amount,
+    depositComment: memo,
+    depositPayload,
+    releaseComment: outMemo,
+    releasePayload,
+    jettonPayload,
+    paymentAddress: deal.payment_address || resolvePaymentAddress(),
+  });
+}));
+
 // --- API Documentation (self-describing) ------------------------------------
 const API_DOCS = {
   name: 'TON Escrow Bot — REST API',
@@ -532,6 +598,8 @@ const API_DOCS = {
     { method: 'POST', path: '/api/refund', auth: 'Admin', desc: 'Refund (guarded DB → REFUNDED)' },
     { method: 'GET', path: '/api/status/:address', auth: 'public', desc: 'On-chain Escrow.getStatus() for address' },
     { method: 'GET', path: '/api/balance/:address', auth: 'public', desc: 'TON wallet balance via TONCenter (nanotons + TON, state)' },
+    { method: 'GET', path: '/api/ton/payload', auth: 'public', desc: 'Encode comment to TON Connect payload {comment, payload: base64} — memo for ALL TON tx' },
+    { method: 'GET', path: '/api/deals/:id/payload', auth: 'public', desc: 'Deal-specific payloads: depositPayload/releasePayload (+ jettonPayload for USDT) with memo' },
   ],
   internalServices: {
     signer: { url: 'http://signer:3001 (internal, NOT published)', endpoints: ['GET /health (open)', 'GET /address (x-api-key)', 'GET /info (x-api-key)', 'POST /send {to,value,comment?}', 'POST /send-batch {requests[]}', 'POST /deploy', 'POST /deploy-escrow {escrowAddress, escrowStateInit{codeBoc,dataBoc}, value, bodyBoc}'] },
