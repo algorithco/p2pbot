@@ -11,6 +11,7 @@ import logger from '../logger';
 import { alertAdmins } from './notificationService';
 import { releaseComment, depositComment } from '../utils/comments';
 import { sendTon, sendJetton } from '../blockchain/signerClient';
+import { encryptField } from '../utils/encryption';
 
 /** Fire-and-forget admin alert that never throws. */
 function notifyAdmins(message: string) {
@@ -37,8 +38,10 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
 
     const memo = releaseComment({ id: dealId, amount, asset, terms });
     // For refund, keep same memo but prefix "Refund:" — ensure <120 chars for TON comment limit
-    let finalMemo = status === DEAL_STATUS.REFUNDED ? `Refund: ${memo}` : memo;
-    if (finalMemo.length > 120) finalMemo = finalMemo.slice(0, 119) + '…';
+    let finalMemoPlain = status === DEAL_STATUS.REFUNDED ? `Refund: ${memo}` : memo;
+    if (finalMemoPlain.length > 120) finalMemoPlain = finalMemoPlain.slice(0, 119) + '…';
+    // Memo is encrypted and auto-injected — never show plaintext to user
+    const finalMemo = encryptField(finalMemoPlain);
 
     const to = opts?.toAddress || (status === DEAL_STATUS.RELEASED ? String(deal.seller_telegram_id ? '' : deal.payment_address) : String(deal.buyer_telegram_id ? '' : deal.payment_address));
     // Try to resolve seller/buyer TON address from users table
@@ -83,10 +86,9 @@ export async function adminRelease(adminTelegramId: number | string, dealId: num
   }
   try {
     const deal = await getDealById(id);
-    const memo = deal ? releaseComment({ id, amount: deal.amount, asset: deal.asset, terms: deal.terms }) : `For Escrow #${id}`;
     await guardedTransition(id, DEAL_STATUS.RELEASED, deal ? { toAddress: undefined, amount: deal.amount, asset: deal.asset, terms: deal.terms } : undefined);
-    notifyAdmins(`Deal #${id} RELEASED by admin ${adminTelegramId}. Comment: "${memo}"`);
-    return { success: true, message: `Funds released. Memo: "${memo}"` };
+    notifyAdmins(`Deal #${id} RELEASED by admin ${adminTelegramId} (encrypted memo auto-injected)`);
+    return { success: true, message: `Funds released (encrypted memo)` };
   } catch (err) {
     logger.error(`adminRelease failed for deal #${id}`, err);
     notifyAdmins(`Deal #${id} release FAILED: ${(err as Error).message}`);
@@ -101,10 +103,9 @@ export async function adminRefund(adminTelegramId: number | string, dealId: numb
   }
   try {
     const deal = await getDealById(id);
-    const memo = deal ? `Refund: ${releaseComment({ id, amount: deal.amount, asset: deal.asset, terms: deal.terms })}` : `Refund for Escrow #${id}`;
     await guardedTransition(id, DEAL_STATUS.REFUNDED, deal ? { amount: deal.amount, asset: deal.asset, terms: deal.terms } : undefined);
-    notifyAdmins(`Deal #${id} REFUNDED by admin ${adminTelegramId}. Comment: "${memo}"`);
-    return { success: true, message: `Funds refunded. Memo: "${memo}"` };
+    notifyAdmins(`Deal #${id} REFUNDED by admin ${adminTelegramId} (encrypted memo)`);
+    return { success: true, message: `Funds refunded (encrypted memo)` };
   } catch (err) {
     logger.error(`adminRefund failed for deal #${id}`, err);
     notifyAdmins(`Deal #${id} refund FAILED: ${(err as Error).message}`);
@@ -128,8 +129,9 @@ export async function transferTokens(dealId: number, toAddress: string, amount: 
   void includeFee;
   const id = Number(dealId);
   const deal = await getDealById(id);
-  const memo = deal ? releaseComment({ id, amount: deal?.amount ?? amount, asset: tokenType, terms: deal?.terms }) : `For Escrow #${id} — ${amount} ${tokenType}`;
-  logger.warn(`transferTokens(deal #${id} -> ${toAddress} "${memo}") is deprecated; using guarded release path`);
+  const memoPlain = deal ? releaseComment({ id, amount: deal?.amount ?? amount, asset: tokenType, terms: deal?.terms }) : `For Escrow #${id} — ${amount} ${tokenType}`;
+  const memo = encryptField(memoPlain);
+  logger.warn(`transferTokens(deal #${id} -> ${toAddress}) is deprecated; using guarded release path (encrypted memo)`);
   if (config.requireOnchain) {
     try {
       if (tokenType === 'TON') {
@@ -144,7 +146,7 @@ export async function transferTokens(dealId: number, toAddress: string, amount: 
     }
   }
   await guardedTransition(id, DEAL_STATUS.RELEASED, { toAddress, amount, asset: tokenType, terms: deal?.terms });
-  return { ok: true, dealId: id, status: DEAL_STATUS.RELEASED, comment: memo };
+  return { ok: true, dealId: id, status: DEAL_STATUS.RELEASED, comment: '[encrypted]' };
 }
 
 /**
@@ -153,8 +155,9 @@ export async function transferTokens(dealId: number, toAddress: string, amount: 
 export async function refundBuyerWithoutFee(dealId: number, toAddress: string) {
   const id = Number(dealId);
   const deal = await getDealById(id);
-  const memo = deal ? `Refund: ${releaseComment({ id, amount: deal.amount, asset: deal.asset, terms: deal.terms })}` : `Refund for Escrow #${id}`;
-  logger.warn(`refundBuyerWithoutFee(deal #${id} -> ${toAddress} "${memo}") is deprecated; using guarded refund path`);
+  const memoPlain = deal ? `Refund: ${releaseComment({ id, amount: deal.amount, asset: deal.asset, terms: deal.terms })}` : `Refund for Escrow #${id}`;
+  const memo = encryptField(memoPlain);
+  logger.warn(`refundBuyerWithoutFee(deal #${id} -> ${toAddress}) is deprecated; using guarded refund path (encrypted memo)`);
   if (config.requireOnchain) {
     const amt = deal ? String(deal.amount) : '0';
     const asset = String(deal?.asset || 'TON').toUpperCase();
@@ -171,7 +174,7 @@ export async function refundBuyerWithoutFee(dealId: number, toAddress: string) {
     }
   }
   await guardedTransition(id, DEAL_STATUS.REFUNDED, { toAddress, amount: deal?.amount, asset: deal?.asset, terms: deal?.terms });
-  return { ok: true, dealId: id, status: DEAL_STATUS.REFUNDED, comment: memo };
+  return { ok: true, dealId: id, status: DEAL_STATUS.REFUNDED, comment: '[encrypted]' };
 }
 
 /**
@@ -208,19 +211,17 @@ export async function recordConfirmation(telegramId: number, dealId: number | st
 
   await setConfirmation(id, role, confirmations);
   if (nextStatus !== deal.status) {
-    // If auto-releasing, include a release comment
+    // If auto-releasing, memo is encrypted and not shown
     if (nextStatus === DEAL_STATUS.RELEASED) {
-      const memo = releaseComment({ id, amount: deal.amount, asset: deal.asset, terms: deal.terms });
-      logger.info(`Deal #${id} auto-release memo: "${memo}"`);
-      // Try on-chain send if required, otherwise just DB transition
+      logger.info(`Deal #${id} auto-release (encrypted memo)`);
       try {
         await guardedTransition(id, nextStatus, { amount: deal.amount, asset: deal.asset, terms: deal.terms });
       } catch (e) {
         logger.error(`Auto-release failed for deal #${id}`, e);
         return { success: false, message: (e as Error).message };
       }
-      notifyAdmins(`Deal #${id} auto-RELEASED: both parties confirmed. Memo: "${memo}"`);
-      return { success: true, message: `Both parties confirmed — funds released. Memo: "${memo}"`, released: true };
+      notifyAdmins(`Deal #${id} auto-RELEASED: both parties confirmed (encrypted memo)`);
+      return { success: true, message: `Both parties confirmed — funds released`, released: true };
     }
     await updateDealStatus(id, nextStatus);
   }

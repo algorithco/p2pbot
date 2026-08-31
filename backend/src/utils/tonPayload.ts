@@ -1,5 +1,6 @@
 import { beginCell, Address, Cell } from '@ton/core';
 import { JETTON_OPS } from '../blockchain/jettonUtils';
+import { encryptField, decryptField } from './encryption';
 
 /**
  * TON payload helpers — ensures memo in ALL on-chain transactions.
@@ -12,6 +13,40 @@ import { JETTON_OPS } from '../blockchain/jettonUtils';
 export function commentToPayloadB64(comment: string): string {
   const cell = beginCell().storeUint(0, 32).storeStringTail(comment).endCell();
   return cell.toBoc().toString('base64');
+}
+
+/** Encrypted memo: encrypt comment with ENCRYPTION_KEY (AES-GCM) then payload — memo crypted, not plaintext, auto-injected */
+export function encryptedCommentToPayloadB64(comment: string): string {
+  const crypted = encryptField(comment);
+  const cell = beginCell().storeUint(0, 32).storeStringTail(crypted).endCell();
+  return cell.toBoc().toString('base64');
+}
+
+/** Decrypt payload comment if encrypted, fallback to plaintext for old tx */
+export function payloadB64ToDecryptedComment(b64: string): string | null {
+  const raw = payloadB64ToComment(b64);
+  if (!raw) return null;
+  try {
+    const dec = decryptField(raw);
+    // If decryptField returned same and raw looks like encrypted base64 (iv+tag), but dec is still base64, keep raw
+    // Otherwise if dec looks like escrow# pattern, use dec
+    if (dec !== raw && dec.includes('escrow#')) return dec;
+    if (dec !== raw && dec.startsWith('For ') || dec.startsWith('Refund:')) return dec;
+    // If encrypted and decrypt succeeded, dec will be original text; if not encrypted, decryptField returns raw
+    return dec;
+  } catch {
+    return raw;
+  }
+}
+
+export function decryptCommentString(maybeEncrypted: string | null | undefined): string | null {
+  if (!maybeEncrypted) return null;
+  try {
+    const dec = decryptField(String(maybeEncrypted));
+    return dec || String(maybeEncrypted);
+  } catch {
+    return String(maybeEncrypted);
+  }
 }
 
 /** Create comment cell (not BOC) for internal use (signer). */

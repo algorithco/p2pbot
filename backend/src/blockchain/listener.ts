@@ -5,6 +5,7 @@ import { updateDealStatus, getDealById } from '../services/dealService';
 import { db } from '../db/queries';
 import { toBaseUnits } from '../utils/money';
 import { depositComment, parseDepositComment, parseTonComment, parseJettonForwardComment } from '../utils/comments';
+import { decryptCommentString } from '../utils/tonPayload';
 import { getBot } from '../bot/bot';
 import logger from '../logger';
 
@@ -91,9 +92,12 @@ async function notifyParties(deal: DealRow, text: string) {
 }
 
 async function processTonDeposit(addr: string, src: Address | null, value: bigint, txHash: string, comment: string | null) {
+  // Memo is encrypted and auto-injected — decrypt before parsing (fallback to plaintext for old tx)
+  const decryptedComment = decryptCommentString(comment);
+  const commentForLog = decryptedComment || comment;
   // Try comment-based lookup first (most reliable for shared custodial address)
   let deal: DealRow | null = null;
-  const expectedId = parseDepositComment(comment);
+  const expectedId = parseDepositComment(decryptedComment);
   if (expectedId != null) {
     deal = await findAwaitingDealById(expectedId, addr);
     if (deal) {
@@ -109,14 +113,14 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     if (!deal) return;
     // If we expected a comment but didn't get one, log but still allow (backwards compat)
     const expectedMemo = depositComment(deal.id);
-    if (comment == null || comment.trim() === '') {
-      logger.info(`Deal #${deal.id}: TON deposit without comment (expected "${expectedMemo}") from ${src?.toString() || 'unknown'} — accepting by amount`);
-    } else if (parseDepositComment(comment) == null) {
+    if (decryptedComment == null || decryptedComment.trim() === '') {
+      logger.info(`Deal #${deal.id}: TON deposit without comment (expected encrypted memo) from ${src?.toString() || 'unknown'} — accepting by amount`);
+    } else if (parseDepositComment(decryptedComment) == null) {
       // Comment present but not matching escrow# pattern — could be user error, but still check amount
-      logger.warn(`Deal #${deal.id}: TON deposit with unexpected comment "${comment}" (expected "${expectedMemo}") — checking amount`);
+      logger.warn(`Deal #${deal.id}: TON deposit with unexpected comment "${commentForLog}" (expected "${expectedMemo}") — checking amount`);
     } else if (expectedId == null || expectedId !== deal.id) {
       // Comment is escrow# but for different deal id
-      logger.warn(`Deal #${deal.id}: TON deposit comment "${comment}" does not match this deal's expected "${expectedMemo}" — checking amount anyway`);
+      logger.warn(`Deal #${deal.id}: TON deposit comment "${commentForLog}" does not match this deal's expected "${expectedMemo}" — checking amount anyway`);
     }
   } else {
     // We already matched by comment, but still need to ensure paymentAddress matches (already checked)
@@ -132,7 +136,7 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     return;
   }
   if (value !== expected) {
-    logger.info(`Deal #${deal.id}: TON deposit amount mismatch: got ${value} expected ${expected} (comment "${comment}")`);
+    logger.info(`Deal #${deal.id}: TON deposit amount mismatch: got ${value} expected ${expected} (memo "${commentForLog}")`);
     return;
   }
 
@@ -150,8 +154,8 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
   }
 
   await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
-  const who = comment ? ` (memo "${comment}")` : '';
-  await notifyParties(deal, `✅ Deposit confirmed for deal #${deal.id}${who}. Both parties can now confirm with /confirm ${deal.id}`);
+  // Do not expose memo to user in notification (memo is encrypted and hidden)
+  await notifyParties(deal, `✅ Deposit confirmed for deal #${deal.id}. Both parties can now confirm with /confirm ${deal.id}`);
 }
 
 interface JettonNotification {
@@ -175,9 +179,11 @@ function parseJettonNotification(body: Cell): JettonNotification | null {
 }
 
 async function processJettonDeposit(addr: string, note: JettonNotification, forwardComment: string | null, txHash: string) {
+  // Forward memo is encrypted — decrypt before parsing
+  const decryptedForward = decryptCommentString(forwardComment);
   // Try comment-based lookup first
   let deal: DealRow | null = null;
-  const expectedId = parseDepositComment(forwardComment);
+  const expectedId = parseDepositComment(decryptedForward);
   if (expectedId != null) {
     deal = await findAwaitingDealById(expectedId, addr);
     if (deal) {
@@ -190,10 +196,10 @@ async function processJettonDeposit(addr: string, note: JettonNotification, forw
     deal = await findAwaitingDeal(addr);
     if (!deal) return;
     const expectedMemo = depositComment(deal.id);
-    if (!forwardComment) {
-      logger.info(`Deal #${deal.id}: USDT deposit without forward comment (expected "${expectedMemo}") — accepting by amount`);
-    } else if (parseDepositComment(forwardComment) == null) {
-      logger.warn(`Deal #${deal.id}: USDT deposit with unexpected forward comment "${forwardComment}" (expected "${expectedMemo}")`);
+    if (!decryptedForward) {
+      logger.info(`Deal #${deal.id}: USDT deposit without forward comment (expected encrypted memo) — accepting by amount`);
+    } else if (parseDepositComment(decryptedForward) == null) {
+      logger.warn(`Deal #${deal.id}: USDT deposit with unexpected forward comment "${decryptedForward}" (expected "${expectedMemo}")`);
     }
   }
 
