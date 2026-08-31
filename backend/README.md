@@ -62,11 +62,12 @@ chat post 60/min · notify 5/min.
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/info` | public | Admin ids + `feeBps` — also the health probe target |
-| GET | `/api/deals` | public | Last 100 deals |
-| GET | `/api/deals/:id` | public | Single deal |
-| GET | `/api/deals/:id/chat` | public | Deal chat messages |
+| GET | `/api/deals` | Identity (party or admin) | Private: only deals where caller is buyer/seller (admin sees all 100) |
+| GET | `/api/deals/:id` | Identity (party or admin, token preview) | Single deal — only buyer/seller/admin or valid `?token=` invite |
+| GET | `/api/deals/:id/chat` | Identity (party or admin) | Deal chat messages (ciphertext only) |
+| GET | `/api/deals/:id/payload` | Identity (party or admin, token preview) | Deal TON payloads — party/admin or `?token=` |
 | GET | `/api/status/:address` | public | On-chain `getStatus()` for an escrow address |
-| GET | `/api/deals/mine` | Identity | Deals where caller is buyer or seller |
+| GET | `/api/deals/mine` | Identity | Alias for `GET /api/deals` — deals where caller is buyer or seller |
 | POST | `/api/deals` | Identity | Create deal `{sellerId, asset, amount[, terms, deadline]}`; `buyerId` forced to caller; returns one-time join link |
 | POST | `/api/deals/:id/join/:token` | Identity | Consume one-time link, assign missing role (caller id used) |
 | POST | `/api/deals/:id/chat` | Identity (party or admin) | Post `{content}`; sender forced to caller |

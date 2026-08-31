@@ -210,20 +210,59 @@ app.get('/api/deals/mine', requireIdentity, asyncHandler(async (req, res) => {
   return res.json(result.rows);
 }));
 
-// Existing deal list (public read)
-app.get('/api/deals', asyncHandler(async (_req, res) => {
+// Deal list — private: only deals where caller is buyer/seller (admin sees all)
+app.get('/api/deals', requireIdentity, asyncHandler(async (req, res) => {
   try {
-    return res.json(await listDeals(100));
+    const caller = getIdentityId(req);
+    const isAdmin = req.authMode === 'api-key' || (caller !== null && isAdminTelegramId(caller));
+    if (isAdmin) {
+      return res.json(await listDeals(100));
+    }
+    if (caller === null) return res.status(401).json({ error: 'identity_required' });
+    const result = await db.query(
+      'SELECT * FROM deals WHERE buyer_telegram_id = $1 OR seller_telegram_id = $1 ORDER BY id DESC LIMIT 100',
+      [caller]
+    );
+    return res.json(result.rows);
   } catch (err) {
     logger.warn('/api/deals error', err);
-    return res.json([]);
+    return res.status(500).json({ error: 'internal_error' });
   }
 }));
 
-app.get('/api/deals/:id', asyncHandler(async (req, res) => {
+app.get('/api/deals/:id', requireIdentity, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid_id' });
-  return res.json(await getDealById(id));
+  const deal = await getDealById(id);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const isParty =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
+  const isAdminCaller = req.authMode === 'api-key' || isAdminTelegramId(caller);
+  if (isParty || isAdminCaller) {
+    return res.json(deal);
+  }
+  // Allow preview if caller holds a valid invite token for this deal (join flow before assignment)
+  const token = String((req.query.token as string) || '').trim();
+  if (token) {
+    try {
+      const link = await getDealLink(token);
+      if (link && Number(link.deal_id) === id && new Date(link.expires_at).getTime() > Date.now()) {
+        return res.json(deal);
+      }
+      // Also check pending join_requests (bot approval flow)
+      const jr = await db.query(
+        'SELECT 1 FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND status = $3 LIMIT 1',
+        [id, token, 'pending']
+      );
+      if (jr.rows.length > 0) {
+        return res.json(deal);
+      }
+    } catch {}
+  }
+  return res.status(403).json({ error: 'not_a_party_to_deal' });
 }));
 
 // Create a new deal (buyer optional for api-key callers, returns generated link)
@@ -533,12 +572,36 @@ app.get('/api/ton/payload', asyncHandler(async (req, res) => {
   return res.json({ payload, format: 'base64', encrypted: true, note: 'Memo is encrypted and auto-injected — do not display to user' });
 }));
 
-// Deal-specific TON payloads (deposit + release) — requires party or public for deposit preview
-app.get('/api/deals/:id/payload', asyncHandler(async (req, res) => {
+// Deal-specific TON payloads (deposit + release) — party-only (token preview allowed for invitees)
+app.get('/api/deals/:id/payload', requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
   const deal = await getDealById(dealId);
   if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const isParty =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
+  const isAdminCaller = req.authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isParty && !isAdminCaller) {
+    const token = String((req.query.token as string) || '').trim();
+    let hasValidToken = false;
+    if (token) {
+      try {
+        const link = await getDealLink(token);
+        if (link && Number(link.deal_id) === dealId && new Date(link.expires_at).getTime() > Date.now()) hasValidToken = true;
+        if (!hasValidToken) {
+          const jr = await db.query(
+            'SELECT 1 FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND status = $3 LIMIT 1',
+            [dealId, token, 'pending']
+          );
+          if (jr.rows.length > 0) hasValidToken = true;
+        }
+      } catch {}
+    }
+    if (!hasValidToken) return res.status(403).json({ error: 'not_a_party_to_deal' });
+  }
   const memo = depositComment(dealId);
   const outMemo = releaseComment({ id: dealId, amount: deal.amount, asset: deal.asset, terms: deal.terms });
   const depositPayload = encryptedCommentToPayloadB64(memo);
@@ -586,9 +649,9 @@ const API_DOCS = {
     { method: 'GET', path: '/api/docs', auth: 'public', desc: 'This doc (JSON)' },
     { method: 'GET', path: '/api/openapi.json', auth: 'public', desc: 'OpenAPI 3.0 spec (machine-readable)' },
     { method: 'GET', path: '/docs', auth: 'public', desc: 'Human HTML docs (try it)' },
-    { method: 'GET', path: '/api/deals', auth: 'public', desc: 'List last 100 deals' },
-    { method: 'GET', path: '/api/deals/:id', auth: 'public', desc: 'Single deal by id' },
-    { method: 'GET', path: '/api/deals/mine', auth: 'Identity', desc: 'Deals where caller is buyer or seller (requires x-init-data or x-api-key)' },
+    { method: 'GET', path: '/api/deals', auth: 'Identity (party or admin)', desc: 'List deals where caller is buyer/seller (admin sees all) — private' },
+    { method: 'GET', path: '/api/deals/:id', auth: 'Identity (party or admin, token preview)', desc: 'Single deal by id — only buyer/seller/admin or valid invite token ?token=' },
+    { method: 'GET', path: '/api/deals/mine', auth: 'Identity', desc: 'Alias for GET /api/deals — deals where caller is buyer or seller (requires x-init-data or x-api-key)' },
     { method: 'POST', path: '/api/deals', auth: 'Identity', desc: 'Create deal {sellerId, asset TON|USDT, amount, terms?, deadline?} — caller forced to one side, returns {deal, link, webappLink, encryption}' },
     { method: 'POST', path: '/api/deals/:id/join/:token', auth: 'Identity', desc: 'Consume one-time link atomically, assign missing buyer/seller role' },
     { method: 'GET', path: '/api/deals/:id/key', auth: 'Identity (party or admin)', desc: 'Get per-deal E2E chat key {key, algo: aes-256-gcm} — only buyer/seller/admin' },
@@ -601,7 +664,7 @@ const API_DOCS = {
     { method: 'GET', path: '/api/status/:address', auth: 'public', desc: 'On-chain Escrow.getStatus() for address' },
     { method: 'GET', path: '/api/balance/:address', auth: 'public', desc: 'TON wallet balance via TONCenter (nanotons + TON, state)' },
     { method: 'GET', path: '/api/ton/payload', auth: 'public', desc: 'Encode comment to TON Connect payload {comment, payload: base64} — memo for ALL TON tx' },
-    { method: 'GET', path: '/api/deals/:id/payload', auth: 'public', desc: 'Deal-specific payloads: depositPayload/releasePayload (+ jettonPayload for USDT) with memo' },
+    { method: 'GET', path: '/api/deals/:id/payload', auth: 'Identity (party or admin, token preview)', desc: 'Deal-specific payloads: depositPayload/releasePayload (+ jettonPayload for USDT) with memo — party/admin or ?token=' },
   ],
   internalServices: {
     signer: { url: 'http://signer:3001 (internal, NOT published)', endpoints: ['GET /health (open)', 'GET /address (x-api-key)', 'GET /info (x-api-key)', 'POST /send {to,value,comment?}', 'POST /send-batch {requests[]}', 'POST /deploy', 'POST /deploy-escrow {escrowAddress, escrowStateInit{codeBoc,dataBoc}, value, bodyBoc}'] },

@@ -701,6 +701,17 @@ export function registerCommands(bot: Bot) {
         await ctx.reply(`Deal <b>#${escapeHtml(String(dealId))}</b> not found.`, { parse_mode: 'HTML' });
         return;
       }
+      // Privacy: only buyer, seller, or admin may view via callback
+      const callerId = ctx.from?.id;
+      const isAdmin = callerId != null && config.adminTelegramIds.map(Number).includes(Number(callerId));
+      const isParty =
+        callerId != null &&
+        ((deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === Number(callerId)) ||
+          (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === Number(callerId)));
+      if (!isParty && !isAdmin) {
+        await ctx.reply('🔒 This deal is private — only its buyer and seller can view it.', { parse_mode: 'HTML' });
+        return;
+      }
       const conf: Record<string, boolean> = (deal as any).confirmations || {};
       const statusEmoji: Record<string, string> = {
         AWAITING_DEPOSIT: '⏳ Awaiting deposit',
