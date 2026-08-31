@@ -32,4 +32,7 @@ export const config = {
   toncenterApiKey: process.env.TONCENTER_API_KEY || '',
   requireOnchain: process.env.REQUIRE_ONCHAIN === 'true',
   walletAddress: process.env.WALLET_ADDRESS || '',
+  // Seller-buyer chat E2E encryption: 64 hex chars (32 bytes) for AES-256-GCM. Must match ubot/utradebot when shared.
+  // Generate: openssl rand -hex 32  (or PowerShell: -join (0..31 | % { "{0:X2}" -f (Get-Random -Max 256) }))
+  encryptionKey: process.env.ENCRYPTION_KEY || '',
 };
