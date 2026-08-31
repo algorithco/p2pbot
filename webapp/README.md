@@ -49,10 +49,11 @@ In production the Express backend serves this same folder at `/` (port 3000 by d
 | Endpoint | Used for |
 |---|---|
 | `GET /api/info` | admin IDs + connectivity check |
-| `GET /api/deals`, `GET /api/deals/:id` | dashboard & detail |
+| `GET /api/deals/mine` (alias `GET /api/deals`) | private dashboard — only own deals (admin sees all) |
+| `GET /api/deals/:id?token=` | private detail — only buyer/seller/admin or valid invite token |
 | `POST /api/deals` | create (`{sellerId, buyerId, asset, amount, terms, deadline}`) |
 | `POST /api/deals/:id/join/:token` | join via invite |
-| `GET/POST /api/deals/:id/chat` | deal chat |
+| `GET/POST /api/deals/:id/chat` | private deal chat (party/admin only) |
 | `GET /api/status/:address` | on-chain escrow status (optional) |
 | `POST /api/notify`, `GET /api/notifications` | admin tools |
 

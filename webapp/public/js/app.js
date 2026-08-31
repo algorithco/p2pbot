@@ -397,7 +397,22 @@
         })
         .catch(function (err) {
           listBox.innerHTML = '';
-          listBox.appendChild(errorBox(err.message || String(err), function () { load(false); }));
+          if (err && (err.status === 401 || err.status === 403)) {
+            // Private listing — anonymous or not-a-party sees nothing
+            if (!TG.realUser()) {
+              listBox.appendChild(UI.h('div', { class: 'banner warn' }, [
+                UI.h('div', { class: 'small', text: 'Open this Mini App inside Telegram to see your private deals. Deals are visible only to buyer and seller.' })
+              ]));
+              listBox.appendChild(emptyState('🔒', 'No deals to show', 'Your deals are private — only you and your counterparty can see them. Create a new deal or join via an invite link.', '+ New Deal'));
+            } else {
+              App.state.apiOk = true;
+              App.state.deals = [];
+              computeStats([]);
+              renderList();
+            }
+          } else {
+            listBox.appendChild(errorBox(err.message || String(err), function () { load(false); }));
+          }
         });
     }
 
@@ -830,7 +845,13 @@
         })
         .catch(function (err) {
           box.innerHTML = '';
-          box.appendChild(errorBox(err.message || String(err), function () { load(); }));
+          if (err && err.status === 403) {
+            box.appendChild(emptyState('🔒', 'Private deal', 'This deal is visible only to its buyer and seller. If you were invited, open the invite link with the token.', 'Back to Deals', '#/home'));
+          } else if (err && err.status === 401) {
+            box.appendChild(emptyState('🔒', 'Authentication required', 'Open this page inside Telegram to view your private deal.', 'Back to Deals', '#/home'));
+          } else {
+            box.appendChild(errorBox(err.message || String(err), function () { load(); }));
+          }
         });
     }
 
@@ -1247,7 +1268,7 @@
     document.getElementById('view').appendChild(box);
     box.appendChild(UI.h('div', {}, UI.skeletonDeals(1)));
 
-    Api.deal(id).then(function (deal) {
+    Api.deal(id, token).then(function (deal) {
       box.innerHTML = '';
       if (!deal) {
         box.appendChild(emptyState('😕', 'Deal not found', 'The invite may be invalid or expired.', 'Go Home', '#/home'));
@@ -1283,9 +1304,15 @@
             UI.toast(err.message || 'Could not join', 'err');
           });
       }
-    }).catch(function () {
+    }).catch(function (err) {
       box.innerHTML = '';
-      box.appendChild(emptyState('📡', 'Could not load deal', 'Check your connection and try again.', 'Go Home', '#/home'));
+      if (err && err.status === 403) {
+        box.appendChild(emptyState('🔒', 'Private deal', 'This deal is private — only the buyer, seller, or invite holder can view it.', 'Go Home', '#/home'));
+      } else if (err && err.status === 401) {
+        box.appendChild(emptyState('🔒', 'Authentication required', 'Open this link inside Telegram to view the invite.', 'Go Home', '#/home'));
+      } else {
+        box.appendChild(emptyState('📡', 'Could not load deal', 'Check your connection and try again.', 'Go Home', '#/home'));
+      }
     });
   }
 

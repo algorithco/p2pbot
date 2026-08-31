@@ -74,16 +74,24 @@
       });
     },
 
-    /** GET /api/deals -> deal[] */
+    /** GET /api/deals -> deal[] (private: only own deals, admin sees all) */
     deals: function () {
       return request('GET', '/api/deals').then(function (d) {
         return Array.isArray(d) ? d : [];
+      }).catch(function (err) {
+        // Fallback to /api/deals/mine for old servers
+        if (err && err.status === 404) {
+          return request('GET', '/api/deals/mine').then(function (d) { return Array.isArray(d) ? d : []; });
+        }
+        throw err;
       });
     },
 
-    /** GET /api/deals/:id -> deal | null */
-    deal: function (id) {
-      return request('GET', '/api/deals/' + encodeURIComponent(id));
+    /** GET /api/deals/:id -> deal | null (party-only, token preview allowed) */
+    deal: function (id, token) {
+      var path = '/api/deals/' + encodeURIComponent(id);
+      if (token) path += '?token=' + encodeURIComponent(token);
+      return request('GET', path);
     },
 
     /**
@@ -156,9 +164,11 @@
       });
     },
 
-    /** GET /api/deals/:id/payload -> { depositPayload, releasePayload, jettonPayload, ... } */
-    dealPayload: function (dealId) {
-      return request('GET', '/api/deals/' + encodeURIComponent(dealId) + '/payload');
+    /** GET /api/deals/:id/payload -> { depositPayload, releasePayload, jettonPayload, ... } (party-only, token preview) */
+    dealPayload: function (dealId, token) {
+      var path = '/api/deals/' + encodeURIComponent(dealId) + '/payload';
+      if (token) path += '?token=' + encodeURIComponent(token);
+      return request('GET', path);
     },
 
     /** Admin: POST /api/notify */

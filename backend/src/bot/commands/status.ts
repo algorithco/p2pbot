@@ -1,4 +1,5 @@
 import { Bot } from 'grammy';
+import { config } from '../../config';
 import { getDealById } from '../../services/dealService';
 
 function fmtDate(v: unknown): string {
@@ -18,6 +19,17 @@ export function registerStatus(bot: Bot) {
 
     const deal = await getDealById(dealId);
     if (!deal) return ctx.reply('Deal not found');
+
+    // Privacy: only buyer, seller, or admin may view deal status
+    const callerId = ctx.from?.id;
+    const isAdmin = callerId != null && config.adminTelegramIds.map(Number).includes(Number(callerId));
+    const isParty =
+      callerId != null &&
+      ((deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === callerId) ||
+        (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === callerId));
+    if (!isParty && !isAdmin) {
+      return ctx.reply('🔒 This deal is private — only its buyer and seller can view it.');
+    }
 
     const conf: Record<string, boolean> = deal.confirmations || {};
     const timeline = [
