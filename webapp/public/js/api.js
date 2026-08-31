@@ -148,6 +148,18 @@
       return request('GET', '/api/balance/' + encodeURIComponent(address));
     },
 
+    /** GET /api/ton/payload?comment=xxx -> { payload: base64, comment } — memo for TON */
+    tonPayload: function (comment) {
+      return request('GET', '/api/ton/payload?comment=' + encodeURIComponent(comment)).then(function (d) {
+        return d && d.payload ? d.payload : null;
+      });
+    },
+
+    /** GET /api/deals/:id/payload -> { depositPayload, releasePayload, jettonPayload, ... } */
+    dealPayload: function (dealId) {
+      return request('GET', '/api/deals/' + encodeURIComponent(dealId) + '/payload');
+    },
+
     /** Admin: POST /api/notify */
     notify: function (chatId, message) {
       return request('POST', '/api/notify', { chatId: Number(chatId), message: message });
