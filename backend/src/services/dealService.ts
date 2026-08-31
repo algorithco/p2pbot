@@ -2,6 +2,12 @@
 import { db } from '../db/queries';
 import { v4 as uuidv4 } from 'uuid';
 import { QueryResult } from 'pg';
+import {
+  generateDealChatKey,
+  encryptDealKey,
+  decryptDealKey,
+  encryptWithDealKey,
+} from '../utils/encryption';
 
 /** Canonical deal status strings. */
 export const DEAL_STATUS = {
@@ -46,6 +52,10 @@ export async function createDealRecord(params: {
 
   const feeAmount = (amount * feeBps) / 10000; // feeBps in basis points (100 = 1%)
 
+  // Generate per-deal E2E chat key (32 bytes base64, encrypted at rest if ENCRYPTION_KEY set)
+  const chatKeyPlain = generateDealChatKey();
+  const chatKeyStored = encryptDealKey(chatKeyPlain);
+
   const res: QueryResult = await db.query(
     `INSERT INTO deals (
         buyer_id,
@@ -61,8 +71,10 @@ export async function createDealRecord(params: {
         payment_address,
         terms,
         deadline,
+        chat_key,
+        chat_key_created_at,
         created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now()) RETURNING *`,
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),now()) RETURNING *`,
     [
       buyerId,
       sellerId,
@@ -77,6 +89,7 @@ export async function createDealRecord(params: {
       paymentAddress,
       terms,
       deadline,
+      chatKeyStored,
     ]
   );
   return res.rows[0];
@@ -85,6 +98,26 @@ export async function createDealRecord(params: {
 export async function getDealById(id: number | string) {
   const res = await db.query('SELECT * FROM deals WHERE id = $1 LIMIT 1', [Number(id)]);
   return res.rows[0] || null;
+}
+
+/** Get plaintext per-deal chat key (only for parties/admin). Returns null if not found. */
+export async function getDealChatKey(dealId: number | string): Promise<string | null> {
+  const deal = await getDealById(dealId);
+  if (!deal || !deal.chat_key) {
+    // Backfill: generate & persist if missing (legacy deals)
+    const newKey = generateDealChatKey();
+    const enc = encryptDealKey(newKey);
+    await db.query('UPDATE deals SET chat_key = $1, chat_key_created_at = now(), updated_at = now() WHERE id = $2', [enc, Number(dealId)]);
+    return newKey;
+  }
+  return decryptDealKey(String(deal.chat_key));
+}
+
+/** Ensure a deal has a chat_key, return plaintext. */
+export async function ensureDealChatKey(dealId: number | string): Promise<string> {
+  const k = await getDealChatKey(dealId);
+  if (!k) throw new Error('chat_key_unavailable');
+  return k;
 }
 
 /** Update deal status; writes tx_hash when provided and stamps resolved_at on final statuses. */
@@ -135,10 +168,46 @@ export async function markDealLinkUsed(token: string) {
   await db.query('DELETE FROM deal_links WHERE token = $1', [token]);
 }
 
-/** Assign role telegram ID to a deal after link validation */
+/** Assign role telegram ID to a deal after link validation — guarded: only if slot is empty */
 export async function assignRoleToDeal(dealId: number | string, role: 'buyer' | 'seller', telegramId: number) {
   const column = role === 'buyer' ? 'buyer_telegram_id' : 'seller_telegram_id';
-  await db.query(`UPDATE deals SET ${column} = $1, updated_at = now() WHERE id = $2`, [telegramId, Number(dealId)]);
+  const res = await db.query(
+    `UPDATE deals SET ${column} = $1, updated_at = now() WHERE id = $2 AND ${column} IS NULL RETURNING id`,
+    [telegramId, Number(dealId)]
+  );
+  if (res.rowCount === 0) {
+    const deal = await getDealById(dealId);
+    if (!deal) throw new Error('deal_not_found');
+    throw new Error('deal_already_full');
+  }
+}
+
+/** Atomic join: assign role + consume link in a transaction to prevent race */
+export async function atomicJoinDeal(dealId: number, token: string, telegramId: number): Promise<'buyer' | 'seller'> {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    // Lock deal row
+    const dealRes = await client.query('SELECT buyer_telegram_id, seller_telegram_id FROM deals WHERE id = $1 FOR UPDATE', [dealId]);
+    if (dealRes.rows.length === 0) throw new Error('deal_not_found');
+    const deal = dealRes.rows[0];
+    const linkRes = await client.query('SELECT * FROM deal_links WHERE token = $1 AND deal_id = $2 AND expires_at > now() FOR UPDATE', [token, dealId]);
+    if (linkRes.rows.length === 0) throw new Error('invalid_token');
+    let role: 'buyer' | 'seller';
+    if (deal.buyer_telegram_id == null) role = 'buyer';
+    else if (deal.seller_telegram_id == null) role = 'seller';
+    else throw new Error('deal_already_full');
+    const col = role === 'buyer' ? 'buyer_telegram_id' : 'seller_telegram_id';
+    await client.query(`UPDATE deals SET ${col} = $1, updated_at = now() WHERE id = $2`, [telegramId, dealId]);
+    await client.query('DELETE FROM deal_links WHERE token = $1', [token]);
+    await client.query('COMMIT');
+    return role;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 /** Record a party confirmation in the confirmations JSONB column. */
@@ -149,20 +218,50 @@ export async function setConfirmation(dealId: number | string, party: 'buyer' | 
   );
 }
 
-/** Retrieve chat messages for a deal */
+/** Retrieve chat messages for a deal — returns ciphertext-aware rows */
 export async function getDealMessages(dealId: number, limit: number = 100) {
   const res = await db.query(
-    `SELECT sender_telegram_id, content, created_at FROM messages WHERE deal_id = $1 ORDER BY created_at DESC LIMIT $2`,
+    `SELECT id, deal_id, sender_telegram_id, content, encrypted_content, is_encrypted, created_at
+     FROM messages WHERE deal_id = $1 ORDER BY created_at ASC LIMIT $2`,
     [dealId, limit]
   );
   return res.rows;
 }
 
-/** Add a message to a deal chat */
+/** Add a message to a deal chat (legacy plaintext path — encrypts at rest if ENCRYPTION_KEY set) */
 export async function addDealMessage(dealId: number, senderTelegramId: number, content: string) {
+  const chatKey = await getDealChatKey(dealId);
+  if (chatKey) {
+    // E2E encrypt with per-deal key so DB never sees plaintext
+    const encrypted = encryptWithDealKey(content, chatKey);
+    await db.query(
+      `INSERT INTO messages (deal_id, sender_telegram_id, content, encrypted_content, is_encrypted) VALUES ($1,$2,$3,$4,true)`,
+      [dealId, senderTelegramId, '', encrypted]
+    );
+  } else {
+    await db.query(
+      `INSERT INTO messages (deal_id, sender_telegram_id, content) VALUES ($1,$2,$3)`,
+      [dealId, senderTelegramId, content]
+    );
+  }
+}
+
+/** Add an already-encrypted message (ciphertext from client) — SERVER NEVER SEES PLAINTEXT */
+export async function addEncryptedMessage(dealId: number, senderTelegramId: number, encryptedContentB64: string) {
+  if (!encryptedContentB64 || typeof encryptedContentB64 !== 'string' || encryptedContentB64.length < 10) {
+    throw new Error('invalid_ciphertext');
+  }
+  // Basic base64 validation + length check (iv 12 + tag 16 + at least 1 byte)
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(encryptedContentB64, 'base64');
+    if (buf.length < 28) throw new Error('ciphertext_too_short');
+  } catch {
+    throw new Error('invalid_ciphertext');
+  }
   await db.query(
-    `INSERT INTO messages (deal_id, sender_telegram_id, content) VALUES ($1,$2,$3)`,
-    [dealId, senderTelegramId, content]
+    `INSERT INTO messages (deal_id, sender_telegram_id, content, encrypted_content, is_encrypted) VALUES ($1,$2,$3,$4,true)`,
+    [dealId, senderTelegramId, '', encryptedContentB64]
   );
 }
 

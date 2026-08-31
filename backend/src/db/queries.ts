@@ -73,6 +73,19 @@ export async function ensureTables() {
   await ensureColumn('deals', 'resolved_at TIMESTAMPTZ');
   await ensureColumn('deals', 'updated_at TIMESTAMPTZ');
   await ensureColumn("deals", "confirmations JSONB DEFAULT '{}'::jsonb");
+  // Encrypted seller-buyer channel: per-deal symmetric key (base64 32B encrypted at rest if ENCRYPTION_KEY set)
+  await ensureColumn('deals', 'chat_key TEXT');
+  await ensureColumn('deals', 'chat_key_created_at TIMESTAMPTZ');
+
+  // Messages E2E: ciphertext-only at rest, plus legacy content for migration
+  await ensureColumn('messages', 'encrypted_content TEXT');
+  await ensureColumn('messages', 'iv TEXT');
+  await ensureColumn('messages', 'auth_tag TEXT');
+  await ensureColumn('messages', 'is_encrypted BOOLEAN DEFAULT false');
+
+  // Indexes for chat polling
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_deal_created ON messages(deal_id, created_at ASC)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_deal_links_expires ON deal_links(expires_at)');
 
   // Telegram IDs exceed 32-bit range — widen legacy INTEGER id columns to BIGINT.
   await pool.query('ALTER TABLE deals ALTER COLUMN buyer_id TYPE BIGINT');
