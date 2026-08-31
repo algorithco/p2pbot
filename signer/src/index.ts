@@ -113,6 +113,28 @@ app.post('/send-batch', authMiddleware, async (req, res) => {
   }
 });
 
+app.post('/send-jetton', authMiddleware, async (req, res) => {
+  try {
+    const { jettonMasterAddress, to, amount, forwardComment, forwardTonAmount } = req.body || {};
+    if (!jettonMasterAddress || !to || !amount) return res.status(400).json({ error: 'jettonMasterAddress, to and amount required' });
+    try {
+      const { Address } = await import('@ton/core');
+      Address.parse(jettonMasterAddress);
+      Address.parse(to);
+    } catch {
+      return res.status(400).json({ error: 'invalid address' });
+    }
+    if (!forwardComment) return res.status(400).json({ error: 'forwardComment (memo) required — every Jetton tx must carry escrow# memo' });
+    const result = await signer.sendJetton({ jettonMasterAddress, to, amount: String(amount), forwardComment, forwardTonAmount });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    const msg = (err as Error).message;
+    if (msg.includes('wallet_not_configured')) return res.status(503).json({ error: msg });
+    logger.error('POST /send-jetton error', err);
+    res.status(500).json({ error: msg });
+  }
+});
+
 app.post('/deploy-escrow', authMiddleware, async (req, res) => {
   try {
     const { escrowAddress, escrowStateInit, value, bodyBoc } = req.body || {};

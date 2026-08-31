@@ -46,7 +46,16 @@ export async function getSignerInfo(): Promise<{ address: string | null; deploye
 }
 
 export async function sendTon(params: { to: string; value: string; comment?: string; bounce?: boolean }): Promise<{ seqno: number }> {
+  if (!params.comment) throw new Error('memo_required: TON transfers must include comment memo (escrow# or release memo)');
   return request<{ seqno: number }>('/send', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function sendJetton(params: { jettonMasterAddress: string; to: string; amount: string; forwardComment: string; forwardTonAmount?: string }): Promise<{ seqno: number }> {
+  if (!params.forwardComment) throw new Error('memo_required: Jetton forwardComment (escrow# memo) is mandatory');
+  return request<{ seqno: number }>('/send-jetton', {
     method: 'POST',
     body: JSON.stringify(params),
   });

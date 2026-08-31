@@ -10,7 +10,7 @@ import { config } from '../config';
 import logger from '../logger';
 import { alertAdmins } from './notificationService';
 import { releaseComment, depositComment } from '../utils/comments';
-import { sendTon } from '../blockchain/signerClient';
+import { sendTon, sendJetton } from '../blockchain/signerClient';
 
 /** Fire-and-forget admin alert that never throws. */
 function notifyAdmins(message: string) {
@@ -54,18 +54,16 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
       throw new Error('onchain_release_not_configured: no destination address (set user ton_address or provide toAddress)');
     }
 
-    // Send via signer (TON or Jetton)
-    // For Jetton (USDT), the signer will need jetton wallet handling — for now we send TON value with comment
-    // and log. Full jetton path would use jetton transfer with forward payload.
+    // Send via signer (TON or Jetton) — memo is mandatory in EVERY tx
     try {
       if (asset === 'TON') {
         await sendTon({ to: toAddress, value: amount, comment: finalMemo, bounce: false });
         logger.info(`On-chain ${status} for deal #${dealId} to ${toAddress} with comment "${finalMemo}"`);
       } else {
-        // USDT Jetton — for now we still use TON send with comment as placeholder;
-        // proper jetton path would be: jettonWallet.transfer with forwardPayload = comment
-        logger.warn(`Jetton on-chain ${status} for deal #${dealId} — using TON send fallback with comment "${finalMemo}" (jetton transfer not yet wired)`);
-        await sendTon({ to: toAddress, value: '0.05', comment: finalMemo, bounce: false });
+        const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
+        if (!jettonMaster) throw new Error('jetton_master_not_configured: set JETTON_MASTER_ADDRESS or USDT_JETTON_ADDRESS');
+        await sendJetton({ jettonMasterAddress: jettonMaster, to: toAddress, amount, forwardComment: finalMemo, forwardTonAmount: '0.01' });
+        logger.info(`On-chain Jetton ${status} for deal #${dealId} to ${toAddress} amount ${amount} forward memo "${finalMemo}"`);
       }
     } catch (e) {
       logger.error(`On-chain send failed for deal #${dealId} (${status})`, e);
@@ -132,9 +130,17 @@ export async function transferTokens(dealId: number, toAddress: string, amount: 
   const memo = deal ? releaseComment({ id, amount: deal?.amount ?? amount, asset: tokenType, terms: deal?.terms }) : `For Escrow #${id} — ${amount} ${tokenType}`;
   logger.warn(`transferTokens(deal #${id} -> ${toAddress} "${memo}") is deprecated; using guarded release path`);
   if (config.requireOnchain) {
-    await sendTon({ to: toAddress, value: String(amount), comment: memo, bounce: false }).catch((e) => {
+    try {
+      if (tokenType === 'TON') {
+        await sendTon({ to: toAddress, value: String(amount), comment: memo, bounce: false });
+      } else {
+        const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
+        if (!jettonMaster) throw new Error('jetton_master_not_configured');
+        await sendJetton({ jettonMasterAddress: jettonMaster, to: toAddress, amount: String(amount), forwardComment: memo });
+      }
+    } catch (e) {
       logger.warn(`transferTokens on-chain send failed for deal #${id}`, e);
-    });
+    }
   }
   await guardedTransition(id, DEAL_STATUS.RELEASED, { toAddress, amount, asset: tokenType, terms: deal?.terms });
   return { ok: true, dealId: id, status: DEAL_STATUS.RELEASED, comment: memo };
@@ -150,9 +156,18 @@ export async function refundBuyerWithoutFee(dealId: number, toAddress: string) {
   logger.warn(`refundBuyerWithoutFee(deal #${id} -> ${toAddress} "${memo}") is deprecated; using guarded refund path`);
   if (config.requireOnchain) {
     const amt = deal ? String(deal.amount) : '0';
-    await sendTon({ to: toAddress, value: amt, comment: memo, bounce: false }).catch((e) => {
+    const asset = String(deal?.asset || 'TON').toUpperCase();
+    try {
+      if (asset === 'TON') {
+        await sendTon({ to: toAddress, value: amt, comment: memo, bounce: false });
+      } else {
+        const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
+        if (!jettonMaster) throw new Error('jetton_master_not_configured');
+        await sendJetton({ jettonMasterAddress: jettonMaster, to: toAddress, amount: amt, forwardComment: memo });
+      }
+    } catch (e) {
       logger.warn(`refundBuyerWithoutFee on-chain send failed for deal #${id}`, e);
-    });
+    }
   }
   await guardedTransition(id, DEAL_STATUS.REFUNDED, { toAddress, amount: deal?.amount, asset: deal?.asset, terms: deal?.terms });
   return { ok: true, dealId: id, status: DEAL_STATUS.REFUNDED, comment: memo };
