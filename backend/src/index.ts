@@ -14,6 +14,7 @@ import { startListener, addAddressToMonitor } from './blockchain/listener';
 import {
   createDealRecord,
   generateDealLink,
+  getBotDeepLink,
   getDealById,
   getDealLink,
   validateDealLink,
@@ -26,7 +27,7 @@ import {
   addEncryptedMessage,
 } from './services/dealService';
 import { depositComment, releaseComment } from './utils/comments';
-import { commentToPayloadB64, jettonTransferPayload } from './utils/tonPayload';
+import { commentToPayloadB64, encryptedCommentToPayloadB64, jettonTransferPayload } from './utils/tonPayload';
 import { isEncryptionEnabled } from './utils/encryption';
 import { toBaseUnits } from './utils/money';
 import {
@@ -280,42 +281,46 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
   // Ensure the payment address is monitored for deposits (with comment)
   const payAddr = (deal as unknown as { payment_address?: string }).payment_address || resolvePaymentAddress();
   if (payAddr) addAddressToMonitor(payAddr);
-  // Build invite link using WEBAPP_URL when configured (prevents Host header injection) — fallback to request host for local dev
+  // Build invite links — primary is BOT deep link (t.me) with approval flow, plus webapp and API for compatibility
   const baseUrl = config.webappUrl || config.frontendUrl || `${req.protocol}://${req.get('host')}`;
-  // Provide both webapp deep link and direct API join link
   const webappLink = `${baseUrl.replace(/\/$/, '')}/#/deal/${deal.id}/join/${linkToken}`;
   const apiLink = `${req.protocol}://${req.get('host')}/api/deals/${deal.id}/join/${linkToken}`;
-  const depositPayload = commentToPayloadB64(memo);
-  const releasePayload = commentToPayloadB64(outMemo);
+  const botLink = getBotDeepLink(deal.id, linkToken, config.botUsername);
+  // Memo is encrypted and auto-injected via payload — never show plaintext to user
+  const depositPayload = encryptedCommentToPayloadB64(memo);
+  const releasePayload = encryptedCommentToPayloadB64(outMemo);
   let jettonPayload: string | null = null;
   if (asset.toUpperCase() !== 'TON') {
     try {
       const mockDest = payAddr && payAddr.length > 10 ? Address.parse(payAddr) : Address.parse('0:' + '00'.repeat(32));
+      // Jetton forward memo is also encrypted (listener will decrypt)
+      const { encryptField } = await import('./utils/encryption');
+      const encMemo = encryptField(memo);
       jettonPayload = jettonTransferPayload({
         amount: BigInt(toBaseUnits(String(amount), asset.toUpperCase())),
         destination: mockDest,
-        forwardComment: memo,
+        forwardComment: encMemo,
         forwardTonAmount: BigInt(1000000), // 0.001 TON for forward
       });
     } catch { jettonPayload = null; }
   }
   return res.json({
     deal,
-    link: webappLink,
-    apiLink,
+    link: botLink,
+    botLink,
     webappLink,
-    depositComment: memo,
-    depositMemo: memo,
+    apiLink,
+    // Memo is auto-injected and encrypted — do not expose plaintext
     depositPayload,
-    releasePreview: outMemo,
     releasePayload,
     jettonPayload,
     paymentAddress: payAddr,
     encryption: isEncryptionEnabled() ? 'e2e-aes-256-gcm' : 'transport-only',
+    memoEncrypted: true,
     instructions:
       asset.toUpperCase() === 'TON'
-        ? `Send ${amount} ${asset} to ${payAddr} with comment "${memo}" (payload ${depositPayload.slice(0, 24)}...) so bot detects your deposit. On release seller will receive "${outMemo}" (payload ${releasePayload.slice(0, 24)}...).`
-        : `Send ${amount} ${asset} (Jetton) to ${payAddr} with forward comment "${memo}" (payload ${depositPayload.slice(0, 24)}...) — bot detects via forward payload. Release memo: "${outMemo}".`,
+        ? `Send ${amount} ${asset} to ${payAddr} — memo is auto-injected and encrypted (payload). Just approve the transaction in your wallet.`
+        : `Send ${amount} ${asset} (Jetton) to ${payAddr} — forward memo is auto-injected and encrypted (payload). Just approve.`,
   });
 }));
 
@@ -519,14 +524,13 @@ app.get('/api/balance/:address', asyncHandler(async (req, res) => {
   }
 }));
 
-// TON payload helpers — memo in ALL on-chain transactions (comment op 0, Jetton forward)
-// Public: encode a comment to TON Connect payload (base64 BOC) so buyer wallet always includes memo
+// TON payload helpers — memo is ENCRYPTED and auto-injected (not shown to user)
 app.get('/api/ton/payload', asyncHandler(async (req, res) => {
   const comment = String(req.query.comment || '').trim();
   if (!comment) return res.status(400).json({ error: 'comment_required' });
   if (comment.length > 120) return res.status(400).json({ error: 'comment_too_long', max: 120 });
-  const payload = commentToPayloadB64(comment);
-  return res.json({ comment, payload, format: 'base64', note: 'Use as TON Connect sendTransaction payload' });
+  const payload = encryptedCommentToPayloadB64(comment);
+  return res.json({ payload, format: 'base64', encrypted: true, note: 'Memo is encrypted and auto-injected — do not display to user' });
 }));
 
 // Deal-specific TON payloads (deposit + release) — requires party or public for deposit preview
@@ -537,16 +541,17 @@ app.get('/api/deals/:id/payload', asyncHandler(async (req, res) => {
   if (!deal) return res.status(404).json({ error: 'deal_not_found' });
   const memo = depositComment(dealId);
   const outMemo = releaseComment({ id: dealId, amount: deal.amount, asset: deal.asset, terms: deal.terms });
-  const depositPayload = commentToPayloadB64(memo);
-  const releasePayload = commentToPayloadB64(outMemo);
+  const depositPayload = encryptedCommentToPayloadB64(memo);
+  const releasePayload = encryptedCommentToPayloadB64(outMemo);
   let jettonPayload: string | null = null;
   if (String(deal.asset).toUpperCase() !== 'TON') {
     try {
       const payAddr = String(deal.payment_address || resolvePaymentAddress() || '0:' + '00'.repeat(32));
+      const { encryptField } = await import('./utils/encryption');
       jettonPayload = jettonTransferPayload({
         amount: BigInt(toBaseUnits(String(deal.amount), String(deal.asset).toUpperCase())),
         destination: Address.parse(payAddr),
-        forwardComment: memo,
+        forwardComment: encryptField(memo),
         forwardTonAmount: BigInt(1000000),
       });
     } catch { jettonPayload = null; }
@@ -555,12 +560,11 @@ app.get('/api/deals/:id/payload', asyncHandler(async (req, res) => {
     dealId,
     asset: deal.asset,
     amount: deal.amount,
-    depositComment: memo,
     depositPayload,
-    releaseComment: outMemo,
     releasePayload,
     jettonPayload,
     paymentAddress: deal.payment_address || resolvePaymentAddress(),
+    memoEncrypted: true,
   });
 }));
 

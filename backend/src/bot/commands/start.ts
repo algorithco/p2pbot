@@ -209,31 +209,122 @@ function createHelpMessage(): string {
 // ── registration ─────────────────────────────────────────────────────────────
 
 export function registerCommands(bot: Bot) {
-  // /start — rich welcome + deep-link payload support
+  // /start — rich welcome + deal invite deep-link with approval flow
   bot.command('start', async (ctx) => {
     const payload = (ctx.match as string)?.trim() || '';
     const name = displayName(ctx);
     const isAdmin = Boolean((ctx as any).session?.isAdmin);
     const webappUrl = config.webappUrl || undefined;
 
-    // Handle deep-link payloads (e.g., /start join_<token> or deal_123)
-    if (payload) {
-      // If payload looks like a deal join token, give a helpful hint instead of swallowing it
-      if (payload.startsWith('join_') || /^[0-9a-f-]{36}$/i.test(payload)) {
-        await ctx.reply(
-          [
-            `🔗 <b>Join link detected</b>`,
-            ``,
-            `You opened the bot with a join token: <code>${escapeHtml(payload.replace(/^join_/, ''))}</code>`,
-            ``,
-            `👉 Open the <b>Mini App</b> to join, or use:`,
-            `  <code>POST /api/deals/:id/join/${escapeHtml(payload.replace(/^join_/, ''))}</code>`,
-            webappUrl ? `\n🌐 <a href="${escapeHtml(webappUrl)}">Open Escrow App</a>` : '',
-          ].join('\n'),
-          { parse_mode: 'HTML', reply_markup: mainMenuKeyboard(webappUrl) }
-        );
-        // still show main menu below
+    // Handle bot deep-link: join_<dealId>_<token>  (e.g., https://t.me/uzsavdochibot?start=join_123_550e8400-e29b-41d4-a716-446655440000)
+    if (payload && payload.startsWith('join_')) {
+      const rest = payload.slice(5); // remove "join_"
+      const sep = rest.indexOf('_');
+      if (sep === -1) {
+        await ctx.reply(`❌ <b>Invalid invite link</b> — malformed payload.`, { parse_mode: 'HTML' });
+      } else {
+        const dealIdStr = rest.slice(0, sep);
+        const token = rest.slice(sep + 1);
+        const dealId = Number(dealIdStr);
+        const requesterId = ctx.from?.id;
+        const requesterUsername = ctx.from?.username || null;
+        const requesterFirstName = ctx.from?.first_name || null;
+        if (!Number.isInteger(dealId) || !token || !requesterId) {
+          await ctx.reply(`❌ <b>Invalid invite link</b>.`, { parse_mode: 'HTML' });
+        } else {
+          try {
+            const { getDealById, getDealLink, createJoinRequest } = await import('../../services/dealService');
+            const deal = await getDealById(dealId);
+            if (!deal) {
+              await ctx.reply(`❌ <b>Deal #${escapeHtml(dealIdStr)} not found.</b> The link may be expired or invalid.`, { parse_mode: 'HTML' });
+            } else if (Number(deal.buyer_telegram_id) === requesterId || Number(deal.seller_telegram_id) === requesterId) {
+              await ctx.reply(`ℹ️ You are already a party to <b>Deal #${deal.id}</b> — <code>${escapeHtml(String(deal.status))}</code>.`, { parse_mode: 'HTML' });
+            } else if (deal.buyer_telegram_id != null && deal.seller_telegram_id != null) {
+              await ctx.reply(`❌ <b>Deal #${deal.id} is already full.</b> Both buyer and seller are set.`, { parse_mode: 'HTML' });
+            } else {
+              const link = await getDealLink(token);
+              if (!link || Number(link.deal_id) !== dealId) {
+                await ctx.reply(`❌ <b>Invalid or expired invite link</b> for Deal #${deal.id}.`, { parse_mode: 'HTML' });
+              } else if (new Date(link.expires_at).getTime() <= Date.now()) {
+                await ctx.reply(`⏰ <b>Invite link expired</b> for Deal #${deal.id}. Ask the creator to generate a new one.`, { parse_mode: 'HTML' });
+              } else {
+                // Determine creator (existing party) and missing role
+                const creatorId = (deal.buyer_telegram_id != null ? Number(deal.buyer_telegram_id) : Number(deal.seller_telegram_id));
+                const missingRole = deal.buyer_telegram_id == null ? 'buyer' : 'seller';
+                if (!creatorId) {
+                  await ctx.reply(`❌ <b>Deal #${deal.id} has no creator</b> — contact support.`, { parse_mode: 'HTML' });
+                } else {
+                  // Try to get requester photo for creator approval card
+                  let photoUrl: string | null = null;
+                  let photoFileId: string | null = null;
+                  try {
+                    const photos = await ctx.api.getUserProfilePhotos(requesterId, { limit: 1 });
+                    if (photos.total_count > 0 && photos.photos[0]?.[0]) {
+                      const fileId = (photos.photos[0][0] as unknown as { file_id: string }).file_id;
+                      photoFileId = fileId;
+                      // We will send via file_id directly, no need for URL
+                    }
+                  } catch {}
+                  const joinReq = await createJoinRequest({
+                    dealId,
+                    token,
+                    requesterTelegramId: requesterId,
+                    requesterUsername,
+                    requesterFirstName,
+                    requesterPhotoUrl: photoUrl,
+                  });
+                  // Notify requester
+                  await ctx.reply(
+                    [
+                      `✅ <b>Join request sent!</b>`,
+                      ``,
+                      `You requested to join <b>Deal #${deal.id}</b> as <b>${escapeHtml(missingRole)}</b>.`,
+                      `  💎 <code>${escapeHtml(String(deal.amount))} ${escapeHtml(String(deal.asset))}</code>`,
+                      `  📝 <i>${escapeHtml(String(deal.terms || '').slice(0, 80))}</i>`,
+                      ``,
+                      `The creator has been asked to approve you (showing your profile). You will be notified once approved.`,
+                    ].join('\n'),
+                    { parse_mode: 'HTML' }
+                  );
+                  // Notify creator with approval card (photo + username)
+                  try {
+                    const { InlineKeyboard } = await import('grammy');
+                    const creatorName = requesterFirstName ? escapeHtml(requesterFirstName) : escapeHtml(String(requesterId));
+                    const creatorUsername = requesterUsername ? `@${escapeHtml(requesterUsername)}` : `ID ${requesterId}`;
+                    const caption = [
+                      `🔔 <b>Join request for Deal #${deal.id}</b>`,
+                      `━━━━━━━━━━━━━━━━━━━━━━━`,
+                      ``,
+                      `👤 <b>${creatorName}</b> ${creatorUsername}`,
+                      `🆔 <code>${requesterId}</code> wants to join as <b>${escapeHtml(missingRole)}</b>.`,
+                      ``,
+                      `  💎 <code>${escapeHtml(String(deal.amount))} ${escapeHtml(String(deal.asset))}</code>`,
+                      `  📝 <i>${escapeHtml(String(deal.terms || '').slice(0, 80))}</i>`,
+                      ``,
+                      `Do you approve this connection? Deal starts after your confirmation.`,
+                    ].join('\n');
+                    const kb = new InlineKeyboard()
+                      .text('✅ Approve', `approve_join:${joinReq.id}`)
+                      .text('❌ Decline', `reject_join:${joinReq.id}`);
+                    if (photoFileId) {
+                      await ctx.api.sendPhoto(creatorId, photoFileId, { caption, parse_mode: 'HTML', reply_markup: kb });
+                    } else {
+                      await ctx.api.sendMessage(creatorId, caption, { parse_mode: 'HTML', reply_markup: kb });
+                    }
+                  } catch (e) {
+                    // Fallback: if we cannot message creator (blocked), tell requester
+                    await ctx.reply(`⚠️ Could not notify the creator (ID ${creatorId}) — they may have blocked the bot. Ask them to start the bot first.`, { parse_mode: 'HTML' });
+                  }
+                  return; // Do not show welcome after handling join
+                }
+              }
+            }
+          } catch (e) {
+            await ctx.reply(`⚠️ <b>Join failed:</b> ${escapeHtml(String((e as Error).message || e))}`, { parse_mode: 'HTML' });
+          }
+        }
       }
+      // For join_ payload we already replied; still show welcome? We returned early on success, but for errors we fall through to welcome
     }
 
     await ctx.reply(welcomeMessage(name, isAdmin), {
@@ -241,6 +332,66 @@ export function registerCommands(bot: Bot) {
       reply_markup: mainMenuKeyboard(webappUrl),
       link_preview_options: { is_disabled: true } as any,
     });
+  });
+
+  // Handle approval callbacks
+  bot.callbackQuery(/^approve_join:(\d+)$/, async (ctx) => {
+    const requestId = Number(ctx.match?.[1]);
+    const approverId = ctx.from?.id;
+    if (!requestId || !approverId) return ctx.answerCallbackQuery({ text: 'Invalid request' });
+    try {
+      const { approveJoinRequest, getJoinRequestById, getDealById } = await import('../../services/dealService');
+      const req = await getJoinRequestById(requestId);
+      if (!req) return ctx.answerCallbackQuery({ text: 'Request not found' });
+      const deal = await getDealById(req.deal_id);
+      if (!deal) return ctx.answerCallbackQuery({ text: 'Deal not found' });
+      await approveJoinRequest(requestId, approverId);
+      await ctx.answerCallbackQuery({ text: 'Approved — deal started!' });
+      const role = req.requester_telegram_id ? 'buyer/seller' : 'counterparty';
+      // Edit creator's message
+      try {
+        await ctx.editMessageCaption({
+          caption: `✅ <b>Approved!</b> Deal #${deal.id} — @${escapeHtml(req.requester_username || String(req.requester_telegram_id))} joined as ${escapeHtml(String(req.requester_telegram_id === deal.buyer_telegram_id ? 'buyer' : 'seller'))}. Deal is now active.`,
+          parse_mode: 'HTML',
+        });
+      } catch {
+        await ctx.editMessageText(`✅ <b>Approved!</b> Deal #${deal.id} — @${escapeHtml(req.requester_username || String(req.requester_telegram_id))} joined.`, { parse_mode: 'HTML' });
+      }
+      // Notify requester
+      try {
+        await ctx.api.sendMessage(req.requester_telegram_id, `✅ <b>Your join request for Deal #${deal.id} was approved!</b>\n\nDeal is now active — you can chat and deposit.`, { parse_mode: 'HTML' });
+      } catch {}
+      // Notify both parties deal started
+      const otherId = Number(req.requester_telegram_id);
+      try {
+        await ctx.api.sendMessage(otherId, `🎉 <b>Deal #${deal.id} started!</b>\nYou are now connected as ${deal.buyer_telegram_id == otherId ? 'buyer' : 'seller'}. Use /status ${deal.id} or the Mini App.`, { parse_mode: 'HTML' });
+      } catch {}
+    } catch (e) {
+      await ctx.answerCallbackQuery({ text: String((e as Error).message || 'Approve failed'), show_alert: true });
+    }
+  });
+
+  bot.callbackQuery(/^reject_join:(\d+)$/, async (ctx) => {
+    const requestId = Number(ctx.match?.[1]);
+    const approverId = ctx.from?.id;
+    if (!requestId || !approverId) return ctx.answerCallbackQuery({ text: 'Invalid request' });
+    try {
+      const { rejectJoinRequest, getJoinRequestById } = await import('../../services/dealService');
+      const req = await getJoinRequestById(requestId);
+      if (!req) return ctx.answerCallbackQuery({ text: 'Request not found' });
+      await rejectJoinRequest(requestId, approverId);
+      await ctx.answerCallbackQuery({ text: 'Declined' });
+      try {
+        await ctx.editMessageCaption({ caption: `❌ <b>Declined</b> — join request for Deal #${req.deal_id} from @${escapeHtml(req.requester_username || String(req.requester_telegram_id))} was declined.`, parse_mode: 'HTML' });
+      } catch {
+        await ctx.editMessageText(`❌ <b>Declined</b> — join request for Deal #${req.deal_id} declined.`, { parse_mode: 'HTML' });
+      }
+      try {
+        await ctx.api.sendMessage(req.requester_telegram_id, `❌ <b>Your join request for Deal #${req.deal_id} was declined</b> by the creator.`, { parse_mode: 'HTML' });
+      } catch {}
+    } catch (e) {
+      await ctx.answerCallbackQuery({ text: String((e as Error).message || 'Reject failed'), show_alert: true });
+    }
   });
 
   // aliases

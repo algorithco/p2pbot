@@ -96,7 +96,8 @@
         d = d || {};
         return {
           deal: d.deal || d,
-          link: d.link || d.webappLink || '',
+          link: d.botLink || d.link || d.webappLink || '',
+          botLink: d.botLink || d.link || '',
           webappLink: d.webappLink || d.link || '',
           encryption: d.encryption || ''
         };

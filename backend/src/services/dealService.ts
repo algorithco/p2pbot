@@ -265,6 +265,81 @@ export async function addEncryptedMessage(dealId: number, senderTelegramId: numb
   );
 }
 
+/** Build bot deep link for deal invite — t.me bot link, not website */
+export function getBotDeepLink(dealId: number | string, token: string, botUsername?: string): string {
+  const username = (botUsername || process.env.BOT_USERNAME || 'uzsavdochibot').replace(/^@/, '');
+  // Telegram start param max 64 chars, allowed A-Za-z0-9_- ; token is uuid with hyphens, so use join_<id>_<token>
+  return `https://t.me/${username}?start=join_${dealId}_${token}`;
+}
+
+/** Create a pending join request (for bot approval flow) */
+export async function createJoinRequest(params: {
+  dealId: number;
+  token: string;
+  requesterTelegramId: number;
+  requesterUsername?: string | null;
+  requesterFirstName?: string | null;
+  requesterPhotoUrl?: string | null;
+}) {
+  const { dealId, token, requesterTelegramId, requesterUsername, requesterFirstName, requesterPhotoUrl } = params;
+  // Upsert: if same requester already pending for same deal+token, return existing
+  const existing = await db.query(
+    `SELECT * FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND requester_telegram_id = $3 AND status = 'pending' LIMIT 1`,
+    [dealId, token, requesterTelegramId]
+  );
+  if (existing.rows[0]) return existing.rows[0];
+  const res = await db.query(
+    `INSERT INTO deal_join_requests (deal_id, token, requester_telegram_id, requester_username, requester_first_name, requester_photo_url, status)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending') RETURNING *`,
+    [dealId, token, requesterTelegramId, requesterUsername || null, requesterFirstName || null, requesterPhotoUrl || null]
+  );
+  return res.rows[0];
+}
+
+export async function getJoinRequestById(id: number) {
+  const res = await db.query('SELECT * FROM deal_join_requests WHERE id = $1 LIMIT 1', [id]);
+  return res.rows[0] || null;
+}
+
+export async function getPendingRequest(dealId: number, token: string, requesterId: number) {
+  const res = await db.query(
+    `SELECT * FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND requester_telegram_id = $3 AND status = 'pending' LIMIT 1`,
+    [dealId, token, requesterId]
+  );
+  return res.rows[0] || null;
+}
+
+export async function updateJoinRequestStatus(id: number, status: 'approved' | 'rejected' | 'pending') {
+  await db.query('UPDATE deal_join_requests SET status = $1, updated_at = now() WHERE id = $2', [status, id]);
+}
+
+/** Approve a join request — atomic: assign role + consume link + mark request approved */
+export async function approveJoinRequest(requestId: number, approverTelegramId: number): Promise<'buyer' | 'seller'> {
+  const req = await getJoinRequestById(requestId);
+  if (!req) throw new Error('request_not_found');
+  if (req.status !== 'pending') throw new Error('request_already_handled');
+  const deal = await getDealById(req.deal_id);
+  if (!deal) throw new Error('deal_not_found');
+  // Only the creator (existing party) can approve — check that approver is the party who created the deal (the non-null side)
+  const isCreator = Number(deal.buyer_telegram_id) === approverTelegramId || Number(deal.seller_telegram_id) === approverTelegramId;
+  if (!isCreator) throw new Error('not_authorized_to_approve');
+  // Perform atomic join
+  const role = await atomicJoinDeal(req.deal_id, req.token, req.requester_telegram_id);
+  await updateJoinRequestStatus(requestId, 'approved');
+  return role;
+}
+
+export async function rejectJoinRequest(requestId: number, approverTelegramId: number) {
+  const req = await getJoinRequestById(requestId);
+  if (!req) throw new Error('request_not_found');
+  if (req.status !== 'pending') throw new Error('request_already_handled');
+  const deal = await getDealById(req.deal_id);
+  if (!deal) throw new Error('deal_not_found');
+  const isCreator = Number(deal.buyer_telegram_id) === approverTelegramId || Number(deal.seller_telegram_id) === approverTelegramId;
+  if (!isCreator) throw new Error('not_authorized_to_approve');
+  await updateJoinRequestStatus(requestId, 'rejected');
+}
+
 /** Cleanup expired deal links */
 export async function purgeExpiredLinks() {
   await db.query('DELETE FROM deal_links WHERE expires_at < now()');

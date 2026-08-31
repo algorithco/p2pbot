@@ -66,6 +66,19 @@ export async function ensureTables() {
       token TEXT UNIQUE,
       expires_at TIMESTAMPTZ
     );
+
+    CREATE TABLE IF NOT EXISTS deal_join_requests (
+      id SERIAL PRIMARY KEY,
+      deal_id INTEGER REFERENCES deals(id) ON DELETE CASCADE,
+      token TEXT,
+      requester_telegram_id BIGINT,
+      requester_username TEXT,
+      requester_first_name TEXT,
+      requester_photo_url TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    );
   `);
 
   // Canonical extra deal columns — boot stays idempotent on pre-existing installs.
@@ -86,6 +99,8 @@ export async function ensureTables() {
   // Indexes for chat polling
   await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_deal_created ON messages(deal_id, created_at ASC)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_deal_links_expires ON deal_links(expires_at)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_join_requests_deal_token ON deal_join_requests(deal_id, token)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_join_requests_status ON deal_join_requests(status)');
 
   // Telegram IDs exceed 32-bit range — widen legacy INTEGER id columns to BIGINT.
   await pool.query('ALTER TABLE deals ALTER COLUMN buyer_id TYPE BIGINT');
