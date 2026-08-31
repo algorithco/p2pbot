@@ -20,7 +20,10 @@
     var h = {};
     try {
       if (window.TG && TG.initData()) h['x-init-data'] = TG.initData();
-      h['x-telegram-user-id'] = String(TG.user().id || 0);
+      // Use real Telegram user when available, fallback to preview id only for public reads
+      var uid = 0;
+      try { uid = (window.TG && TG.realUser && TG.realUser() ? TG.realUser().id : (TG.user().id || 0)); } catch (e) { uid = 0; }
+      h['x-telegram-user-id'] = String(uid || (window.TG ? TG.user().id : 0) || 0);
     } catch (e) { /* ignore */ }
     return h;
   }
@@ -93,7 +96,9 @@
         d = d || {};
         return {
           deal: d.deal || d,
-          link: d.link || ''
+          link: d.link || d.webappLink || '',
+          webappLink: d.webappLink || d.link || '',
+          encryption: d.encryption || ''
         };
       });
     },
@@ -103,14 +108,29 @@
       return request('POST', '/api/deals/' + encodeURIComponent(id) + '/join/' + encodeURIComponent(token), {});
     },
 
-    /** GET /api/deals/:id/chat -> message[] */
+    /** GET /api/deals/:id/key -> {key} (per-deal E2E key, party-only) */
+    dealKey: function (dealId) {
+      return request('GET', '/api/deals/' + encodeURIComponent(dealId) + '/key').then(function (d) {
+        return d && d.key ? d.key : null;
+      });
+    },
+
+    /** GET /api/deals/:id/chat -> message[] (ciphertext when encrypted) */
     chat: function (dealId) {
       return request('GET', '/api/deals/' + encodeURIComponent(dealId) + '/chat').then(function (d) {
         return Array.isArray(d) ? d : [];
       });
     },
 
-    /** POST /api/deals/:id/chat */
+    /** POST /api/deals/:id/chat — E2E: sends ciphertext (preferred) */
+    sendChatEncrypted: function (dealId, senderTelegramId, ciphertext) {
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/chat', {
+        senderTelegramId: senderTelegramId,
+        ciphertext: ciphertext
+      });
+    },
+
+    /** POST /api/deals/:id/chat — legacy plaintext (server will E2E-encrypt before storing) */
     sendChat: function (dealId, senderTelegramId, content) {
       return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/chat', {
         senderTelegramId: senderTelegramId,
@@ -121,6 +141,11 @@
     /** GET /api/status/:address -> { status: number } (on-chain escrow state) */
     chainStatus: function (address) {
       return request('GET', '/api/status/' + encodeURIComponent(address));
+    },
+
+    /** GET /api/balance/:address -> { balance (nanotons), balanceTon, state, address } */
+    balance: function (address) {
+      return request('GET', '/api/balance/' + encodeURIComponent(address));
     },
 
     /** Admin: POST /api/notify */

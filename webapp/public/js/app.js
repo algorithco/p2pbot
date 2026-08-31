@@ -194,42 +194,94 @@
   /* ================= Wallet ================= */
 
   function walletPill() {
+    var balEl = UI.h('span', { class: 'wallet-bal small muted', style: 'margin-left:8px', text: '' });
     var btn = UI.h('button', {
       class: 'wallet-pill',
       onclick: function () {
         TG.haptic.tap();
         if (!Wallet.available()) { UI.toast('Wallet SDK still loading…'); return; }
         if (Wallet.connected()) walletSheet();
-        else Wallet.connect().catch(function () { /* user closed modal */ });
+        else Wallet.connect().catch(function (err) {
+          console.warn('[App] connect failed', err);
+          UI.toast(err && err.message ? err.message : 'Wallet connection cancelled', 'err');
+        });
       }
     }, ['🔌 Connect Wallet']);
-    var render = function () {
-      if (Wallet.connected()) {
-        btn.textContent = '👛 ' + UI.shortAddr(UI.toFriendly(Wallet.address()));
+    var wrap = UI.h('div', { class: 'wallet-pill-wrap', style: 'display:flex;align-items:center' }, [btn, balEl]);
+
+    var render = function (acc) {
+      // acc may be passed from onStatus, else use Wallet
+      var isConn = Wallet.connected();
+      var addr = Wallet.address();
+      // If onStatus gave us acc directly, prefer it
+      if (acc && acc.address) { isConn = true; addr = acc.address; }
+      if (isConn && addr) {
+        var friendly = Wallet.addressFriendly ? Wallet.addressFriendly() : (UI.toFriendly ? UI.toFriendly(addr) : addr);
+        btn.textContent = '👛 ' + UI.shortAddr(friendly);
         btn.classList.add('connected');
+        // Fetch balance async
+        balEl.textContent = '…';
+        Wallet.getBalance().then(function (r) {
+          var ton = r.balanceTon || (Number(r.balance) / 1e9).toString();
+          var n = Number(ton);
+          balEl.textContent = isFinite(n) ? n.toFixed(4).replace(/\.?0+$/, '') + ' TON' : ton + ' TON';
+        }).catch(function (err) {
+          console.warn('[App] balance fetch failed', err);
+          balEl.textContent = '';
+        });
       } else {
         btn.textContent = '🔌 Connect Wallet';
         btn.classList.remove('connected');
+        balEl.textContent = '';
       }
     };
-    Wallet.onStatus(function () { render(); });
-    setTimeout(render, 800);
-    return btn;
+
+    // Immediate + subscribed rendering
+    Wallet.whenReady().then(function () { render(); }).catch(function () { render(); });
+    Wallet.onStatus(function (acc) { render(acc); });
+    // Fallback poll until wallet ready (covers slow SDK)
+    var iv = setInterval(function () { if (Wallet.connected()) { render(); clearInterval(iv); } }, 1000);
+    setTimeout(function () { clearInterval(iv); }, 10000);
+    // Initial render
+    render();
+    return wrap;
   }
 
   function walletSheet() {
-    var friendly = UI.toFriendly(Wallet.address());
+    var raw = Wallet.address();
+    if (!raw) {
+      UI.toast('Wallet not connected', 'err');
+      return;
+    }
+    var friendly = Wallet.addressFriendly ? Wallet.addressFriendly() : UI.toFriendly(raw);
+    var chain = Wallet.chain ? Wallet.chain() : null;
+    var chainLabel = chain === -239 ? 'Mainnet' : chain === -3 ? 'Testnet' : (chain != null ? 'Chain ' + chain : '');
+    var balRow = UI.h('div', { class: 'field-hint', style: 'margin:8px 0;font-size:13px', text: 'Balance: loading…' });
+    // Fetch balance
+    Wallet.getBalance().then(function (r) {
+      var ton = r.balanceTon || (Number(r.balance) / 1e9).toString();
+      balRow.textContent = 'Balance: ' + ton + ' TON' + (r.state ? ' · ' + r.state : '') + (chainLabel ? ' · ' + chainLabel : '');
+    }).catch(function (err) {
+      balRow.textContent = 'Balance: unavailable' + (chainLabel ? ' · ' + chainLabel : '');
+      console.warn('[App] walletSheet balance failed', err);
+    });
+
     var content = UI.h('div', {}, [
       UI.h('h3', { text: 'Your wallet' }),
-      UI.h('p', { class: 'sub', text: (Wallet.walletName() || 'Connected') + ' · tap address to copy' }),
+      UI.h('p', { class: 'sub', text: (Wallet.walletName() || 'Connected') + (chainLabel ? ' · ' + chainLabel : '') + ' · tap address to copy' }),
       UI.h('button', {
         class: 'addr-pill',
-        style: 'margin-bottom:12px',
+        style: 'margin-bottom:8px',
         onclick: function () { UI.copy(friendly, 'Wallet address copied'); }
       }, [
         UI.h('span', { class: 'mono', text: UI.truncate(friendly, 10, 8) }),
         UI.h('span', { class: 'small muted', text: 'copy' })
       ]),
+      UI.h('div', { class: 'addr-pill', style: 'margin-bottom:8px;opacity:.7' }, [
+        UI.h('span', { class: 'mono small', text: UI.truncate(raw, 12, 8) }),
+        UI.h('span', { class: 'small muted', text: 'raw' })
+      ]),
+      balRow,
       UI.h('button', {
         class: 'btn btn-danger',
         onclick: function () {
@@ -974,19 +1026,28 @@
       html: '<svg viewBox="0 0 24 24" width="21" height="21"><path fill="currentColor" d="M3.4 20.4 20.9 12 3.4 3.6 3.3 10l13 2-13 2z"/></svg>',
       onclick: send
     });
+    var statusBar = UI.h('div', { class: 'small muted', style: 'text-align:center;padding:6px;font-size:12px', text: '🔒 Encrypted channel — loading…' });
 
     document.getElementById('view').innerHTML = '';
     document.getElementById('view').appendChild(UI.h('div', { class: 'chat-wrap' }, [
+      statusBar,
       scroller,
       UI.h('div', { class: 'composer' }, [input, sendBtn])
     ]));
 
+    var dealKey = null;
+    var keyReady = false;
+    var keyError = null;
+    var consecutiveFails = 0;
+
     function bubble(msg) {
       var mine = Number(msg.sender_telegram_id) === App.state.meId;
+      var displayText = msg.decrypted || msg.content || '';
+      if (msg.is_encrypted && !msg.decrypted && msg.ciphertext) displayText = '🔒 Encrypted message';
       return UI.h('div', { class: 'msg' + (mine ? ' mine' : '') }, [
         UI.h('div', { class: 'bubble' }, [
-          UI.h('div', { text: msg.content, style: 'word-break:break-word;white-space:pre-wrap' }),
-          UI.h('div', { class: 'm-meta', text: (mine ? '' : shortName(msg.sender_telegram_id) + ' · ') + UI.fmtTime(msg.created_at) })
+          UI.h('div', { text: displayText, style: 'word-break:break-word;white-space:pre-wrap' }),
+          UI.h('div', { class: 'm-meta', text: (mine ? '' : shortName(msg.sender_telegram_id) + ' · ') + UI.fmtTime(msg.created_at) + (msg.is_encrypted ? ' · 🔒' : '') })
         ])
       ]);
     }
@@ -996,46 +1057,166 @@
       return s.length > 8 ? s.slice(0, 6) + '…' : s;
     }
 
+    async function decryptList(list) {
+      if (!keyReady || !dealKey) return list;
+      var out = [];
+      for (var i = 0; i < list.length; i++) {
+        var m = list[i];
+        if (m.is_encrypted && m.ciphertext) {
+          try {
+            var plain = await ChatCrypto.decrypt(m.ciphertext, dealKey);
+            m.decrypted = plain;
+          } catch (e) {
+            m.decrypted = '🔒 Unable to decrypt';
+          }
+        } else if (!m.is_encrypted && m.content) {
+          m.decrypted = m.content;
+        } else if (m.ciphertext && !m.is_encrypted) {
+          // Fallback: try decrypt even if flag missing
+          try { m.decrypted = await ChatCrypto.decrypt(m.ciphertext, dealKey); } catch (e) { m.decrypted = m.ciphertext; }
+        }
+        out.push(m);
+      }
+      return out;
+    }
+
     function renderMessages(list) {
       var nearBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 60;
       scroller.innerHTML = '';
       if (!list.length) {
-        scroller.appendChild(emptyState('💬', 'No messages yet', 'Coordinate the trade details here. Be clear to avoid disputes.'));
+        scroller.appendChild(emptyState('💬', 'No messages yet', 'Coordinate the trade details here. Be clear to avoid disputes. Messages are end-to-end encrypted.'));
         return;
       }
       list.forEach(function (msg) { scroller.appendChild(bubble(msg)); });
       if (nearBottom) scroller.scrollTop = scroller.scrollHeight;
     }
 
-    function load() {
-      return Api.chat(id)
-        .then(renderMessages)
-        .catch(function (err) {
-          scroller.innerHTML = '';
-          scroller.appendChild(errorBox(err.message || String(err), load));
-        });
+    function updateStatus() {
+      if (keyError) {
+        statusBar.textContent = '⛔ ' + keyError;
+        statusBar.style.color = '#ff6b6b';
+        input.setAttribute('disabled', '');
+        sendBtn.setAttribute('disabled', '');
+      } else if (!keyReady) {
+        statusBar.textContent = '🔒 Establishing encrypted channel…';
+        statusBar.style.color = '';
+        input.setAttribute('disabled', '');
+        sendBtn.setAttribute('disabled', '');
+      } else {
+        statusBar.textContent = '🔒 End-to-end encrypted · only you and the counterparty can read';
+        statusBar.style.color = '#7dd3a5';
+        input.removeAttribute('disabled');
+        sendBtn.removeAttribute('disabled');
+      }
     }
 
-    function send() {
+    async function load() {
+      try {
+        var raw = await Api.chat(id);
+        var decrypted = await decryptList(raw);
+        renderMessages(decrypted);
+        consecutiveFails = 0;
+      } catch (err) {
+        consecutiveFails++;
+        var msg = err && err.message ? String(err.message) : String(err);
+        if (err && err.status === 403) {
+          scroller.innerHTML = '';
+          scroller.appendChild(UI.h('div', { class: 'banner error' }, [
+            UI.h('div', {}, [
+              UI.h('div', { style: 'font-weight:700', text: 'Chat locked' }),
+              UI.h('div', { class: 'small', text: 'Only the buyer and seller of this deal can read or send messages. Join the deal first.' })
+            ]),
+            UI.h('button', { class: 'link-btn', onclick: function () { go('#/deal/' + id); }, text: 'View deal' })
+          ]));
+          statusBar.textContent = '⛔ Not a party to this deal';
+        } else if (err && err.status === 401) {
+          scroller.innerHTML = '';
+          scroller.appendChild(UI.h('div', { class: 'banner warn' }, [
+            UI.h('div', { class: 'small', text: 'Open this Mini App inside Telegram to use the encrypted chat.' })
+          ]));
+          statusBar.textContent = '⛔ Open in Telegram';
+        } else {
+          // Transient: keep existing messages, show toast after 2 fails
+          if (consecutiveFails >= 2) UI.toast(msg || 'Could not load chat', 'err');
+        }
+        // Exponential backoff for polling on repeated failures
+        if (consecutiveFails >= 3 && App.chatTimer) {
+          clearInterval(App.chatTimer);
+          var backoff = Math.min(4000 * Math.pow(1.8, consecutiveFails - 3), 30000);
+          App.chatTimer = setInterval(load, backoff);
+        }
+      }
+    }
+
+    async function initKey() {
+      try {
+        if (!window.ChatCrypto || !ChatCrypto.isAvailable()) {
+          // Fallback: still try but warn — backend will also encrypt at rest
+          console.warn('[Chat] WebCrypto unavailable, using server-side encryption only');
+        }
+        var k = await Api.dealKey(id);
+        if (!k) throw new Error('No chat key — join the deal first');
+        dealKey = k;
+        keyReady = true;
+        keyError = null;
+        updateStatus();
+        await load();
+      } catch (err) {
+        var m = err && err.message ? err.message : String(err);
+        if (err && err.status === 403) {
+          keyError = 'Not a party to this deal — join first';
+        } else if (err && err.status === 401) {
+          keyError = 'Open in Telegram to enable encrypted chat';
+        } else {
+          keyError = m || 'Could not establish encrypted channel';
+        }
+        updateStatus();
+        // Still try to load to show proper banner from load()
+        try { await load(); } catch (e) {}
+        console.warn('[Chat] key init failed', err);
+      }
+    }
+
+    async function send() {
       var text = input.value.trim();
       if (!text) return;
+      if (!keyReady || !dealKey) {
+        UI.toast(keyError || 'Encrypted channel not ready', 'err');
+        return;
+      }
+      if (!TG.realUser()) {
+        UI.toast('Open in Telegram to chat securely', 'err');
+        return;
+      }
+      if (text.length > 4000) { UI.toast('Message too long (max 4000)', 'err'); return; }
       input.value = '';
       sendBtn.setAttribute('disabled', '');
       TG.haptic.light();
-      Api.sendChat(id, App.state.meId, text)
-        .then(function () { return load(); })
-        .then(function () { scroller.scrollTop = scroller.scrollHeight; })
-        .catch(function (err) {
-          UI.toast(err.message || 'Could not send', 'err');
-          input.value = text;
-        })
-        .then(function () { sendBtn.removeAttribute('disabled'); });
+      try {
+        var ciphertext = await ChatCrypto.encrypt(text, dealKey);
+        await Api.sendChatEncrypted(id, App.state.meId, ciphertext);
+        await load();
+        scroller.scrollTop = scroller.scrollHeight;
+      } catch (err) {
+        var em = err && err.message ? err.message : 'Could not send';
+        UI.toast(em, 'err');
+        input.value = text;
+        // If encryption failed due to key, try refresh key once
+        if (String(em).indexOf('key') !== -1) {
+          try { dealKey = await Api.dealKey(id); keyReady = !!dealKey; updateStatus(); } catch (e) {}
+        }
+      } finally {
+        sendBtn.removeAttribute('disabled');
+        updateStatus();
+      }
     }
 
-    load();
-    scroller.scrollTop = scroller.scrollHeight;
-    App.chatTimer = setInterval(load, 4000);
+    // Boot
+    updateStatus();
+    initKey();
+    App.chatTimer = setInterval(load, 3500);
     App.cleanupFns.push(function () { if (App.chatTimer) clearInterval(App.chatTimer); });
+    App.cleanupFns.push(function () { if (window.ChatCrypto) ChatCrypto.clearCache(id); });
   }
 
   /* ================= Join deal ================= */
@@ -1154,25 +1335,52 @@
       ]),
       UI.h('div', { class: 'section-title', text: 'Service' }),
       UI.h('div', { class: 'card', style: 'padding:4px 14px' }, [
-        UI.h('button', {
-          class: 'list-item',
-          onclick: function () {
-            TG.haptic.tap();
-            if (Wallet.connected()) { walletSheet(); return; }
-            if (!Wallet.available()) { UI.toast('Wallet SDK still loading…'); return; }
-            Wallet.connect().catch(function () { /* modal closed */ });
+        (function () {
+          var walletValueEl = UI.h('span', { class: 'li-value', text: Wallet.connected() ? UI.shortAddr((Wallet.addressFriendly ? Wallet.addressFriendly() : UI.toFriendly(Wallet.address())) || '') : 'Connect' });
+          var walletSubEl = UI.h('span', { text: 'Tonkeeper · MyTonWallet · @wallet' });
+          function updateWalletRow(acc) {
+            var isConn = Wallet.connected();
+            var addr = Wallet.address();
+            if (acc && acc.address) { isConn = true; addr = acc.address; }
+            if (isConn && addr) {
+              var friendly = Wallet.addressFriendly ? Wallet.addressFriendly() : UI.toFriendly(addr);
+              walletValueEl.textContent = UI.shortAddr(friendly);
+              // Fetch balance async
+              Wallet.getBalance().then(function (r) {
+                var ton = r.balanceTon || (Number(r.balance) / 1e9).toString();
+                walletSubEl.textContent = Number(ton).toFixed(4).replace(/\.?0+$/, '') + ' TON';
+              }).catch(function () {
+                walletSubEl.textContent = 'Connected';
+              });
+            } else {
+              walletValueEl.textContent = 'Connect';
+              walletSubEl.textContent = 'Tonkeeper · MyTonWallet · @wallet';
+            }
           }
-        }, [
-          UI.h('div', { class: 'li-icon', text: '👛' }),
-          UI.h('div', { class: 'li-main' }, [
-            UI.h('b', { text: 'Wallet' }),
-            UI.h('span', { text: 'Tonkeeper · MyTonWallet · @wallet' })
-          ]),
-          UI.h('span', {
-            class: 'li-value',
-            text: Wallet.connected() ? UI.shortAddr(UI.toFriendly(Wallet.address())) : 'Connect'
-          })
-        ]),
+          Wallet.whenReady().then(function () { updateWalletRow(); }).catch(function () {});
+          Wallet.onStatus(function (acc) { updateWalletRow(acc); });
+          // Initial
+          updateWalletRow();
+          return UI.h('button', {
+            class: 'list-item',
+            onclick: function () {
+              TG.haptic.tap();
+              if (Wallet.connected()) { walletSheet(); return; }
+              if (!Wallet.available()) { UI.toast('Wallet SDK still loading…'); return; }
+              Wallet.connect().catch(function (err) {
+                console.warn('[App] wallet connect failed', err);
+                UI.toast(err && err.message ? err.message : 'Wallet connection cancelled', 'err');
+              });
+            }
+          }, [
+            UI.h('div', { class: 'li-icon', text: '👛' }),
+            UI.h('div', { class: 'li-main' }, [
+              UI.h('b', { text: 'Wallet' }),
+              walletSubEl
+            ]),
+            walletValueEl
+          ]);
+        })(),
         UI.h('button', {
           class: 'list-item',
           onclick: function () {
@@ -1329,8 +1537,19 @@
     console.log('[TonEscrow] build v3 — ' + new Date().toISOString());
 
     TG.init();
-    App.state.user = TG.user();
-    App.state.meId = Number(TG.user() && TG.user().id) || 0;
+    // Prefer real Telegram user when inside Telegram; preview fallback only for browsing
+    var real = TG.realUser();
+    var u = real || TG.user();
+    App.state.user = u;
+    App.state.meId = Number(u && u.id) || 0;
+    // Re-sync meId if Telegram injects user after boot (some clients delay)
+    setTimeout(function () {
+      var r2 = TG.realUser();
+      if (r2 && Number(r2.id) !== App.state.meId) {
+        App.state.user = r2;
+        App.state.meId = Number(r2.id);
+      }
+    }, 800);
     applyThemeMode(getThemeMode());
     bindChrome();
 

@@ -8,9 +8,19 @@
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icon.svg" />
-  <link rel="stylesheet" href="/css/style.css?v=6" />
-  <script src="/js/telegram-web-app.js?v=6"></script>
-  <script src="https://unpkg.com/@tonconnect/ui@2/dist/tonconnect-ui.min.js" defer></script>
+  <link rel="stylesheet" href="/css/style.css?v=10" />
+  <script src="/js/telegram-web-app.js?v=10"></script>
+  <!-- TON Connect SDK — local first (no external dependency), CDN fallback -->
+  <script src="/js/tonconnect-ui.min.js?v=10"></script>
+  <script>
+    // Fallback to CDN if local failed (e.g., old cached frontend without the file)
+    if (!window.TonConnectUI) {
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/@tonconnect/ui@2/dist/tonconnect-ui.min.js';
+      s.async = false;
+      document.head.appendChild(s);
+    }
+  </script>
 </head>
 <body data-scheme="dark">
   <div id="app">
@@ -45,10 +55,12 @@
   <div id="toast-root"></div>
   <div id="sheet-root"></div>
 
-  <script src="/js/tg.js?v=6"></script>
-  <script src="/js/api.js?v=6"></script>
-  <script src="/js/ui.js?v=6"></script>
-  <script src="/js/wallet.js?v=6"></script>
-  <script src="/js/app.js?v=6"></script>
+  <script src="/js/app-config.js?v=10"></script>
+  <script src="/js/tg.js?v=10"></script>
+  <script src="/js/crypto.js?v=12"></script>
+  <script src="/js/api.js?v=12"></script>
+  <script src="/js/ui.js?v=10"></script>
+  <script src="/js/wallet.js?v=10"></script>
+  <script src="/js/app.js?v=12"></script>
 </body>
 </html>
