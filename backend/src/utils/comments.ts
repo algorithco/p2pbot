@@ -1,0 +1,117 @@
+/**
+ * Comment helpers for escrow deposits & releases.
+ * - Buyer -> escrow: short machine-parseable comment for bot to detect the deal
+ * - Escrow -> seller: human-readable comment for the seller to see what it's for
+ */
+
+import { Cell, Slice } from '@ton/core';
+
+/** Short, deterministic deposit comment for a deal. Buyer must include this when paying. */
+export function depositComment(dealId: number | string): string {
+  return `escrow#${dealId}`;
+}
+
+/** Try to extract deal id from a deposit comment. Supports: escrow#123, escrow:deal#123, Deal #123, deal#123 */
+export function parseDepositComment(comment: string | null | undefined): number | null {
+  if (!comment) return null;
+  const s = String(comment).trim();
+  // escrow#123, escrow:deal#123, deal#123
+  let m = s.match(/(?:escrow|deal)\s*[:#]?\s*(\d{1,10})\b/i);
+  if (m) {
+    const n = Number(m[1]);
+    if (Number.isInteger(n) && n > 0) return n;
+  }
+  // "Escrow #123" or "#123"
+  m = s.match(/#\s*(\d{1,10})\b/);
+  if (m) {
+    const n = Number(m[1]);
+    if (Number.isInteger(n) && n > 0) return n;
+  }
+  return null;
+}
+
+/** Human-readable release comment for seller. Example: `For Vintage Watch — 2.5 TON — Escrow #42` */
+export function releaseComment(deal: {
+  id: number | string;
+  amount: string | number;
+  asset: string;
+  terms?: string | null;
+}): string {
+  const id = String(deal.id);
+  const asset = String(deal.asset || 'TON').toUpperCase();
+  const amt = String(deal.amount);
+  const rawTerms = String(deal.terms || '').trim();
+
+  let item: string;
+  if (!rawTerms || rawTerms.toLowerCase() === 'no special terms') {
+    item = 'deal';
+  } else {
+    // Take first line/sentence, strip trailing punctuation, limit to 40 chars
+    const first = rawTerms.split(/[\n\r]+/)[0].split(/[.]+/)[0].trim();
+    item = first.slice(0, 40).replace(/[,;:]+$/, '').trim() || 'deal';
+    // If item is just a generic word like "deal", keep it lower, else capitalize first letter
+    if (item.toLowerCase() === 'deal') item = 'deal';
+  }
+
+  // Keep comment under 120 chars (TON comment limit ~123)
+  let comment = `For ${item} — ${amt} ${asset} — Escrow #${id}`;
+  if (comment.length > 120) {
+    // Truncate item part
+    const overhead = `For  — ${amt} ${asset} — Escrow #${id}`.length;
+    const maxItem = Math.max(10, 120 - overhead);
+    const truncated = item.slice(0, maxItem - 1) + '…';
+    comment = `For ${truncated} — ${amt} ${asset} — Escrow #${id}`;
+  }
+  return comment;
+}
+
+/** Parse a TON simple comment (op 0) from a body Cell. Returns null if not a comment. */
+export function parseTonComment(body: Cell | Slice | null | undefined): string | null {
+  if (!body) return null;
+  try {
+    const slice: Slice = body instanceof Cell ? body.beginParse() : body;
+    if (slice.remainingBits < 32) return null;
+    const op = slice.loadUint(32);
+    if (op !== 0) return null;
+    // Remaining bits are the comment string (may be empty)
+    // Use loadStringTail if available, else manual
+    if (slice.remainingBits === 0 && slice.remainingRefs === 0) return '';
+    // @ton/core Slice has loadStringTail()
+    const comment = (slice as unknown as { loadStringTail: () => string }).loadStringTail?.() ?? '';
+    // Fallback: try to read as string tail manually
+    if (typeof comment === 'string') return comment;
+    // Manual fallback: read remaining bytes as utf8
+    let s = '';
+    while (slice.remainingBits >= 8) {
+      s += String.fromCharCode(slice.loadUint(8));
+    }
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+/** Parse jetton forward payload comment. The forwardPayload is the remaining slice after transfer_notification fields. */
+export function parseJettonForwardComment(forwardPayload: Slice | Cell | null | undefined): string | null {
+  if (!forwardPayload) return null;
+  try {
+    const slice: Slice = forwardPayload instanceof Cell ? forwardPayload.beginParse() : forwardPayload;
+    if (slice.remainingBits === 0 && slice.remainingRefs === 0) return null;
+    // Forward payload may be either a simple comment cell (op 0 + string) or empty
+    // Try to parse as TON comment first
+    const c = parseTonComment(slice);
+    if (c !== null) return c;
+    // If not op 0, it may be a raw string without op (some wallets)
+    // Try to read as string tail
+    if (slice.remainingBits >= 8) {
+      try {
+        return (slice as unknown as { loadStringTail: () => string }).loadStringTail?.() ?? null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}

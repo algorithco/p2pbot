@@ -10,7 +10,7 @@ import { Escrow } from './contracts/wrappers/Escrow';
 import { client } from './blockchain/tonClient';
 import logger from './logger';
 import { startBot, getBot } from './bot/bot';
-import { startListener } from './blockchain/listener';
+import { startListener, addAddressToMonitor } from './blockchain/listener';
 import {
   createDealRecord,
   generateDealLink,
@@ -19,8 +19,14 @@ import {
   validateDealLink,
   markDealLinkUsed,
   assignRoleToDeal,
+  atomicJoinDeal,
+  getDealChatKey,
   purgeExpiredLinks,
+  getDealMessages,
+  addEncryptedMessage,
 } from './services/dealService';
+import { depositComment, releaseComment } from './utils/comments';
+import { isEncryptionEnabled } from './utils/encryption';
 import {
   identityAuth,
   requireIdentity,
@@ -31,7 +37,7 @@ import {
 } from './auth/guard';
 
 const app = express();
-// Trust X-Forwarded-* from nginx/cloudflared (needed for https detection behind proxy)
+// Trust X-Forwarded-* from nginx (needed for https detection behind TLS proxy)
 app.set('trust proxy', 1);
 
 /** CORS — micro-architecture: backend (3000) separate from frontend (8080 via nginx).
@@ -134,11 +140,11 @@ function resolvePaymentAddress(): string | null {
   return null;
 }
 
-// TON Connect dapp manifest — dynamic per-request origin (supports both localhost and cloudflare)
-// Returns the origin of the incoming request so wallet sees matching url whichever way you access:
-//  - http://localhost:8080/tonconnect-manifest.json → https is NOT forced, returns http://localhost:8080
-//  - https://xxx.trycloudflare.com/tonconnect-manifest.json → returns that https origin
-// WEBAPP_URL/FRONTEND_URL is only used for bot setChatMenuButton, not for manifest url mismatch.
+// TON Connect dapp manifest — dynamic per-request origin (kept for local dev & full deploy, but NOT used now)
+// Current wallet uses GitHub raw URL (webapp/public/js/app-config.js → TONCONNECT_MANIFEST_URL) so cloudflare is gone.
+// Kept for fallback when you have a real domain: wallet.js falls back to location.origin + '/tonconnect-manifest.json'
+//  - http://localhost:8080/tonconnect-manifest.json → http://localhost:8080 (local dev)
+//  - https://your-domain/tonconnect-manifest.json → https://your-domain (future prod)
 app.get('/tonconnect-manifest.json', (req, res) => {
   const host = (req.get('x-forwarded-host') || req.get('host') || 'localhost').split(',')[0].trim() || 'localhost';
   const forwardedProto = (req.get('x-forwarded-proto') || '').split(',')[0].trim();
@@ -150,7 +156,7 @@ app.get('/tonconnect-manifest.json', (req, res) => {
       : host.startsWith('localhost') || host.startsWith('127.0.0.1')
         ? 'http'
         : 'https';
-  // Always derive from request to avoid mismatch when accessing via different host (localhost vs cloudflare)
+  // Always derive from request to avoid mismatch when accessing via different host (localhost vs prod domain)
   origin = `${proto}://${host}`;
   // Log for debugging wallet issues
   if (req.get('origin') || req.get('referer')) {
@@ -253,70 +259,129 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
     deadline: deadline ? new Date(deadline) : null,
   });
   const linkToken = await generateDealLink(deal.id);
+  const memo = depositComment(deal.id);
+  const outMemo = releaseComment({ id: deal.id, amount, asset, terms });
+  // Ensure the payment address is monitored for deposits (with comment)
+  const payAddr = (deal as unknown as { payment_address?: string }).payment_address || resolvePaymentAddress();
+  if (payAddr) addAddressToMonitor(payAddr);
+  // Build invite link using WEBAPP_URL when configured (prevents Host header injection) — fallback to request host for local dev
+  const baseUrl = config.webappUrl || config.frontendUrl || `${req.protocol}://${req.get('host')}`;
+  // Provide both webapp deep link and direct API join link
+  const webappLink = `${baseUrl.replace(/\/$/, '')}/#/deal/${deal.id}/join/${linkToken}`;
+  const apiLink = `${req.protocol}://${req.get('host')}/api/deals/${deal.id}/join/${linkToken}`;
   return res.json({
     deal,
-    link: `${req.protocol}://${req.get('host')}/api/deals/${deal.id}/join/${linkToken}`,
+    link: webappLink,
+    apiLink,
+    webappLink,
+    depositComment: memo,
+    depositMemo: memo,
+    releasePreview: outMemo,
+    paymentAddress: payAddr,
+    encryption: isEncryptionEnabled() ? 'e2e-aes-256-gcm' : 'transport-only',
+    instructions:
+      asset.toUpperCase() === 'TON'
+        ? `Send ${amount} ${asset} to ${payAddr} with comment "${memo}" so bot detects your deposit. On release seller will receive with comment "${outMemo}".`
+        : `Send ${amount} ${asset} (Jetton) to ${payAddr} with forward comment "${memo}" — bot detects via forward payload. Release memo: "${outMemo}".`,
   });
 }));
 
-// Join a deal via one-time link (assigns the missing role exactly once)
+// Join a deal via one-time link (atomic, encrypted channel ready)
 app.post('/api/deals/:id/join/:token', joinLimiter, requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   const token = String(req.params.token || '');
   if (!Number.isInteger(dealId) || !token) return res.status(400).json({ error: 'invalid_request' });
 
-  // Token must exist in deal_links…
-  const link = await getDealLink(token);
-  if (!link || Number(link.deal_id) !== dealId) {
-    return res.status(404).json({ error: 'invalid_token' });
-  }
-  // …and not be expired.
-  if (new Date(link.expires_at).getTime() <= Date.now()) {
-    void markDealLinkUsed(token).catch(() => undefined);
-    return res.status(410).json({ error: 'link_expired' });
-  }
-
-  const deal = await validateDealLink(token);
-  if (!deal || Number(deal.id) !== dealId) {
-    return res.status(404).json({ error: 'deal_not_found' });
-  }
-
-  // Role = whichever side is still missing.
-  let role: 'buyer' | 'seller';
-  if (deal.buyer_telegram_id == null) role = 'buyer';
-  else if (deal.seller_telegram_id == null) role = 'seller';
-  else return res.status(409).json({ error: 'deal_already_full' });
-
-  // Telegram id: verified identity wins; body value only for api-key callers.
   let telegramId: number | null;
   if ((req.authMode === 'telegram' || req.authMode === 'dev') && req.user && isValidPositiveInt(req.user.id)) {
-    telegramId = req.user.id; // body {telegramId} is ignored for authenticated callers
+    telegramId = req.user.id;
   } else {
     telegramId = callerTelegramId(req);
   }
   if (telegramId === null) return res.status(400).json({ error: 'telegramId_required' });
 
-  await assignRoleToDeal(dealId, role, telegramId);
-
-  // One-time link: consume it.
-  await markDealLinkUsed(token);
-  void purgeExpiredLinks().catch((err) => logger.warn('purgeExpiredLinks failed', err));
-
-  return res.json({ ok: true, role });
+  try {
+    const role = await atomicJoinDeal(dealId, token, telegramId);
+    void purgeExpiredLinks().catch((err) => logger.warn('purgeExpiredLinks failed', err));
+    // Ensure chat key exists so buyer-seller can immediately chat encrypted
+    try { await getDealChatKey(dealId); } catch {}
+    return res.json({ ok: true, role });
+  } catch (err) {
+    const msg = String((err as Error).message || '');
+    if (msg === 'invalid_token') return res.status(404).json({ error: 'invalid_token' });
+    if (msg === 'deal_not_found') return res.status(404).json({ error: 'deal_not_found' });
+    if (msg === 'deal_already_full') return res.status(409).json({ error: 'deal_already_full' });
+    // Expired check via validate: if token exists but expired, mark used
+    const link = await getDealLink(token).catch(() => null);
+    if (link && new Date(link.expires_at).getTime() <= Date.now()) {
+      void markDealLinkUsed(token).catch(() => undefined);
+      return res.status(410).json({ error: 'link_expired' });
+    }
+    logger.warn('join failed', err);
+    return res.status(400).json({ error: msg || 'join_failed' });
+  }
 }));
 
-// Chat endpoints
-app.get('/api/deals/:id/chat', asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const messages = await db.query('SELECT * FROM messages WHERE deal_id = $1 ORDER BY created_at ASC', [id]);
-  return res.json(messages.rows);
+// Per-deal E2E chat key — only buyer, seller or admin may fetch (ciphertext never leaves client decrypted on server)
+app.get('/api/deals/:id/key', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const deal = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const isParty =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
+  const isAdminCaller = req.authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isParty && !isAdminCaller) return res.status(403).json({ error: 'not_a_party_to_deal' });
+  const key = await getDealChatKey(dealId);
+  return res.json({ dealId, key, algo: 'aes-256-gcm', format: 'base64' });
+}));
+
+// Chat endpoints — fully encrypted, authenticated, party-only
+// Returns ciphertext only; decryption happens client-side with per-deal key from /key
+app.get('/api/deals/:id/chat', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const limitRaw = Number(req.query.limit || 100);
+  const limit = Number.isInteger(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 100;
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const isParty =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
+  const isAdminCaller = req.authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isParty && !isAdminCaller) return res.status(403).json({ error: 'not_a_party_to_deal' });
+
+  const rows = await getDealMessages(dealId, limit);
+  // Return canonical shape: id, sender, created_at, ciphertext (encrypted_content) + legacy content for migration
+  const out = rows.map((r: any) => ({
+    id: r.id,
+    deal_id: r.deal_id,
+    sender_telegram_id: r.sender_telegram_id,
+    created_at: r.created_at,
+    is_encrypted: !!r.is_encrypted,
+    // ciphertext is the E2E blob (iv+tag+enc base64) — plaintext never returned when encrypted
+    ciphertext: r.encrypted_content || null,
+    content: r.is_encrypted ? undefined : r.content,
+  }));
+  return res.json(out);
 }));
 
 app.post('/api/deals/:id/chat', chatPostLimiter, requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
-  const content = req.body ? req.body.content : undefined;
-  if (typeof content !== 'string' || !content.trim()) return res.status(400).json({ error: 'content_required' });
+
+  // Accept either E2E ciphertext (preferred) or legacy plaintext content
+  const body = (req.body || {}) as Record<string, unknown>;
+  const ciphertext = typeof body.ciphertext === 'string' ? body.ciphertext.trim()
+    : typeof (body as any).encryptedContent === 'string' ? String((body as any).encryptedContent).trim()
+    : typeof (body as any).encrypted_content === 'string' ? String((body as any).encrypted_content).trim()
+    : '';
+  const content = typeof body.content === 'string' ? body.content.trim() : '';
 
   // Sender identity is FORCED server-side; body senderTelegramId only trusted from api-key callers.
   let senderTelegramId: number | null;
@@ -340,8 +405,26 @@ app.post('/api/deals/:id/chat', chatPostLimiter, requireIdentity, asyncHandler(a
   const isAdminCaller = req.authMode === 'api-key' || isAdminTelegramId(senderTelegramId);
   if (!isParty && !isAdminCaller) return res.status(403).json({ error: 'not_a_party_to_deal' });
 
-  await db.query('INSERT INTO messages (deal_id, sender_telegram_id, content) VALUES ($1,$2,$3)', [dealId, senderTelegramId, content]);
-  return res.json({ ok: true });
+  // Validate payload
+  if (ciphertext) {
+    // E2E path: server stores ciphertext as-is, never sees plaintext
+    if (ciphertext.length < 20 || ciphertext.length > 20000) return res.status(400).json({ error: 'invalid_ciphertext_length' });
+    try {
+      await addEncryptedMessage(dealId, senderTelegramId, ciphertext);
+    } catch (e) {
+      return res.status(400).json({ error: String((e as Error).message || 'invalid_ciphertext') });
+    }
+    return res.json({ ok: true, encrypted: true });
+  }
+
+  if (!content) return res.status(400).json({ error: 'content_required' });
+  if (content.length > 4000) return res.status(400).json({ error: 'content_too_long' });
+
+  // Legacy plaintext path — encrypt server-side with per-deal key so DB never stores plaintext long-term
+  // (future clients should always send ciphertext)
+  const { addDealMessage } = await import('./services/dealService');
+  await addDealMessage(dealId, senderTelegramId, content);
+  return res.json({ ok: true, encrypted: true });
 }));
 
 // Withdraw endpoint (admin-only; deprecated wrapper — guarded DB transition only)
@@ -373,6 +456,36 @@ app.get('/api/status/:address', asyncHandler(async (req, res) => {
   }
 }));
 
+// TON wallet balance — public, proxied via backend to keep TONCENTER_API_KEY server-side
+// Supports both raw (0:hex) and friendly (EQ/UQ) addresses; returns balance in nanotons + TON
+app.get('/api/balance/:address', asyncHandler(async (req, res) => {
+  const raw = String(req.params.address || '').trim();
+  if (!raw) return res.status(400).json({ error: 'address_required' });
+  try {
+    const addr = Address.parse(raw);
+    const state = await client.getContractState(addr);
+    // state.balance is bigint (nanotons), state.state is 'active'|'uninitialized'|'frozen'
+    const balanceNano = state.balance.toString();
+    // Use BigInt math to avoid Number precision loss
+    const nano = state.balance;
+    const whole = nano / 1000000000n;
+    const frac = nano % 1000000000n;
+    const fracStr = frac.toString().padStart(9, '0').replace(/0+$/, '');
+    const balanceTon = fracStr ? `${whole.toString()}.${fracStr}` : whole.toString();
+    return res.json({
+      address: addr.toString({ urlSafe: true, bounceable: false }),
+      addressRaw: `${addr.workChain}:${addr.hash.toString('hex')}`,
+      balance: balanceNano,
+      balanceTon,
+      state: state.state,
+      network: config.tonNetwork,
+    });
+  } catch (err) {
+    logger.warn('/api/balance error for ' + raw, err);
+    return res.status(400).json({ error: 'invalid_address', detail: String((err as Error).message || err) });
+  }
+}));
+
 // --- API Documentation (self-describing) ------------------------------------
 const API_DOCS = {
   name: 'TON Escrow Bot — REST API',
@@ -386,7 +499,7 @@ const API_DOCS = {
   },
   rateLimits: 'create deal 10/min · join 20/min · chat post 60/min · notify 5/min (sliding window per IP+route)',
   endpoints: [
-    { method: 'GET', path: '/api/info', auth: 'public', desc: 'Health + feeBps, paymentAddress, network, adminTelegramIds' },
+    { method: 'GET', path: '/api/info', auth: 'public', desc: 'Health + feeBps, paymentAddress, network, adminTelegramIds, encryption' },
     { method: 'GET', path: '/tonconnect-manifest.json', auth: 'public', desc: 'TON Connect manifest (dynamic origin)' },
     { method: 'GET', path: '/api/docs', auth: 'public', desc: 'This doc (JSON)' },
     { method: 'GET', path: '/api/openapi.json', auth: 'public', desc: 'OpenAPI 3.0 spec (machine-readable)' },
@@ -394,15 +507,17 @@ const API_DOCS = {
     { method: 'GET', path: '/api/deals', auth: 'public', desc: 'List last 100 deals' },
     { method: 'GET', path: '/api/deals/:id', auth: 'public', desc: 'Single deal by id' },
     { method: 'GET', path: '/api/deals/mine', auth: 'Identity', desc: 'Deals where caller is buyer or seller (requires x-init-data or x-api-key)' },
-    { method: 'POST', path: '/api/deals', auth: 'Identity', desc: 'Create deal {sellerId, asset TON|USDT, amount, terms?, deadline?} — caller forced to one side, returns {deal, link} with one-time join link' },
-    { method: 'POST', path: '/api/deals/:id/join/:token', auth: 'Identity', desc: 'Consume one-time link, assign missing buyer/seller role' },
-    { method: 'GET', path: '/api/deals/:id/chat', auth: 'public', desc: 'Deal chat messages' },
-    { method: 'POST', path: '/api/deals/:id/chat', auth: 'Identity (party or admin)', desc: 'Post {content} — sender forced to caller, only party/admin' },
+    { method: 'POST', path: '/api/deals', auth: 'Identity', desc: 'Create deal {sellerId, asset TON|USDT, amount, terms?, deadline?} — caller forced to one side, returns {deal, link, webappLink, encryption}' },
+    { method: 'POST', path: '/api/deals/:id/join/:token', auth: 'Identity', desc: 'Consume one-time link atomically, assign missing buyer/seller role' },
+    { method: 'GET', path: '/api/deals/:id/key', auth: 'Identity (party or admin)', desc: 'Get per-deal E2E chat key {key, algo: aes-256-gcm} — only buyer/seller/admin' },
+    { method: 'GET', path: '/api/deals/:id/chat', auth: 'Identity (party or admin)', desc: 'Deal chat messages — ciphertext only (E2E). Decrypt client-side with per-deal key. ?limit=1..200' },
+    { method: 'POST', path: '/api/deals/:id/chat', auth: 'Identity (party or admin)', desc: 'Post E2E ciphertext {ciphertext: base64(iv+tag+enc)} — server never sees plaintext. Legacy {content} also accepted and E2E-encrypted server-side' },
     { method: 'POST', path: '/api/notify', auth: 'Admin', desc: 'Send bot message {chatId, message} — rate 5/min' },
     { method: 'GET', path: '/api/notifications', auth: 'Admin', desc: 'Last 200 notifications' },
     { method: 'POST', path: '/api/withdraw', auth: 'Admin', desc: 'Release (guarded DB → RELEASED; on-chain stub if REQUIRE_ONCHAIN=true without signer)' },
     { method: 'POST', path: '/api/refund', auth: 'Admin', desc: 'Refund (guarded DB → REFUNDED)' },
     { method: 'GET', path: '/api/status/:address', auth: 'public', desc: 'On-chain Escrow.getStatus() for address' },
+    { method: 'GET', path: '/api/balance/:address', auth: 'public', desc: 'TON wallet balance via TONCenter (nanotons + TON, state)' },
   ],
   internalServices: {
     signer: { url: 'http://signer:3001 (internal, NOT published)', endpoints: ['GET /health (open)', 'GET /address (x-api-key)', 'GET /info (x-api-key)', 'POST /send {to,value,comment?}', 'POST /send-batch {requests[]}', 'POST /deploy', 'POST /deploy-escrow {escrowAddress, escrowStateInit{codeBoc,dataBoc}, value, bodyBoc}'] },
@@ -417,7 +532,9 @@ const API_DOCS = {
     'x-ubot-key / x-api-key (ubot)': 'UBOT_API_KEY',
   },
   notes: [
-    'Mini App served at / (webapp/public) with ?deal=<id>&join=<token> deep links; requires WEBAPP_URL=https://<public> for Telegram menu button',
+    'Mini App served at /#/deal/:id/join/:token deep links; requires WEBAPP_URL=https://<public> for Telegram menu button — invite uses WEBAPP_URL when set, else request Host (no Host-header injection)',
+    'Seller-buyer chat is E2E encrypted: per-deal AES-256-GCM key from GET /api/deals/:id/key, messages are ciphertext-only (iv+tag+enc base64) — server never stores plaintext',
+    'Join is atomic (BEGIN FOR UPDATE): one-time link cannot be double-consumed, role assignment guarded with WHERE IS NULL',
     'Postgres: deals, users, messages, deal_links, notifications + utrade_trades/utrade_events (shared volume pgdata)',
     'See backend/README.md for full env table and auth legend',
   ],
@@ -522,28 +639,74 @@ if (config.serveStatic) {
 const port = Number(process.env.PORT || 3000);
 let server: Server | null = null;
 
-connectDB()
-  .then(async () => {
-    if (config.botToken) {
-      try {
-        await startBot();
-      } catch (err) {
-        logger.error('Bot failed to start — continuing without Telegram polling', err);
-      }
-    } else {
-      logger.warn('BOT_TOKEN not set — /api/notify will return 503');
+async function boot() {
+  // Retry DB with backoff — handles postgres "starting up" after unclean shutdown (40s recovery)
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    try {
+      await connectDB();
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (attempt === 6) break;
+      const delay = attempt * 3000; // 3s, 6s, 9s, 12s, 15s = ~45s total covers worst recovery
+      logger.warn(`DB connect failed (attempt ${attempt}/6), retrying in ${delay}ms`, err);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  if (lastErr) throw lastErr;
+
+  if (config.botToken) {
+    try {
+      await startBot();
+    } catch (err) {
+      logger.error('Bot failed to start — continuing without Telegram polling', err);
+    }
+  } else {
+    logger.warn('BOT_TOKEN not set — /api/notify will return 503');
+  }
+  try {
+    await startListener();
+  } catch (err) {
+    logger.error('Blockchain listener failed to start', err);
+  }
+  server = app.listen(port, () => logger.info(`Server listening on http://localhost:${port}`));
+}
+
+boot().catch((err) => {
+  logger.error('Could not initialize DB after retries', err);
+  server = app.listen(port, () => logger.info(`Server listening (DB not ready) on http://localhost:${port}`));
+  // Background retry: if DB comes up later, warm it and try to start bot
+  let bgAttempts = 0;
+  const bgRetry = setInterval(async () => {
+    bgAttempts++;
+    if (bgAttempts > 12) {
+      clearInterval(bgRetry);
+      return;
     }
     try {
-      await startListener();
-    } catch (err) {
-      logger.error('Blockchain listener failed to start', err);
+      await connectDB();
+      logger.info('Background DB retry succeeded — starting bot/listener');
+      clearInterval(bgRetry);
+      if (config.botToken && !getBot()) {
+        try {
+          await startBot();
+          logger.info('Bot started via background retry');
+        } catch (e) {
+          logger.error('Background bot start failed', e);
+        }
+      }
+      try {
+        await startListener();
+      } catch (e) {
+        logger.warn('Background listener start failed', e);
+      }
+    } catch {
+      // keep retrying
     }
-    server = app.listen(port, () => logger.info(`Server listening on http://localhost:${port}`));
-  })
-  .catch(err => {
-    logger.error('Could not initialize DB', err);
-    server = app.listen(port, () => logger.info(`Server listening (DB not ready) on http://localhost:${port}`));
-  });
+  }, 10000);
+});
 
 let shuttingDown = false;
 async function shutdown(signal: string) {
