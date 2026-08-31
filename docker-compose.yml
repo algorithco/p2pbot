@@ -1,12 +1,12 @@
-# P2P escrow bot — micro-architecture (8 services, cloudflared everywhere)
+# P2P escrow bot — micro-architecture (6 services, no cloudflared)
 #  frontend (webapp nginx :8080 -> backend :3000) | backend (API-only :3000, bot)
 #  signer (W5 :3001) | ubot (:3002) | utradebot (:3003) | postgres (:5432)
-#  cloudflared (frontend :80) + cloudflared-backend (backend :3000) -> public HTTPS
+#  TON Connect manifest is now hosted on GitHub raw (see tonconnect-manifest.json) — no tunnel needed
 #
 # Prerequisites:
-#   1. cp backend/.env.example backend/.env       # BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL, FRONTEND_URL
+#   1. cp backend/.env.example backend/.env       # BOT_TOKEN, ADMIN_TELEGRAM_IDS, SIGNER_URL, FRONTEND_URL, ENCRYPTION_KEY
 #   2. cp signer/.env.example signer/.env         # SIGNER_MNEMONIC (24 words), SIGNER_API_KEY
-#   3. cp ubot/.env.example ubot/.env             # API_ID, API_HASH, TWO_FA_PASSWORD
+#   3. cp ubot/.env.example ubot/.env             # API_ID, API_HASH, TWO_FA_PASSWORD, ENCRYPTION_KEY
 #   4. cp utradebot/.env.example utradebot/.env   # UTRADE_BOT_TOKEN, API_ID/HASH, ENCRYPTION_KEY
 #   5. docker compose up --build -d
 #   6. Frontend (Telegram Mini App) → http://localhost:8080
@@ -14,7 +14,8 @@
 #
 # For production TLS (Telegram Mini App requires HTTPS public URL):
 #   - Put frontend+backend behind Caddy/nginx (set WEBAPP_URL=https://your-domain, FRONTEND_URL same)
-#   - Ensure POSTGRES_PASSWORD, SIGNER_API_KEY, UBOT_API_KEY, UTRADE_API_KEY are strong (32+ chars)
+#   - Or host tonconnect-manifest.json on GitHub raw (see tonconnect-manifest.json + webapp/public/tonconnect-manifest.json)
+#   - Ensure POSTGRES_PASSWORD, SIGNER_API_KEY, UBOT_API_KEY, UTRADE_API_KEY, ENCRYPTION_KEY are strong (32+ hex chars, 64 hex for ENCRYPTION_KEY)
 #
 # Micro-architecture: each service is independently buildable/scalable, isolated network escrow-net.
 #  - backend:3000 API-only (no static, SERVE_STATIC=false) — CORS allows frontend origin
@@ -98,7 +99,7 @@ services:
       signer:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/info',r=>process.exit(0)).on('error',()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/info',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 3s
       retries: 5
@@ -145,46 +146,6 @@ services:
         limits:
           cpus: "0.3"
           memory: 128M
-
-  # Cloudflared — tunnels everywhere (frontend + backend) to public HTTPS
-  # Both use quick tunnel (random trycloudflare.com, URL in logs) — wallet can use either.
-  # Frontend tunnel: Mini App + /api proxy (single public URL for dapp)
-  # Backend tunnel: direct API https://xxx.trycloudflare.com/api/* (alternative)
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    # Quick tunnel — no config needed, URL printed in `docker compose logs cloudflared`
-    command: tunnel --url http://frontend:80 --no-autoupdate
-    # Named tunnel (stable URL) — uncomment and provide token:
-    # command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      frontend:
-        condition: service_healthy
-    networks:
-      - escrow-net
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    # Optional: if using named tunnel, ensure token is passed
-    # environment:
-    #   - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-
-  cloudflared-backend:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --url http://backend:3000 --no-autoupdate
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - escrow-net
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   ubot:
     build:
