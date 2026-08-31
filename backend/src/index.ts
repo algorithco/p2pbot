@@ -28,6 +28,7 @@ import {
 import { depositComment, releaseComment } from './utils/comments';
 import { commentToPayloadB64, jettonTransferPayload } from './utils/tonPayload';
 import { isEncryptionEnabled } from './utils/encryption';
+import { toBaseUnits } from './utils/money';
 import {
   identityAuth,
   requireIdentity,
@@ -289,12 +290,9 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
   let jettonPayload: string | null = null;
   if (asset.toUpperCase() !== 'TON') {
     try {
-      // For Jetton (USDT) deposits, buyer sends Jetton transfer with forward comment = memo
-      // Payload is the jetton transfer cell with forwardPayload containing memo
-      // We precompute a sample for display; actual amount/destination will be set by wallet
-      const mockDest = payAddr && payAddr.length > 10 ? Address.parse(payAddr) : Address.parse('EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJKZ');
+      const mockDest = payAddr && payAddr.length > 10 ? Address.parse(payAddr) : Address.parse('0:' + '00'.repeat(32));
       jettonPayload = jettonTransferPayload({
-        amount: BigInt(Math.round(Number(amount) * 1e6)), // USDT 6 decimals mock for preview
+        amount: BigInt(toBaseUnits(String(amount), asset.toUpperCase())),
         destination: mockDest,
         forwardComment: memo,
         forwardTonAmount: BigInt(1000000), // 0.001 TON for forward
@@ -544,9 +542,9 @@ app.get('/api/deals/:id/payload', asyncHandler(async (req, res) => {
   let jettonPayload: string | null = null;
   if (String(deal.asset).toUpperCase() !== 'TON') {
     try {
-      const payAddr = String(deal.payment_address || resolvePaymentAddress() || 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJKZ');
+      const payAddr = String(deal.payment_address || resolvePaymentAddress() || '0:' + '00'.repeat(32));
       jettonPayload = jettonTransferPayload({
-        amount: BigInt(Math.round(Number(deal.amount) * 1e6)),
+        amount: BigInt(toBaseUnits(String(deal.amount), String(deal.asset).toUpperCase())),
         destination: Address.parse(payAddr),
         forwardComment: memo,
         forwardTonAmount: BigInt(1000000),

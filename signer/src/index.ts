@@ -82,6 +82,8 @@ app.post('/send', authMiddleware, async (req, res) => {
   try {
     const { to, value, body, bounce, comment } = req.body || {};
     if (!to || !value) return res.status(400).json({ error: 'to and value required' });
+    if (!comment) return res.status(400).json({ error: 'memo_required: TON send must include comment memo (e.g. escrow#123)' });
+    if (String(comment).length > 120) return res.status(400).json({ error: 'memo_too_long', max: 120 });
     // Basic address validation
     try {
       const { Address } = await import('@ton/core');
@@ -94,6 +96,7 @@ app.post('/send', authMiddleware, async (req, res) => {
   } catch (err) {
     const msg = (err as Error).message;
     if (msg.includes('wallet_not_configured')) return res.status(503).json({ error: msg });
+    if (msg.includes('memo_required') || msg.includes('memo_too_long')) return res.status(400).json({ error: msg });
     logger.error('POST /send error', err);
     res.status(500).json({ error: msg });
   }

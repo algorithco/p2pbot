@@ -36,8 +36,9 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     const terms = String(opts?.terms || deal.terms || '');
 
     const memo = releaseComment({ id: dealId, amount, asset, terms });
-    // For refund, keep same memo but prefix "Refund:"
-    const finalMemo = status === DEAL_STATUS.REFUNDED ? `Refund: ${memo}` : memo;
+    // For refund, keep same memo but prefix "Refund:" — ensure <120 chars for TON comment limit
+    let finalMemo = status === DEAL_STATUS.REFUNDED ? `Refund: ${memo}` : memo;
+    if (finalMemo.length > 120) finalMemo = finalMemo.slice(0, 119) + '…';
 
     const to = opts?.toAddress || (status === DEAL_STATUS.RELEASED ? String(deal.seller_telegram_id ? '' : deal.payment_address) : String(deal.buyer_telegram_id ? '' : deal.payment_address));
     // Try to resolve seller/buyer TON address from users table
