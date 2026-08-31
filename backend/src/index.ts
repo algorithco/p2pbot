@@ -40,6 +40,20 @@ const app = express();
 // Trust X-Forwarded-* from nginx (needed for https detection behind TLS proxy)
 app.set('trust proxy', 1);
 
+// Security headers — encrypted seller-buyer channel must not be sniffed/framed
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (req.secure || req.get('x-forwarded-proto') === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
+  }
+  // CSP: Telegram WebView needs inline scripts (Mini App), so allow self + unsafe-inline for now but block framing
+  res.setHeader('Content-Security-Policy', "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; connect-src 'self' https: wss:; frame-ancestors 'none'");
+  next();
+});
+
 /** CORS — micro-architecture: backend (3000) separate from frontend (8080 via nginx).
  * Allow WEBAPP_URL, FRONTEND_URL, and local dev origins. Falls back to allow-all in dev.
  */
