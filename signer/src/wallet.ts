@@ -215,6 +215,80 @@ export class W5Signer {
   }
 
   /**
+   * Send a Jetton (TEP-74) with forward memo.
+   * Resolves the signer's jetton wallet for `jettonMasterAddress`, then sends JettonTransfer with forwardPayload = comment.
+   * Memo is in forwardPayload so the receiver jetton wallet forwards it with notification op 0x7362d09c.
+   */
+  async sendJetton(req: {
+    jettonMasterAddress: string;
+    to: string;
+    amount: string; // human amount, e.g. "100.5" for USDT (6 decimals)
+    forwardComment?: string;
+    forwardTonAmount?: string; // default 0.01 TON for forward
+  }): Promise<{ seqno: number }> {
+    const { wallet, keyPair } = this.assertConfigured();
+    const master = Address.parse(req.jettonMasterAddress);
+    const dest = Address.parse(req.to);
+    const forwardTon = toNano(req.forwardTonAmount || '0.01');
+    let jettonWalletAddr: Address | null = null;
+    try {
+      const { beginCell } = await import('@ton/core');
+      const ownerSlice = beginCell().storeAddress(wallet.address).endCell();
+      const res = await this.client.runMethod(master, 'get_wallet_address', [{ type: 'slice', cell: ownerSlice }]);
+      jettonWalletAddr = res.stack.readAddress();
+    } catch (e) {
+      throw new Error(`jetton_wallet_resolve_failed: ${String(e)}`);
+    }
+    if (!jettonWalletAddr) throw new Error('jetton_wallet_not_found');
+
+    let amountNano: bigint;
+    try {
+      // USDT-style 6 decimals
+      const [whole, frac = ''] = req.amount.trim().split('.');
+      const fracPadded = (frac + '0'.repeat(6)).slice(0, 6);
+      amountNano = BigInt(whole === '' ? '0' : whole) * 1000000n + BigInt(fracPadded === '' ? '0' : fracPadded);
+    } catch {
+      throw new Error('invalid jetton amount');
+    }
+    if (amountNano <= 0n) throw new Error('jetton amount must be > 0');
+
+    let forwardPayload: Cell | null = null;
+    if (req.forwardComment) {
+      forwardPayload = beginCell().storeUint(0, 32).storeStringTail(req.forwardComment).endCell();
+    }
+
+    const body = beginCell()
+      .storeUint(0x0f8a7ea5, 32) // JETTON_TRANSFER
+      .storeUint(0, 64) // queryId
+      .storeCoins(amountNano)
+      .storeAddress(dest)
+      .storeAddress(null) // responseDestination
+      .storeBit(0) // customPayload null
+      .storeCoins(forwardTon)
+      .storeMaybeRef(forwardPayload)
+      .endCell();
+
+    const provider = this.client.provider(wallet.address, null);
+    const seqno = await wallet.getSeqno(provider);
+    const { internal } = await import('@ton/ton');
+    await wallet.sendTransfer(provider, {
+      seqno,
+      secretKey: keyPair.secretKey,
+      sendMode: SendMode.PAY_GAS_SEPARATELY,
+      messages: [
+        internal({
+          to: jettonWalletAddr,
+          value: toNano('0.06'), // jetton op gas
+          bounce: true,
+          body,
+        }),
+      ],
+    });
+    logger.info(`Jetton send ${req.amount} from ${jettonWalletAddr.toString()} to ${dest.toString()} with memo "${req.forwardComment || ''}"`);
+    return { seqno };
+  }
+
+  /**
    * Sign and send a custom internal message carrying StateInit + body.
    * Used by backend's Escrow deployer: needs to send Deploy{queryId} body to escrow address with StateInit.
    */
