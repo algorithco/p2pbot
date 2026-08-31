@@ -1,9 +1,10 @@
 import { client } from './tonClient';
 import { Address, Cell } from '@ton/core';
 import type { Transaction } from '@ton/core';
-import { updateDealStatus } from '../services/dealService';
+import { updateDealStatus, getDealById } from '../services/dealService';
 import { db } from '../db/queries';
 import { toBaseUnits } from '../utils/money';
+import { depositComment, parseDepositComment, parseTonComment, parseJettonForwardComment } from '../utils/comments';
 import { getBot } from '../bot/bot';
 import logger from '../logger';
 
@@ -26,16 +27,44 @@ interface DealRow {
   amount: string | null;
   buyer_telegram_id: number | null;
   seller_telegram_id: number | null;
+  payment_address: string | null;
+  terms: string | null;
 }
 
 async function findAwaitingDeal(paymentAddress: string): Promise<DealRow | null> {
   const res = await db.query(
-    `SELECT id, asset, amount, buyer_telegram_id, seller_telegram_id
+    `SELECT id, asset, amount, buyer_telegram_id, seller_telegram_id, payment_address, terms
      FROM deals WHERE payment_address = $1 AND status = $2
      ORDER BY id DESC LIMIT 1`,
     [paymentAddress, 'AWAITING_DEPOSIT']
   );
   return res.rows[0] || null;
+}
+
+async function findAwaitingDealById(dealId: number, paymentAddress?: string): Promise<DealRow | null> {
+  const res = await db.query(
+    `SELECT id, asset, amount, buyer_telegram_id, seller_telegram_id, payment_address, terms
+     FROM deals WHERE id = $1 AND status = $2 LIMIT 1`,
+    [dealId, 'AWAITING_DEPOSIT']
+  );
+  const row = res.rows[0] as DealRow | undefined;
+  if (!row) return null;
+  // If paymentAddress is provided, ensure it matches (or is empty for off-chain fallback)
+  if (paymentAddress && row.payment_address && row.payment_address !== paymentAddress) {
+    // For shared custodial wallet, paymentAddress will be the custodial address for all deals,
+    // so this check should be lenient: only reject if row has a distinct contract address
+    // that doesn't match the monitored address.
+    // We allow custodial matches.
+    try {
+      if (Address.parse(row.payment_address).toRawString() !== Address.parse(paymentAddress).toRawString()) {
+        // Different contract address — not a match
+        return null;
+      }
+    } catch {
+      if (row.payment_address !== paymentAddress) return null;
+    }
+  }
+  return row;
 }
 
 function addressesEqual(a: string, b: string): boolean {
@@ -61,8 +90,38 @@ async function notifyParties(deal: DealRow, text: string) {
   }
 }
 
-async function processTonDeposit(addr: string, src: Address | null, value: bigint, txHash: string) {
-  const deal = await findAwaitingDeal(addr);
+async function processTonDeposit(addr: string, src: Address | null, value: bigint, txHash: string, comment: string | null) {
+  // Try comment-based lookup first (most reliable for shared custodial address)
+  let deal: DealRow | null = null;
+  const expectedId = parseDepositComment(comment);
+  if (expectedId != null) {
+    deal = await findAwaitingDealById(expectedId, addr);
+    if (deal) {
+      logger.info(`Deal #${deal.id}: matched by comment "${comment}" from ${src?.toString() || 'unknown'}`);
+    } else {
+      logger.warn(`Deposit to ${addr} with comment "${comment}" -> no awaiting deal #${expectedId} (or address mismatch), falling back to amount-based lookup`);
+    }
+  }
+
+  // Fallback: find latest awaiting deal for this paymentAddress
+  if (!deal) {
+    deal = await findAwaitingDeal(addr);
+    if (!deal) return;
+    // If we expected a comment but didn't get one, log but still allow (backwards compat)
+    const expectedMemo = depositComment(deal.id);
+    if (comment == null || comment.trim() === '') {
+      logger.info(`Deal #${deal.id}: TON deposit without comment (expected "${expectedMemo}") from ${src?.toString() || 'unknown'} — accepting by amount`);
+    } else if (parseDepositComment(comment) == null) {
+      // Comment present but not matching escrow# pattern — could be user error, but still check amount
+      logger.warn(`Deal #${deal.id}: TON deposit with unexpected comment "${comment}" (expected "${expectedMemo}") — checking amount`);
+    } else if (expectedId == null || expectedId !== deal.id) {
+      // Comment is escrow# but for different deal id
+      logger.warn(`Deal #${deal.id}: TON deposit comment "${comment}" does not match this deal's expected "${expectedMemo}" — checking amount anyway`);
+    }
+  } else {
+    // We already matched by comment, but still need to ensure paymentAddress matches (already checked)
+  }
+
   if (!deal) return;
 
   let expected: bigint;
@@ -72,7 +131,10 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     logger.warn(`Deal #${deal.id}: cannot compute base units (${(err as Error).message})`);
     return;
   }
-  if (value !== expected) return;
+  if (value !== expected) {
+    logger.info(`Deal #${deal.id}: TON deposit amount mismatch: got ${value} expected ${expected} (comment "${comment}")`);
+    return;
+  }
 
   // If the buyer's TON address is known, require the funds to come from them.
   if (src && deal.buyer_telegram_id != null) {
@@ -82,13 +144,14 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     );
     const buyerTon = userRes.rows[0]?.ton_address;
     if (buyerTon && !addressesEqual(buyerTon, src.toString())) {
-      logger.warn(`Deal #${deal.id}: TON deposit from unexpected source ${src.toString()}`);
+      logger.warn(`Deal #${deal.id}: TON deposit from unexpected source ${src.toString()} (expected ${buyerTon})`);
       return;
     }
   }
 
   await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
-  await notifyParties(deal, `Deposit confirmed for deal #${deal.id}. Both parties can now confirm with /confirm ${deal.id}`);
+  const who = comment ? ` (memo "${comment}")` : '';
+  await notifyParties(deal, `✅ Deposit confirmed for deal #${deal.id}${who}. Both parties can now confirm with /confirm ${deal.id}`);
 }
 
 interface JettonNotification {
@@ -111,8 +174,29 @@ function parseJettonNotification(body: Cell): JettonNotification | null {
   }
 }
 
-async function processJettonDeposit(addr: string, note: JettonNotification, txHash: string) {
-  const deal = await findAwaitingDeal(addr);
+async function processJettonDeposit(addr: string, note: JettonNotification, forwardComment: string | null, txHash: string) {
+  // Try comment-based lookup first
+  let deal: DealRow | null = null;
+  const expectedId = parseDepositComment(forwardComment);
+  if (expectedId != null) {
+    deal = await findAwaitingDealById(expectedId, addr);
+    if (deal) {
+      logger.info(`Deal #${deal.id}: matched by jetton forward comment "${forwardComment}"`);
+    } else {
+      logger.warn(`Jetton deposit to ${addr} with forward comment "${forwardComment}" -> no awaiting deal #${expectedId}`);
+    }
+  }
+  if (!deal) {
+    deal = await findAwaitingDeal(addr);
+    if (!deal) return;
+    const expectedMemo = depositComment(deal.id);
+    if (!forwardComment) {
+      logger.info(`Deal #${deal.id}: USDT deposit without forward comment (expected "${expectedMemo}") — accepting by amount`);
+    } else if (parseDepositComment(forwardComment) == null) {
+      logger.warn(`Deal #${deal.id}: USDT deposit with unexpected forward comment "${forwardComment}" (expected "${expectedMemo}")`);
+    }
+  }
+
   if (!deal) return;
 
   let expected: bigint;
@@ -122,24 +206,54 @@ async function processJettonDeposit(addr: string, note: JettonNotification, txHa
     logger.warn(`Deal #${deal.id}: cannot compute base units (${(err as Error).message})`);
     return;
   }
-  if (note.amount !== expected) return;
-  // Optional strictness: when USDT master is configured the sending jetton wallet
-  // should belong to it — skipped here because wallet->master derivation needs jettonUtils.
+  if (note.amount !== expected) {
+    logger.info(`Deal #${deal.id}: USDT deposit amount mismatch: got ${note.amount} expected ${expected} (forward "${forwardComment}")`);
+    return;
+  }
 
   await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
-  await notifyParties(deal, `USDT deposit confirmed for deal #${deal.id}. Both parties can now confirm with /confirm ${deal.id}`);
+  const who = forwardComment ? ` (memo "${forwardComment}")` : '';
+  await notifyParties(deal, `✅ USDT deposit confirmed for deal #${deal.id}${who}. Both parties can now confirm with /confirm ${deal.id}`);
 }
 
 async function handleTransaction(addr: string, tx: Transaction) {
   const txHash = tx.hash().toString('hex');
   if (!tx.inMessage) return;
 
-  // TEP-74 transfer notifications arrive as internal messages that DO carry
-  // positive attached TON (forward fee), so we must classify by body opcode
-  // BEFORE treating the message as a native TON deposit.
+  // Try jetton first
   const note = parseJettonNotification(tx.inMessage.body);
   if (note) {
-    await processJettonDeposit(addr, note, txHash);
+    // Extract forward payload comment if present (remaining slice after jetton notification)
+    let forwardComment: string | null = null;
+    try {
+      // The body has been consumed by parseJettonNotification, need to re-parse to get forwardPayload
+      // Use the helper from comments utils
+      const bodySlice = tx.inMessage.body.beginParse();
+      bodySlice.loadUint(32); // op
+      bodySlice.loadUintBig(64); // queryId
+      bodySlice.loadCoins(); // amount
+      bodySlice.loadAddress(); // sender
+      // Remaining is forwardPayload
+      // It may contain a comment cell
+      if (bodySlice.remainingBits > 0 || bodySlice.remainingRefs > 0) {
+        // Check if there's a forward payload
+        // In TEP-74, after sender there is forwardPayload (slice)
+        // We need to handle it: if there's a ref, load it
+        try {
+          if (bodySlice.remainingRefs > 0) {
+            const fwd = bodySlice.loadRef().beginParse();
+            forwardComment = parseTonComment(fwd) ?? parseJettonForwardComment(fwd);
+          } else {
+            forwardComment = parseTonComment(bodySlice) ?? parseJettonForwardComment(bodySlice);
+          }
+        } catch {
+          forwardComment = null;
+        }
+      }
+    } catch {
+      forwardComment = null;
+    }
+    await processJettonDeposit(addr, note, forwardComment, txHash);
     return;
   }
 
@@ -147,7 +261,14 @@ async function handleTransaction(addr: string, tx: Transaction) {
     const value = tx.inMessage.info.value.coins;
     const src = tx.inMessage.info.src;
     if (value > 0n) {
-      await processTonDeposit(addr, src, value, txHash);
+      // Extract TON comment
+      let comment: string | null = null;
+      try {
+        comment = parseTonComment(tx.inMessage.body);
+      } catch {
+        comment = null;
+      }
+      await processTonDeposit(addr, src, value, txHash, comment);
     }
   }
 }
