@@ -480,8 +480,10 @@
           TG.haptic.success();
           TG.preventClose(false);
           TG.main.hide();
-          App.state.createdLinks[res.deal.id] = res.link;
-          renderSuccess(res.deal, res.link);
+          // Prefer bot link (t.me) for Telegram approval flow; fallback to webapp
+          var shareLink = res.botLink || res.link || res.webappLink || '';
+          App.state.createdLinks[res.deal.id] = shareLink;
+          renderSuccess(res.deal, shareLink);
         })
         .catch(function (err) {
           TG.haptic.error();
@@ -495,26 +497,27 @@
       setTopbar('Deal Created', { back: function () { go('#/deal/' + deal.id); } });
       TG.showBack(function () { go('#/deal/' + deal.id); });
       var shareUrl = link || location.href.split('#')[0] + '#/deal/' + deal.id;
+      var isBotLink = shareUrl.indexOf('t.me/') !== -1;
 
       box.innerHTML = '';
       box.appendChild(UI.h('div', { class: 'success-panel' }, [
         UI.h('div', { class: 'check-ring', html: '<svg viewBox="0 0 34 34" width="44" height="44"><path d="M8 18l6 6L26 11"/></svg>' }),
         UI.h('h2', { text: 'Escrow deal #' + deal.id + ' created' }),
-        UI.h('p', { text: 'Share the invite link with the counterparty. Funds will be held safely until both sides are satisfied.' }),
+        UI.h('p', { text: isBotLink ? 'Share this bot link via Telegram. When the other party opens it, you will be asked to approve (their photo & username shown). Deal starts after your confirmation.' : 'Share the invite link with the counterparty. Funds will be held safely until both sides are satisfied.' }),
         UI.h('div', { class: 'link-box' }, [
           UI.h('div', { class: 'mono', text: shareUrl }),
           UI.h('button', {
             class: 'icon-btn',
             'aria-label': 'Copy link',
             html: '<svg viewBox="0 0 24 24" width="19" height="19"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2m0 16H8V7h11z"/></svg>',
-            onclick: function () { UI.copy(shareUrl, 'Invite link copied'); }
+            onclick: function () { UI.copy(shareUrl, 'Bot invite link copied'); }
           })
         ]),
         UI.h('div', { class: 'btn-row' }, [
           UI.h('button', {
             class: 'btn btn-primary',
-            onclick: function () { TG.share(shareUrl, 'Join my escrow deal #' + deal.id + ' on TonEscrow'); }
-          }, ['Share invite']),
+            onclick: function () { TG.share(shareUrl, 'Join my escrow deal #' + deal.id + ' on TonEscrow — tap to request to join'); }
+          }, [isBotLink ? 'Share bot link' : 'Share invite']),
           UI.h('button', { class: 'btn btn-ghost', onclick: function () { go('#/deal/' + deal.id); } }, ['View deal'])
         ]),
         UI.h('div', { class: 'btn-row' }, [
@@ -736,26 +739,17 @@
 
   function paySheet(deal, payTo, am) {
     var memo = 'escrow#' + deal.id;
-    var releaseMemo = 'For ' + (deal.terms ? deal.terms.split(/[\n\r]+/)[0].slice(0, 30) : 'deal') + ' — ' + deal.amount + ' ' + am.symbol + ' — Escrow #' + deal.id;
     var amountInput = UI.h('input', {
       class: 'input',
       type: 'text',
       inputmode: 'decimal',
       value: UI.fmtAmount(deal.amount)
     });
-    var memoPill = UI.h('button', {
-      class: 'addr-pill',
-      style: 'margin-bottom:8px',
-      onclick: function () { UI.copy(memo, 'Memo copied — include it in the transaction!'); }
-    }, [
-      UI.h('span', { class: 'mono', text: memo }),
-      UI.h('span', { class: 'small muted', text: 'tap to copy memo' })
-    ]);
-    var payBtn = UI.h('button', { class: 'btn btn-primary', onclick: doPay }, ['Approve & Pay with memo']);
+    var payBtn = UI.h('button', { class: 'btn btn-primary', onclick: doPay }, ['Approve & Pay']);
 
     UI.sheetOpen(UI.h('div', {}, [
       UI.h('h3', { text: 'Pay with wallet' }),
-      UI.h('p', { class: 'sub', text: 'The memo "' + memo + '" is mandatory — it links your payment to this deal on-chain.' }),
+      UI.h('p', { class: 'sub', text: 'This payment is secured by an encrypted on-chain memo (auto-injected).' }),
       UI.h('div', { class: 'card review-rows', style: 'padding:6px 14px;margin-bottom:14px' }, [
         UI.h('div', { class: 'rrow' }, [
           UI.h('span', { class: 'k', text: 'To' }),
@@ -764,17 +758,11 @@
         UI.h('div', { class: 'rrow' }, [
           UI.h('span', { class: 'k', text: 'Deal' }),
           UI.h('span', { class: 'v', text: '#' + deal.id })
-        ]),
-        UI.h('div', { class: 'rrow' }, [
-          UI.h('span', { class: 'k', text: 'Memo' }),
-          UI.h('span', { class: 'v mono', text: memo })
         ])
       ]),
-      memoPill,
-      UI.h('div', { class: 'field-hint', style: 'margin-bottom:8px;color:#7dd3a5', text: '✓ Memo will be attached automatically. Verify "' + memo + '" in wallet before approving.' }),
+      UI.h('div', { class: 'field-hint', style: 'margin-bottom:8px;color:#7dd3a5', text: '✓ Encrypted memo auto-injected — you do not need to copy anything.' }),
       UI.h('div', { class: 'field' }, [UI.h('label', { text: 'Amount (' + am.symbol + ')' }), amountInput]),
-      payBtn,
-      UI.h('div', { class: 'field-hint', text: 'On release, seller receives "' + UI.truncate(releaseMemo, 40, 0) + '" as memo.' })
+      payBtn
     ]));
 
     function doPay() {
@@ -787,10 +775,10 @@
       Wallet.pay(payTo, amt, memo)
         .then(function (res) {
           TG.haptic.success();
-          UI.toast('Payment sent with memo "' + memo + '" — awaiting confirmation', 'ok');
+          UI.toast('Payment sent — awaiting confirmation', 'ok');
           var proof = (res && res.boc) ? UI.truncate(res.boc, 16, 8) : 'wallet transfer';
-          // Use encrypted chat path if available, fallback to legacy
-          var chatText = '💰 Paid ' + UI.fmtAmount(amt) + ' ' + am.symbol + ' to escrow with memo "' + memo + '". Proof: ' + proof;
+          // Use encrypted chat path if available, fallback to legacy — memo is encrypted, not shown
+          var chatText = '💰 Paid ' + UI.fmtAmount(amt) + ' ' + am.symbol + ' to escrow. Proof: ' + proof;
           if (window.ChatCrypto && window.Api && Api.sendChatEncrypted) {
             return Api.dealKey(deal.id).then(function (k) {
               if (k) return ChatCrypto.encrypt(chatText, k).then(function (ct) { return Api.sendChatEncrypted(deal.id, App.state.meId, ct); });
@@ -807,7 +795,7 @@
           else if (msg.indexOf('memo') !== -1) msg = 'Memo error: ' + msg;
           UI.toast(msg, 'err');
           payBtn.removeAttribute('disabled');
-          payBtn.textContent = 'Approve & Pay with memo';
+          payBtn.textContent = 'Approve & Pay';
         });
     }
   }
@@ -982,10 +970,8 @@
       var paySection = null;
       if (payTo) {
         var canPay = iAmBuyer && String(deal.status).toUpperCase() === 'AWAITING_DEPOSIT' && am.symbol === 'TON';
-        var memo = 'escrow#' + deal.id;
-        var releaseMemoPreview = 'For ' + (deal.terms ? deal.terms.split(/[\n\r]+/)[0].slice(0, 20) : 'deal') + ' — ' + UI.fmtAmount(deal.amount) + ' ' + am.symbol + ' — Escrow #' + deal.id;
         paySection = UI.h('div', {}, [
-          UI.h('div', { class: 'section-title', text: 'Payment — memo required' }),
+          UI.h('div', { class: 'section-title', text: 'Payment' }),
           UI.h('div', { class: 'card', style: 'padding:12px' }, [
             UI.h('button', {
               class: 'addr-pill',
@@ -994,23 +980,14 @@
               UI.h('span', { class: 'mono', text: UI.truncate(UI.toFriendly(payTo), 10, 8) }),
               UI.h('span', { class: 'small muted', text: 'tap to copy address' })
             ]),
-            UI.h('button', {
-              class: 'addr-pill',
-              style: 'margin-top:8px',
-              onclick: function () { UI.copy(memo, 'Memo copied — paste as comment!'); }
-            }, [
-              UI.h('span', { class: 'mono', text: memo }),
-              UI.h('span', { class: 'small muted', text: 'memo · tap to copy' })
-            ]),
-            UI.h('div', { class: 'field-hint', style: 'margin-top:8px;color:#7dd3a5', text: 'Send exactly ' + UI.fmtAmount(deal.amount) + ' ' + am.symbol + ' with memo "' + memo + '". The memo links your payment to this deal.' }),
-            UI.h('div', { class: 'field-hint', style: 'margin-top:4px', text: 'On release, seller receives with memo "' + UI.truncate(releaseMemoPreview, 36, 0) + '".' }),
+            UI.h('div', { class: 'field-hint', style: 'margin-top:8px;color:#7dd3a5', text: 'Send exactly ' + UI.fmtAmount(deal.amount) + ' ' + am.symbol + ' — encrypted memo auto-injected.' }),
             canPay ? UI.h('button', {
               class: 'btn btn-primary',
               style: 'margin-top:10px',
               onclick: function () { TG.haptic.medium(); paySheet(deal, payTo, am); }
-            }, ['💳 Pay ' + UI.fmtAmount(deal.amount) + ' ' + am.symbol + ' with memo']) : null,
+            }, ['💳 Pay ' + UI.fmtAmount(deal.amount) + ' ' + am.symbol]) : null,
             (canPay && !Wallet.available()) ? UI.h('div', { class: 'field-hint', style: 'margin-top:6px', text: 'Wallet SDK is loading — reopen this screen if it does not appear.' }) : null,
-            (!canPay && String(deal.status).toUpperCase() === 'AWAITING_DEPOSIT' && am.symbol === 'USDT') ? UI.h('div', { class: 'field-hint', style: 'margin-top:8px', text: 'USDT: send Jetton to ' + UI.truncate(UI.toFriendly(payTo), 8, 6) + ' with forward memo "' + memo + '" (0.01 TON forward). Bot detects via forward payload.' }) : null
+            (!canPay && String(deal.status).toUpperCase() === 'AWAITING_DEPOSIT' && am.symbol === 'USDT') ? UI.h('div', { class: 'field-hint', style: 'margin-top:8px', text: 'USDT: send Jetton to ' + UI.truncate(UI.toFriendly(payTo), 8, 6) + ' — encrypted forward memo auto-injected (0.01 TON forward).' }) : null
           ].filter(Boolean))
         ]);
       }

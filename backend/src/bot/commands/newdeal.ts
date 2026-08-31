@@ -1,12 +1,11 @@
 import { Bot } from 'grammy';
 import { db, getUserByTelegramId, createUserIfNotExists } from '../../db/queries';
-import { createDealRecord, generateDealLink, DEAL_STATUS } from '../../services/dealService';
+import { createDealRecord, generateDealLink, getBotDeepLink, DEAL_STATUS } from '../../services/dealService';
 import { deployEscrowContract } from '../../blockchain/contractDeployer';
 import { addAddressToMonitor } from '../../blockchain/listener';
 import { config } from '../../config';
 import { postCreateKeyboard } from '../keyboards';
 import { toBaseUnits, fromBaseUnits } from '../../utils/money';
-import { depositComment, releaseComment } from '../../utils/comments';
 import { Address } from '@ton/core';
 import logger from '../../logger';
 
@@ -118,15 +117,11 @@ export function registerNewDeal(bot: Bot) {
     if (paymentAddress) addAddressToMonitor(paymentAddress);
 
     const token = await generateDealLink(deal.id);
-    const joinHint = config.webappUrl
-      ? `${config.webappUrl}${config.webappUrl.includes('?') ? '&' : '?'}deal=${deal.id}&join=${token}`
-      : `POST /api/deals/${deal.id}/join/${token}`;
+    const botLink = getBotDeepLink(deal.id, token, config.botUsername);
 
     const feePct = (config.feeBps / 100).toFixed(config.feeBps % 100 === 0 ? 0 : 2);
-    const memo = depositComment(deal.id);
-    const outPreview = releaseComment({ id: deal.id, amount: humanAmount, asset, terms });
 
-    // Polished HTML card — matches the new welcome design language
+    // Polished HTML card — memo is now encrypted and auto-injected, not shown
     const card = [
       `✅ <b>Escrow Deal #${deal.id} Created!</b>`,
       `━━━━━━━━━━━━━━━━━━━━━━━`,
@@ -142,16 +137,13 @@ export function registerNewDeal(bot: Bot) {
       `  ⏰ <b>Deadline:</b> <code>${escapeHtml(deadline.toISOString().slice(0, 16).replace('T', ' '))} UTC</code> (24h)`,
       terms ? `  📝 <b>Terms:</b> <i>${escapeHtml(terms.slice(0, 180))}</i>` : '',
       ``,
-      `  📝 <b>Deposit memo (required):</b> <code>${escapeHtml(memo)}</code>`,
-      asset === 'TON'
-        ? `     <i>Include this comment when you send TON to the address above — bot uses it to detect your payment.</i>`
-        : `     <i>Include this in the Jetton forward payload when you send ${asset} — bot uses it to detect your payment.</i>`,
-      `  💸 <b>On release seller will receive:</b> <code>${escapeHtml(outPreview)}</code>`,
+      `  🔒 <b>Encrypted memo</b> — auto-injected in wallet, not shown`,
       ``,
-      `🔗 <b>Invite counterparty</b> — share this one-time link:`,
-      config.webappUrl ? `  <a href="${escapeHtml(joinHint)}">${escapeHtml(joinHint)}</a>` : `  <code>${escapeHtml(joinHint)}</code>`,
+      `🔗 <b>Invite counterparty — BOT LINK</b> (share via Telegram):`,
+      `  <a href="${escapeHtml(botLink)}">${escapeHtml(botLink)}</a>`,
+      `  <code>${escapeHtml(botLink)}</code>`,
       ``,
-      `💡 <i>They tap the link to join as seller. Then deposit to the address above with the memo.</i>`,
+      `💡 <i>When they open this link in Telegram, you will be asked to approve (their photo & username shown). Deal starts after your confirmation.</i>`,
       `📊 Check progress any time: <code>/status ${deal.id}</code>`,
     ]
       .filter(Boolean)
