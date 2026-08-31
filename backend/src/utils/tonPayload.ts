@@ -46,7 +46,7 @@ export function jettonTransferPayload(params: {
   queryId?: bigint;
 }): string {
   const queryId = params.queryId ?? 0n;
-  const forwardTonAmount = params.forwardTonAmount ?? 1n; // 1 nanotons minimal
+  const forwardTonAmount = params.forwardTonAmount ?? 1000000n; // 0.001 TON minimal for forward notification gas
   let forwardPayload: Cell | null = null;
   if (params.forwardComment) {
     forwardPayload = commentToCell(params.forwardComment);
