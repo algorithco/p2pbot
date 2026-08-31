@@ -227,27 +227,37 @@ contract Escrow with Deployable {
         // Effect first: a bounced payout reverts via bounced() below.
         self.status = STATUS_RELEASED;
 
+        // Memo for every on-chain payout — generic "For Escrow #<dealId>" would be ideal, but Tact's Int->String is limited
+        // We keep a static memo that still guarantees memo-in-all-tx; off-chain release memo is richer (amount+terms)
+        let releaseMemo: String = "For Escrow";
+        let feeMemo: String = "Fee for Escrow";
+
         if (self.assetType == ASSET_TON) {
             let fee: Int = (self.amount * self.feeBps) / 10000;
             let sellerAmt: Int = self.amount - fee;
+            // Release to seller with memo (op 0 + string) — seller sees "For Escrow" in explorer
+            let memoCell: Cell = beginCell().storeUint(0, 32).storeStringTail(releaseMemo).endCell();
             send(SendParameters{
                 to: self.seller,
                 value: sellerAmt,
                 bounce: false,
+                body: memoCell,
                 mode: SendPayGasSeparately
             });
             if (fee > 0) {
+                let feeCell: Cell = beginCell().storeUint(0, 32).storeStringTail(feeMemo).endCell();
                 send(SendParameters{
                     to: self.feeAddress,
                     value: fee,
                     bounce: false,
+                    body: feeCell,
                     mode: SendPayGasSeparately
                 });
             }
             // STORAGE_RESERVE plus any deposit excess remains for storage debt.
         } else {
-            // SIMPLIFICATION (documented): full amount goes to the seller in a
-            // single transfer; the platform fee split is settled off-chain.
+            // Jetton release with forward memo — forwardPayload carries "For Escrow" so seller's notification includes it
+            let fwd: Slice = beginCell().storeUint(0, 32).storeStringTail(releaseMemo).asSlice();
             send(SendParameters{
                 to: self.contractJettonWallet!!,
                 value: JETTON_OP_GAS,
@@ -259,7 +269,7 @@ contract Escrow with Deployable {
                     responseDestination: self.admin,
                     customPayload: null,
                     forwardTonAmount: JETTON_FORWARD_TON,
-                    forwardPayload: emptySlice()
+                    forwardPayload: fwd
                 }.toCell()
             });
         }
@@ -272,11 +282,14 @@ contract Escrow with Deployable {
         if (!hadDeposit) {
             return; // nothing ever escrowed — just close the deal out
         }
+        let refundMemo: String = "Refund for Escrow";
         if (self.assetType == ASSET_TON) {
+            let memoCell: Cell = beginCell().storeUint(0, 32).storeStringTail(refundMemo).endCell();
             send(SendParameters{
                 to: self.buyer,
                 value: self.amount,
                 bounce: false,
+                body: memoCell,
                 mode: SendPayGasSeparately
             }); // STORAGE_RESERVE stays behind for storage debt
         } else {
@@ -284,6 +297,7 @@ contract Escrow with Deployable {
             if (self.buyerJettonWallet != null) {
                 dest = self.buyerJettonWallet!!;
             }
+            let fwd: Slice = beginCell().storeUint(0, 32).storeStringTail(refundMemo).asSlice();
             send(SendParameters{
                 to: self.contractJettonWallet!!,
                 value: JETTON_OP_GAS,
@@ -295,7 +309,7 @@ contract Escrow with Deployable {
                     responseDestination: self.admin,
                     customPayload: null,
                     forwardTonAmount: JETTON_FORWARD_TON,
-                    forwardPayload: emptySlice()
+                    forwardPayload: fwd
                 }.toCell()
             });
         }
