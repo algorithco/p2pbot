@@ -85,6 +85,8 @@ async function main() {
   console.log('Eslatma: 42777 emas, aynan Telegram → Sozlamalar → Qurilmalar → Link Desktop Device dan skan qiling.\n');
 
   try {
+    console.log('\nℹ Agar "Incomplete login attempt" (to\'liq bo\'lmagan kirish) deb qolsa, demak 2FA parol kiritilmagan yoki xato.');
+    console.log('  Telegram sizga 42777 emas, aynan QR skan qilingan device da 2FA hint ko\'rsatadi.\n');
     const user = await (client as unknown as {
       signInUserWithQrCode: (creds: { apiId: number; apiHash: string }, params: unknown) => Promise<unknown>;
     }).signInUserWithQrCode(
@@ -94,32 +96,42 @@ async function main() {
           printQrUrl(qr.token);
         },
         password: async (hint?: string) => {
-          console.log(`\n2FA required${hint ? ` (hint: ${hint})` : ''}`);
-          const pwd = config.twoFaPassword || (await ask('2FA password: '));
+          console.log(`\n🔐 2FA Cloud Password so'raldi${hint ? ` (hint: "${hint}")` : ' (hint yo\'q)'}`);
+          if (hint) console.log(`   Hint: ${hint} — shu so'zga mos parolni kiriting!`);
+          console.log(`   .env TWO_FA_PASSWORD=${config.twoFaPassword ? config.twoFaPassword.slice(0, 3) + '***' : '(bo\'sh)'}`);
+          let pwd = config.twoFaPassword;
+          if (pwd) {
+            console.log(`   → Avtomatik .env dagi TWO_FA_PASSWORD ishlatilmoqda...`);
+            // verify if empty or wrong, still prompt
+            if (!pwd) pwd = await ask('2FA password (cloud password, 777000 emas): ');
+          } else {
+            pwd = await ask('2FA password (Telegram → Settings → Privacy → Two-Step Verification → password): ');
+          }
+          if (!pwd) {
+            console.warn('   ⚠ Parol bo\'sh — Incomplete bo\'lib qoladi! Qayta urinib ko\'ring.');
+          }
           return pwd;
         },
-        emailAddress: async () => {
-          console.log('\n📧 Telegram email verification so\'radi (login email).');
-          const email = await ask('Email address: ');
-          return email;
-        },
-        emailVerification: async (opts?: unknown) => {
-          const o = opts as { emailPattern?: string; codeLength?: number } | undefined;
-          if (o?.emailPattern) console.log(`   Email pattern: ${o.emailPattern}, code length: ${o.codeLength ?? 6}`);
-          console.log('   → Pochta inbox + Spam ham tekshiring');
-          const ec = await ask('Email code (pochtadan): ');
-          return { code: ec.replace(/\s+/g, '') };
-        },
         onError: async (err: Error) => {
-          console.error('QR error:', err.message || err);
-          if (String(err.message).includes('FLOOD_WAIT')) {
-            const sec = String(err.message).match(/\d+/)?.[0];
+          const msg = String(err.message || err);
+          console.error('QR error:', msg);
+          if (msg.includes('FLOOD_WAIT')) {
+            const sec = msg.match(/\d+/)?.[0];
             console.error(`→ FloodWait ${sec || ''}s — ${sec ? sec + 's kuting' : 'kuting'}`);
+            return true; // stop polling, let outer catch handle
+          }
+          if (msg.includes('AUTH_TOKEN_EXPIRED') || msg.includes('AUTH_TOKEN_INVALID') || msg.includes('AUTH_TOKEN_ALREADY_ACCEPTED')) {
+            console.log('→ Token expired/invalid — yangi QR generatsiya qilinmoqda...');
+            return false; // retry
+          }
+          if (msg.includes('SESSION_PASSWORD_NEEDED') || msg.includes('2FA') || msg.includes('PASSWORD_HASH_INVALID')) {
+            console.error('→ 2FA xatosi — parol noto\'g\'ri yoki kiritilmagan. Incomplete sababi shu!');
+            console.error('   → Telegram → Settings → Devices → Incomplete login attempts → Terminate, keyin qayta QR');
             return true;
           }
-          if (String(err.message).includes('AUTH_TOKEN_EXPIRED') || String(err.message).includes('AUTH_TOKEN_INVALID')) {
-            console.log('→ Token expired — yangi QR generatsiya qilinmoqda...');
-            return false;
+          if (msg.toLowerCase().includes('incomplete')) {
+            console.error('→ Incomplete login — 2FA/email tasdiqlanmagan. Password/email ni to\'liq kiriting.');
+            return true;
           }
           return false;
         },
@@ -127,10 +139,26 @@ async function main() {
     );
 
     console.log('\n✔ QR login success! User:', (user as unknown as { username?: string })?.username || user);
-    // warmup to ensure Active Sessions propagation
+    // critical: verify not incomplete (password_pending)
+    let verified = false;
     try {
       const me = await client.getMe();
       console.log(`  verified as: ${(me as unknown as { username?: string })?.username || (me as unknown as { firstName?: string })?.firstName || 'unknown'}`);
+      const isAuth = await client.checkAuthorization();
+      console.log(`  checkAuthorization: ${isAuth} (true bo'lishi kerak, false → Incomplete)`);
+      if (!isAuth) {
+        console.error('\n❌ INCOMPLETE: Telegram sessiyani tasdiqlamadi (password_pending).');
+        console.error('   → Sabab: 2FA parol xato yoki kiritilmadi. Telegram 42777 da "Incomplete login attempt" xabari keladi.');
+        console.error('   → Yechim: Settings → Devices → Incomplete login attempts → Terminate → qayta npm run login:qr → 2FA ni to\'g\'ri kiriting.');
+        throw new Error('INCOMPLETE: checkAuthorization false — 2FA password missing/invalid');
+      }
+      verified = true;
+    } catch (e) {
+      if (!verified) throw e;
+      console.warn('  warmup warning:', (e as Error).message);
+    }
+    // warmup to ensure Active Sessions propagation only if verified
+    try {
       const iter = (client as unknown as { iterDialogs: (p: unknown) => AsyncIterable<unknown> }).iterDialogs({ limit: 5 });
       let c = 0;
       for await (const _ of iter) {
@@ -139,6 +167,19 @@ async function main() {
       }
       await new Promise((r) => setTimeout(r, 1000));
       console.log('  warmup done — sessiya Active Sessions ga propagatsiya qilindi');
+      // final check via account.GetAuthorizations to see if really listed
+      try {
+        const { Api } = await import('teleproto');
+        const auths = (await client.invoke(new Api.account.GetAuthorizations())) as unknown as {
+          authorizations: Array<{ hash: unknown; deviceModel: string; appName: string; passwordPending?: boolean; unconfirmed?: boolean }>;
+        };
+        const pending = auths.authorizations.filter((a) => (a as unknown as { passwordPending?: boolean }).passwordPending);
+        if (pending.length) {
+          console.warn(`  ⚠ Hali ${pending.length} ta Incomplete sessiya bor (password_pending). Ularni terminate qiling.`);
+        } else {
+          console.log(`  ✓ Active Sessions da ${auths.authorizations.length} ta sessiya, hammasi tasdiqlangan.`);
+        }
+      } catch {}
     } catch (e) {
       console.warn('  warmup warning:', (e as Error).message);
     }
