@@ -27,17 +27,54 @@ function redact(obj: unknown): unknown {
   return copy;
 }
 
+const isProd = process.env.NODE_ENV === 'production';
+const logLevel = process.env.LOG_LEVEL || 'info';
+
+const baseFormat = winston.format.combine(
+  winston.format.timestamp(),
+  winston.format.errors({ stack: true }),
+  winston.format.printf(({ level, message, timestamp, stack, ...meta }) => {
+    const metaStr = Object.keys(meta).length ? ' ' + JSON.stringify(redact(meta)) : '';
+    const msgStr = typeof message === 'string' ? message : JSON.stringify(redact(message as unknown as Record<string, unknown>));
+    const stackStr = stack ? `\n${String(stack).slice(0, 800)}` : '';
+    return `${timestamp} ${level}: ${msgStr}${metaStr}${stackStr}`;
+  })
+);
+
+const jsonFormat = winston.format.combine(winston.format.timestamp(), winston.format.errors({ stack: true }), winston.format.json());
+
+const transports: winston.transport[] = [
+  new winston.transports.Console({
+    format: isProd ? jsonFormat : winston.format.combine(winston.format.colorize(), winston.format.simple(), baseFormat),
+  }),
+];
+
+// In production try to add file transport if available (winston-daily-rotate-file)
+if (isProd) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const DailyRotateFile = require('winston-daily-rotate-file');
+    transports.push(
+      new DailyRotateFile({
+        filename: 'logs/ubot-%DATE%.log',
+        datePattern: 'YYYY-MM-DD',
+        maxSize: '20m',
+        maxFiles: '14d',
+        format: jsonFormat,
+        level: logLevel,
+      })
+    );
+  } catch {
+    // fallback: no file transport
+  }
+}
+
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.printf(({ level, message, timestamp, ...meta }) => {
-      const metaStr = Object.keys(meta).length ? ' ' + JSON.stringify(redact(meta)) : '';
-      const msgStr = typeof message === 'string' ? message : JSON.stringify(redact(message as unknown as Record<string, unknown>));
-      return `${timestamp} ${level}: ${msgStr}${metaStr}`;
-    })
-  ),
-  transports: [new winston.transports.Console({ format: winston.format.combine(winston.format.colorize(), winston.format.simple()) })],
+  level: logLevel,
+  format: baseFormat,
+  transports,
+  // Avoid exit on handled exceptions
+  exitOnError: false,
 });
 
 export default logger;
