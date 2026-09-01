@@ -156,9 +156,8 @@ services:
       - ubot/.env
     expose:
       - "3002"
-    # Uncomment to debug ubot externally:
-    # ports:
-    #   - "3002:3002"
+    ports:
+      - "127.0.0.1:3002:3002"
     volumes:
       - ubot_sessions:/app/ubot/sessions
     depends_on:
