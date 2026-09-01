@@ -261,11 +261,11 @@ export async function ensureClient(): Promise<TelegramClient> {
       retryDelay: 2000 + Math.random() * 1000,
       autoReconnect: true,
       floodSleepThreshold: 60,
-      deviceModel: 'Pixel 7',
-      systemVersion: '14',
-      appVersion: '10.2.1',
+      deviceModel: config.deviceModel || 'Pixel 7',
+      systemVersion: config.systemVersion || '14',
+      appVersion: config.appVersion || '10.2.1',
       langCode: 'en',
-      systemLangCode: 'en',
+      systemLangCode: 'en-US',
     });
 
     logger.info('Connecting TelegramClient (teleproto)...');
