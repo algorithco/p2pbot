@@ -40,7 +40,7 @@ function welcomeMessage(name: string, isAdmin: boolean): string {
     `Hi, <b>${name}</b> 👋`,
     ``,
     `Welcome to <b>the safest way</b> to trade <b>TON</b> & <b>USDT</b> on Telegram.`,
-    `Funds stay locked until <b>both parties confirm</b> — no scams, no chasing.`,
+    `Funds stay locked until <b>buyer confirms receipt</b> — no scams, no chasing.`,
     ``,
     `┌ <b>✨ Why TonEscrow?</b>`,
     `│  🔒 <b>Escrow-protected</b> — on-chain or custodial`,
@@ -51,11 +51,12 @@ function welcomeMessage(name: string, isAdmin: boolean): string {
     `│  ⏱ <b>24h deadline</b> with auto-resolve`,
     `└  🌐 Network: <code>${network}</code>`,
     ``,
-    `📖 <b>How it works — 4 steps</b>`,
-    `  <b>1️⃣ Create</b> → <code>/newdeal @seller 10 TON</code>`,
-    `  <b>2️⃣ Invite</b> → share the join link`,
-    `  <b>3️⃣ Deposit</b> → pay to escrow address`,
-    `  <b>4️⃣ Confirm</b> → both tap <code>/confirm &lt;id&gt;</code> → auto-release`,
+    `📖 <b>How it works — 5 steps</b>`,
+    `  <b>1️⃣ Buyer creates</b> → <code>/newdeal @seller 10 TON item</code>`,
+    `  <b>2️⃣ Seller joins via link</b> → buyer approves "Are you trading with this person?"`,
+    `  <b>3️⃣ Buyer deposits TON</b> → bot tells seller "Send item to buyer"`,
+    `  <b>4️⃣ Seller sends item</b> → taps "I sent" → bot asks buyer "Did you receive it?"`,
+    `  <b>5️⃣ Buyer confirms</b> → funds released to seller minus fee`,
     ``,
     `👇 <b>Choose an action below to get started:</b>`,
     adminHint,
@@ -75,26 +76,28 @@ function helpMessage(): string {
     `  <code>/help</code> — show this guide`,
     `  <code>/about</code> — about the bot`,
     ``,
-    `➕ <b>Creating Deals</b>`,
+    `➕ <b>Creating Deals (Buyer)</b>`,
     `  <code>/newdeal &lt;@seller|seller_id&gt; &lt;amount&gt; &lt;TON|USDT&gt; [terms]</code>`,
-    `  <i>Example:</i> <code>/newdeal @alice 25 TON fast delivery</code>`,
-    `  <i>Example:</i> <code>/newdeal 123456789 100 USDT no refund after ship</code>`,
-    `  → Bot creates deal, gives you a <b>join link</b> to send to counterparty.`,
+    `  <i>Example:</i> <code>/newdeal @alice 25 TON Telegram Stars</code>`,
+    `  → Bot creates deal, gives you a <b>join link</b> to send to seller. Seller needs your approval.`,
     ``,
     `📊 <b>Tracking</b>`,
     `  <code>/status &lt;deal_id&gt;</code> — full timeline & status`,
     `  <i>Tap “My Deals”</i> — see your last 5 deals instantly`,
     ``,
-    `✅ <b>Confirmations</b>`,
-    `  <code>/confirm &lt;deal_id&gt;</code> — confirm your side (only in DEPOSIT_CONFIRMED)`,
-    `  → When <b>both parties</b> confirm → funds <b>auto-release</b>`,
+    `✅ <b>Flow</b>`,
+    `  • Seller joins → bot asks <b>buyer</b>: "Are you trading with this person?"`,
+    `  • Buyer deposits TON → bot tells <b>seller</b>: "Send item to buyer"`,
+    `  • Seller taps "I sent" → bot asks <b>buyer</b>: "Did you receive it?"`,
+    `  • Buyer confirms → funds released to seller minus fee`,
+    `  <code>/confirm &lt;deal_id&gt;</code> — buyer-only receipt approval (also in web app)`,
     ``,
     `👑 <b>Admin Only</b>`,
     `  <code>/admin_release &lt;id&gt;</code> — force release`,
     `  <code>/admin_refund &lt;id&gt;</code> — force refund`,
     `  <code>/admin_set_fiat_sent &lt;id&gt;</code> — mark fiat sent`,
     ``,
-    `💡 <b>Tip:</b> Use the <b>Open Escrow App</b> button for a visual deal manager — same deals, nicer UI!`,
+    `💡 <b>Tip:</b> Everything happens in the web app — bot is only for approvals & notifications. Use <b>Open Escrow App</b>!`,
   ].join('\n');
 }
 
@@ -106,28 +109,34 @@ function howItWorksMessage(): string {
     `Think of us as a <b>neutral vault</b> between buyer & seller.`,
     ``,
     ` <b>1️⃣ Buyer creates deal</b>`,
-    `    └ <code>/newdeal @seller 10 TON</code>`,
+    `    └ <code>/newdeal @seller 10 TON item</code>`,
     `    └ Bot stores deal as <code>AWAITING_DEPOSIT</code>`,
-    `    └ Generates a <b>one-time join link</b>`,
+    `    └ Generates a <b>one-time join link</b> (share with seller)`,
     ``,
-    ` <b>2️⃣ Counterparty joins</b>`,
-    `    └ Opens join link (or via Mini App)`,
-    `    └ Bot assigns role (buyer/seller) automatically`,
+    ` <b>2️⃣ Seller joins via link</b>`,
+    `    └ Seller opens link (web app or t.me)`,
+    `    └ Bot asks ONLY buyer: "Are you trading with @seller?" — buyer approves`,
+    `    └ Deal becomes active`,
     ``,
-    ` <b>3️⃣ Deposit</b>`,
-    `    └ Buyer pays to <b>escrow address</b> shown on deal card`,
-    `    └ On-chain mode: contract holds funds · Off-chain: custodial wallet`,
+    ` <b>3️⃣ Buyer deposits TON</b>`,
+    `    └ Buyer sends TON to bot wallet (memo auto-encrypted)`,
     `    └ Status → <code>DEPOSIT_CONFIRMED</code>`,
+    `    └ Bot notifies ONLY seller: "I've received TON; please send item to buyer"`,
     ``,
-    ` <b>4️⃣ Mutual confirmation</b>`,
-    `    └ Both run <code>/confirm &lt;id&gt;</code> (or tap in App)`,
-    `    └ First confirm → <code>BUYER_CONFIRMED</code> (waiting for other)`,
-    `    └ Second confirm → <code>RELEASED</code> 🎉 — funds released`,
+    ` <b>4️⃣ Seller sends item off-chain</b>`,
+    `    └ Seller taps "I sent the item" (web app or bot)`,
+    `    └ Status → <code>ITEM_SENT</code>`,
+    `    └ Bot asks buyer: "Did you receive it?"`,
+    ``,
+    ` <b>5️⃣ Buyer confirms receipt</b>`,
+    `    └ Buyer taps ✅ in web app or <code>/confirm &lt;id&gt;</code>`,
+    `    └ Bot transfers TON to seller <b>minus ${feeLabel()} fee</b> → <code>RELEASED</code> 🎉`,
     ``,
     ` <b>🛡️ Safety nets</b>`,
     `    • 24h deadline — unresolved deals can be refunded by admin`,
     `    • Every state change is logged (<code>tx_hash</code>, <code>confirmations</code>)`,
     `    • Admin never holds your keys — signer service is isolated`,
+    `    • Everything in web app — bot is only for approvals`,
     ``,
     ` <b>💎 Supported assets</b>: <code>TON</code> (9 decimals) & <code>USDT</code> (Jetton, 6 decimals)`,
     ` <b>💰 Fee</b>: ${feeLabel()} — shown upfront, no hidden charges`,
@@ -185,24 +194,26 @@ function aboutMessage(): string {
 
 function createHelpMessage(): string {
   return [
-    `➕ <b>Create a New Escrow Deal</b>`,
+    `➕ <b>Create a New Escrow Deal (Buyer)</b>`,
     `━━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
     ` <b>Syntax</b>:`,
-    ` <code>/newdeal &lt;@seller|seller_id&gt; &lt;amount&gt; &lt;TON|USDT&gt; [terms]</code>`,
+    ` <code>/newdeal &lt;@seller|seller_id&gt; &lt;amount&gt; &lt;TON|USDT&gt; [product/terms]</code>`,
     ``,
     ` <b>Examples</b>:`,
-    `  <code>/newdeal @alice 2.5 TON fast deal, no fee on refund</code>`,
-    `  <code>/newdeal 987654321 50 USDT ship within 24h</code>`,
+    `  <code>/newdeal @alice 2.5 TON Telegram Stars 100</code>`,
+    `  <code>/newdeal 987654321 50 USDT Premium gift</code>`,
     `  <code>/newdeal @bob 0.5 TON</code>`,
     ``,
     ` <b>What happens next?</b>`,
-    `  1. Bot creates <b>Deal #ID</b> (status: AWAITING_DEPOSIT)`,
-    `  2. You get a <b>join link</b> — send it to counterparty`,
-    `  3. Once they join, pay to the <b>escrow address</b> shown`,
-    `  4. Both run <code>/confirm &lt;id&gt;</code> → funds release`,
+    `  1. Bot creates <b>Deal #ID</b> (status: AWAITING_DEPOSIT) — you are buyer`,
+    `  2. You get a <b>join link</b> — send it to seller`,
+    `  3. Seller opens link → bot asks YOU "Are you trading with @seller?" → approve`,
+    `  4. Send TON to bot wallet → bot tells seller "Send item to buyer"`,
+    `  5. Seller sends item → taps "I sent" → bot asks you "Did you receive it?"`,
+    `  6. You confirm → funds released to seller minus fee`,
     ``,
-    ` 💡 <b>Pro tip</b>: Tap <b>Open Escrow App</b> for a form-based creator — no syntax to memorize!`,
+    ` 💡 <b>Pro tip</b>: Use <b>Open Escrow App</b> — same flow with better UI, everything in web app!`,
   ].join('\n');
 }
 
@@ -248,12 +259,17 @@ export function registerCommands(bot: Bot) {
               } else if (new Date(link.expires_at).getTime() <= Date.now()) {
                 await ctx.reply(`⏰ <b>Invite link expired</b> for Deal #${deal.id}. Ask the creator to generate a new one.`, { parse_mode: 'HTML' });
               } else {
-                // Determine creator (existing party) and missing role
-                const creatorId = (deal.buyer_telegram_id != null ? Number(deal.buyer_telegram_id) : Number(deal.seller_telegram_id));
-                const missingRole = deal.buyer_telegram_id == null ? 'buyer' : 'seller';
-                if (!creatorId) {
-                  await ctx.reply(`❌ <b>Deal #${deal.id} has no creator</b> — contact support.`, { parse_mode: 'HTML' });
-                } else {
+                // Desired flow: buyer is ALWAYS creator; seller joins. Enforce buyer-only approval.
+                if (deal.buyer_telegram_id == null) {
+                  await ctx.reply(`❌ <b>Deal #${deal.id} has no buyer creator</b> — buyer must create the deal.`, { parse_mode: 'HTML' });
+                  return;
+                }
+                const creatorId = Number(deal.buyer_telegram_id);
+                const missingRole = 'seller';
+                if (deal.seller_telegram_id != null) {
+                  await ctx.reply(`❌ <b>Deal #${deal.id} is already full.</b> Both buyer and seller are set.`, { parse_mode: 'HTML' });
+                  return;
+                }
                   // Try to get requester photo for creator approval card
                   let photoUrl: string | null = null;
                   let photoFileId: string | null = null;
@@ -301,7 +317,7 @@ export function registerCommands(bot: Bot) {
                       `  💎 <code>${escapeHtml(String(deal.amount))} ${escapeHtml(String(deal.asset))}</code>`,
                       `  📝 <i>${escapeHtml(String(deal.terms || '').slice(0, 80))}</i>`,
                       ``,
-                      `Do you approve this connection? Deal starts after your confirmation.`,
+                      `Are you trading with this person?`,
                     ].join('\n');
                     const kb = new InlineKeyboard()
                       .text('✅ Approve', `approve_join:${joinReq.id}`)
@@ -316,7 +332,6 @@ export function registerCommands(bot: Bot) {
                     await ctx.reply(`⚠️ Could not notify the creator (ID ${creatorId}) — they may have blocked the bot. Ask them to start the bot first.`, { parse_mode: 'HTML' });
                   }
                   return; // Do not show welcome after handling join
-                }
               }
             }
           } catch (e) {
@@ -347,25 +362,40 @@ export function registerCommands(bot: Bot) {
       if (!deal) return ctx.answerCallbackQuery({ text: 'Deal not found' });
       await approveJoinRequest(requestId, approverId);
       await ctx.answerCallbackQuery({ text: 'Approved — deal started!' });
-      const role = req.requester_telegram_id ? 'buyer/seller' : 'counterparty';
       // Edit creator's message
       try {
         await ctx.editMessageCaption({
-          caption: `✅ <b>Approved!</b> Deal #${deal.id} — @${escapeHtml(req.requester_username || String(req.requester_telegram_id))} joined as ${escapeHtml(String(req.requester_telegram_id === deal.buyer_telegram_id ? 'buyer' : 'seller'))}. Deal is now active.`,
+          caption: `✅ <b>Approved!</b> Deal #${deal.id} — @${escapeHtml(req.requester_username || String(req.requester_telegram_id))} joined as seller. Deal is now active.`,
           parse_mode: 'HTML',
         });
       } catch {
         await ctx.editMessageText(`✅ <b>Approved!</b> Deal #${deal.id} — @${escapeHtml(req.requester_username || String(req.requester_telegram_id))} joined.`, { parse_mode: 'HTML' });
       }
-      // Notify requester
+      // Notify requester (seller)
       try {
         await ctx.api.sendMessage(req.requester_telegram_id, `✅ <b>Your join request for Deal #${deal.id} was approved!</b>\n\nDeal is now active — you can chat and deposit.`, { parse_mode: 'HTML' });
       } catch {}
       // Notify both parties deal started
       const otherId = Number(req.requester_telegram_id);
       try {
-        await ctx.api.sendMessage(otherId, `🎉 <b>Deal #${deal.id} started!</b>\nYou are now connected as ${deal.buyer_telegram_id == otherId ? 'buyer' : 'seller'}. Use /status ${deal.id} or the Mini App.`, { parse_mode: 'HTML' });
+        await ctx.api.sendMessage(otherId, `🎉 <b>Deal #${deal.id} started!</b>\nYou are now connected as seller. Use /status ${deal.id} or the Mini App.`, { parse_mode: 'HTML' });
       } catch {}
+      // If deal already DEPOSIT_CONFIRMED (buyer deposited before seller joined), immediately notify seller to send item
+      if (String(deal.status) === 'DEPOSIT_CONFIRMED') {
+        try {
+          const { InlineKeyboard } = await import('grammy');
+          const product = deal.terms ? `"${String(deal.terms).slice(0, 80)}"` : 'the item';
+          const sellerMsg = [
+            `✅ <b>I've received ${String(deal.amount)} ${String(deal.asset)} for deal #${deal.id}</b>`,
+            `Product: ${product}`,
+            ``,
+            `Please send ${product} to the buyer (ID <code>${deal.buyer_telegram_id}</code>).`,
+            `When done, tap "I sent the item" below.`,
+          ].join('\n');
+          const kb = new InlineKeyboard().text('📦 I sent the item', `item_sent:${deal.id}`);
+          await ctx.api.sendMessage(otherId, sellerMsg, { parse_mode: 'HTML', reply_markup: kb });
+        } catch {}
+      }
     } catch (e) {
       await ctx.answerCallbackQuery({ text: String((e as Error).message || 'Approve failed'), show_alert: true });
     }
@@ -392,6 +422,47 @@ export function registerCommands(bot: Bot) {
     } catch (e) {
       await ctx.answerCallbackQuery({ text: String((e as Error).message || 'Reject failed'), show_alert: true });
     }
+  });
+
+  // Seller taps "I sent the item" — mark ITEM_SENT and ask buyer
+  bot.callbackQuery(/^item_sent:(\d+)$/, async (ctx) => {
+    const dealId = Number(ctx.match?.[1]);
+    const sellerId = ctx.from?.id;
+    if (!dealId || !sellerId) return ctx.answerCallbackQuery({ text: 'Invalid' });
+    try {
+      const { markItemSent } = await import('../../services/escrowService');
+      const res = await markItemSent(sellerId, dealId);
+      if (!res.success) return ctx.answerCallbackQuery({ text: res.message.slice(0, 60), show_alert: true });
+      await ctx.answerCallbackQuery({ text: 'Marked as sent — buyer notified!' });
+      try { await ctx.editMessageReplyMarkup({ reply_markup: undefined } as any); } catch {}
+      await ctx.reply(`✅ <b>Deal #${dealId}</b> marked as <code>ITEM_SENT</code> — buyer has been asked "Did you receive it?"`, { parse_mode: 'HTML' });
+    } catch (e) {
+      await ctx.answerCallbackQuery({ text: String((e as Error).message || 'Failed'), show_alert: true });
+    }
+  });
+
+  // Buyer approves receipt — release funds minus fee
+  bot.callbackQuery(/^buyer_approve:(\d+)$/, async (ctx) => {
+    const dealId = Number(ctx.match?.[1]);
+    const buyerId = ctx.from?.id;
+    if (!dealId || !buyerId) return ctx.answerCallbackQuery({ text: 'Invalid' });
+    try {
+      const { buyerApproveReceipt } = await import('../../services/escrowService');
+      const res = await buyerApproveReceipt(buyerId, dealId);
+      if (!res.success) return ctx.answerCallbackQuery({ text: res.message.slice(0, 60), show_alert: true });
+      await ctx.answerCallbackQuery({ text: 'Approved — funds released!' });
+      try { await ctx.editMessageReplyMarkup({ reply_markup: undefined } as any); } catch {}
+      await ctx.reply(`✅ <b>Deal #${dealId} closed</b> — funds released to seller minus fee.`, { parse_mode: 'HTML' });
+    } catch (e) {
+      await ctx.answerCallbackQuery({ text: String((e as Error).message || 'Failed'), show_alert: true });
+    }
+  });
+
+  bot.callbackQuery(/^buyer_dispute:(\d+)$/, async (ctx) => {
+    const dealId = Number(ctx.match?.[1]);
+    if (!dealId) return ctx.answerCallbackQuery({ text: 'Invalid' });
+    await ctx.answerCallbackQuery({ text: 'Not yet — contact seller or admin if item not received.' });
+    await ctx.reply(`⏳ <b>Deal #${dealId}</b> — you marked as not received. Contact seller via chat or wait. An admin can refund if needed.`, { parse_mode: 'HTML' });
   });
 
   // aliases
@@ -441,6 +512,7 @@ export function registerCommands(bot: Bot) {
       const statusEmoji: Record<string, string> = {
         AWAITING_DEPOSIT: '⏳',
         DEPOSIT_CONFIRMED: '💰',
+        ITEM_SENT: '📦',
         BUYER_CONFIRMED: '✅',
         RELEASED: '🎉',
         REFUNDED: '↩️',
@@ -640,6 +712,7 @@ export function registerCommands(bot: Bot) {
       const statusEmoji: Record<string, string> = {
         AWAITING_DEPOSIT: '⏳',
         DEPOSIT_CONFIRMED: '💰',
+        ITEM_SENT: '📦',
         BUYER_CONFIRMED: '✅',
         RELEASED: '🎉',
         REFUNDED: '↩️',
@@ -715,9 +788,10 @@ export function registerCommands(bot: Bot) {
       const conf: Record<string, boolean> = (deal as any).confirmations || {};
       const statusEmoji: Record<string, string> = {
         AWAITING_DEPOSIT: '⏳ Awaiting deposit',
-        DEPOSIT_CONFIRMED: '💰 Deposit confirmed — awaiting confirmations',
-        BUYER_CONFIRMED: '✅ One side confirmed — waiting for counterparty',
-        RELEASED: '🎉 Released',
+        DEPOSIT_CONFIRMED: '💰 Deposit confirmed — seller should send item',
+        ITEM_SENT: '📦 Item sent — awaiting buyer receipt confirmation',
+        BUYER_CONFIRMED: '✅ Buyer confirmed — releasing (legacy)',
+        RELEASED: '🎉 Released (fee deducted)',
         REFUNDED: '↩️ Refunded',
       };
       const text = [

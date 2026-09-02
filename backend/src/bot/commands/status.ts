@@ -32,11 +32,12 @@ export function registerStatus(bot: Bot) {
     }
 
     const conf: Record<string, boolean> = deal.confirmations || {};
+    const isSent = deal.status === 'ITEM_SENT' || deal.status === 'RELEASED' || deal.status === 'REFUNDED';
     const timeline = [
       `Created:   ${fmtDate(deal.created_at)}`,
       `Deposit:   ${deal.status === 'AWAITING_DEPOSIT' ? 'waiting' : 'confirmed'}${deal.tx_hash ? `\n           tx: ${String(deal.tx_hash).slice(0, 24)}…` : ''}`,
-      `Buyer ✓:   ${conf.buyer ? 'yes' : 'no'}`,
-      `Seller ✓:  ${conf.seller ? 'yes' : 'no'}`,
+      `Item sent: ${isSent || conf.seller ? 'yes (seller marked sent)' : deal.status === 'DEPOSIT_CONFIRMED' ? 'waiting seller' : 'not yet'}`,
+      `Buyer receipt: ${conf.buyer ? 'yes (approved)' : isSent ? 'waiting buyer' : 'not yet — buyer will confirm "Did you receive?"'}`,
       `Resolved:  ${fmtDate(deal.resolved_at)}`,
       `Deadline:  ${fmtDate(deal.deadline)}`,
     ].join('\n');
