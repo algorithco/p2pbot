@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>TonEscrow — Secure P2P Deals</title>
+  <meta name="theme-color" content="#0b1220" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <script src="/js/telegram-web-app.js"></script>
+  <script src="/js/tonconnect-ui.min.js"></script>
+  <script>
+    if (!window.TonConnectUI) {
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/@tonconnect/ui@2/dist/tonconnect-ui.min.js';
+      s.async = false;
+      document.head.appendChild(s);
+    }
+  </script>
+</head>
+<body data-scheme="dark" data-theme-mode="dark">
+  <div id="app">
+    <header id="topbar" class="topbar" role="banner">
+      <button id="tb-back" class="icon-btn hidden" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M15.5 19.5 8 12l7.5-7.5 1.4 1.4L10.8 12l6.1 6.1z"/></svg>
+      </button>
+      <div id="tb-title" class="topbar-title">TonEscrow</div>
+      <button id="tb-action" class="icon-btn hidden" aria-label="Action"></button>
+    </header>
+
+    <main id="view" class="view-root" aria-live="polite" role="main"></main>
+
+    <nav id="tabbar" class="tabbar" role="navigation" aria-label="Main navigation">
+      <button class="tab-btn active" data-tab="#/home" aria-label="Deals" aria-current="page">
+        <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path fill="currentColor" d="M12 3.1 2.8 10v10.4h6.4V14h5.6v6.4h6.4V10zm7.2 15.9h-3.2v-6.4H8v6.4H4.8v-8.4L12 5l7.2 5.6z"/></svg>
+        <span>Deals</span>
+      </button>
+      <button class="tab-btn tab-trade" data-tab="#/trade" aria-label="Trade">
+        <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path fill="currentColor" d="M7 14h10v2H7zM7 10h10v2H7zM12 3L2 12l2 1.5L12 6l8 7.5L22 12z"/></svg>
+        <span>Trade</span>
+      </button>
+      <button class="tab-btn tab-new" data-tab="#/create" aria-label="New deal">
+        <span class="fab-plus">
+          <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+        </span>
+        <span>New</span>
+      </button>
+      <button class="tab-btn tab-channels" data-tab="#/channels" aria-label="Channels">
+        <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+        <span>Channels</span>
+      </button>
+      <button class="tab-btn" data-tab="#/profile" aria-label="Account">
+        <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path fill="currentColor" d="M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12m0 2c-3.6 0-8 1.8-8 5.4V21h16v-1.6c0-3.6-4.4-5.4-8-5.4"/></svg>
+        <span>Account</span>
+      </button>
+    </nav>
+  </div>
+
+  <div id="toast-root" aria-live="assertive"></div>
+  <div id="sheet-root" role="dialog" aria-modal="true"></div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

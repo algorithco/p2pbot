@@ -3,10 +3,14 @@
   "version": "2.0.0",
   "private": true,
   "scripts": {
-    "start": "npx http-server public -p 8080 -c-1 --silent",
-    "build": "echo 'no build needed for static webapp'"
+    "start": "vite --host 0.0.0.0 --port 8080",
+    "build": "vite build",
+    "dev": "vite --host 0.0.0.0 --port 8080",
+    "preview": "vite preview --port 8080"
   },
   "devDependencies": {
-    "http-server": "^14.1.1"
+    "http-server": "^14.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
   }
 }
