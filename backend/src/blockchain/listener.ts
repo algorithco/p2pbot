@@ -76,6 +76,38 @@ function addressesEqual(a: string, b: string): boolean {
   }
 }
 
+async function notifySellerOnly(deal: DealRow, text: string) {
+  const bot = getBot();
+  if (!bot) return;
+  const sellerId = deal.seller_telegram_id;
+  if (sellerId == null) return;
+  try {
+    const { InlineKeyboard } = await import('grammy');
+    const kb = new InlineKeyboard().text('📦 I sent the item', `item_sent:${deal.id}`);
+    await bot.api.sendMessage(sellerId, text, { parse_mode: 'HTML', reply_markup: kb });
+  } catch (err) {
+    logger.warn(`Could not notify seller ${sellerId} about deal #${deal.id}`, err);
+    // Fallback without keyboard
+    try {
+      const bot2 = getBot();
+      if (bot2) await bot2.api.sendMessage(sellerId, text, { parse_mode: 'HTML' });
+    } catch {}
+  }
+}
+
+async function notifyBuyer(deal: DealRow, text: string) {
+  const bot = getBot();
+  if (!bot) return;
+  const buyerId = deal.buyer_telegram_id;
+  if (buyerId == null) return;
+  try {
+    await bot.api.sendMessage(buyerId, text, { parse_mode: 'HTML' });
+  } catch (err) {
+    logger.warn(`Could not notify buyer ${buyerId} about deal #${deal.id}`, err);
+  }
+}
+
+// Keep legacy alias for any external usage (no longer used internally)
 async function notifyParties(deal: DealRow, text: string) {
   const bot = getBot();
   if (!bot) return;
@@ -154,8 +186,16 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
   }
 
   await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
-  // Do not expose memo to user in notification (memo is encrypted and hidden)
-  await notifyParties(deal, `✅ Deposit confirmed for deal #${deal.id}. Both parties can now confirm with /confirm ${deal.id}`);
+  // Desired flow: notify ONLY seller "I've received the TON; please send the item to the buyer" with product type
+  const productTon = deal.terms ? `"${String(deal.terms).slice(0, 100)}"` : 'the item';
+  const sellerMsgTon = [
+    `✅ <b>I've received ${String(deal.amount)} ${String(deal.asset)} for deal #${deal.id}</b>`,
+    `Product: ${productTon}`,
+    ``,
+    `Please send ${productTon} to the buyer (ID <code>${deal.buyer_telegram_id}</code>).`,
+    `When done, tap "I sent the item" below or in the web app.`,
+  ].join('\n');
+  await notifySellerOnly(deal, sellerMsgTon);
 }
 
 interface JettonNotification {
@@ -218,8 +258,15 @@ async function processJettonDeposit(addr: string, note: JettonNotification, forw
   }
 
   await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
-  const who = forwardComment ? ` (memo "${forwardComment}")` : '';
-  await notifyParties(deal, `✅ USDT deposit confirmed for deal #${deal.id}${who}. Both parties can now confirm with /confirm ${deal.id}`);
+  const productJetton = deal.terms ? `"${String(deal.terms).slice(0, 100)}"` : 'the item';
+  const sellerMsgUsdt = [
+    `✅ <b>I've received ${String(deal.amount)} ${String(deal.asset)} for deal #${deal.id}</b>`,
+    `Product: ${productJetton}`,
+    ``,
+    `Please send ${productJetton} to the buyer (ID <code>${deal.buyer_telegram_id}</code>).`,
+    `When done, tap "I sent the item" below.`,
+  ].join('\n');
+  await notifySellerOnly(deal, sellerMsgUsdt);
 }
 
 async function handleTransaction(addr: string, tx: Transaction) {
