@@ -36,4 +36,9 @@ export const config = {
   // Seller-buyer chat E2E encryption: 64 hex chars (32 bytes) for AES-256-GCM. Must match ubot/utradebot when shared.
   // Generate: openssl rand -hex 32  (or PowerShell: -join (0..31 | % { "{0:X2}" -f (Get-Random -Max 256) }))
   encryptionKey: process.env.ENCRYPTION_KEY || '',
+  // Internal microservices (proxied via backend, keep host-bound)
+  ubotUrl: process.env.UBOT_URL || 'http://ubot:3002',
+  ubotApiKey: process.env.UBOT_API_KEY || process.env.UBOT_API_KEY || '',
+  utradeUrl: process.env.UTRADE_URL || 'http://utradebot:3003',
+  utradeApiKey: process.env.UTRADE_API_KEY || '',
 };

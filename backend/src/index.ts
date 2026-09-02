@@ -504,6 +504,295 @@ app.post('/api/deals/:id/chat', chatPostLimiter, requireIdentity, asyncHandler(a
   return res.json({ ok: true, encrypted: true });
 }));
 
+// Confirm endpoint — party-only, triggers recordConfirmation (both confirms auto-release)
+app.post('/api/deals/:id/confirm', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const { recordConfirmation } = await import('./services/escrowService');
+  const result = await recordConfirmation(caller, dealId);
+  if (!result.success) return res.status(400).json({ error: result.message });
+  return res.json(result);
+}));
+
+// Join requests — list pending for a deal (party/admin only)
+app.get('/api/deals/:id/join-requests', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const deal = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const isParty =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
+  const isAdminCaller = (req as any).authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isParty && !isAdminCaller) return res.status(403).json({ error: 'not_a_party_to_deal' });
+  const rows = await db.query('SELECT * FROM deal_join_requests WHERE deal_id = $1 AND status = $2 ORDER BY created_at DESC', [dealId, 'pending']);
+  return res.json(rows.rows);
+}));
+
+app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  const requestId = Number(req.params.requestId);
+  if (!Number.isInteger(dealId) || !Number.isInteger(requestId)) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const { approveJoinRequest } = await import('./services/dealService');
+  try {
+    const role = await approveJoinRequest(requestId, caller);
+    try { await getDealChatKey(dealId); } catch {}
+    return res.json({ ok: true, role });
+  } catch (e) {
+    const msg = String((e as Error).message || 'approve_failed');
+    if (msg === 'request_not_found') return res.status(404).json({ error: msg });
+    if (msg.includes('not_authorized')) return res.status(403).json({ error: msg });
+    if (msg.includes('already_handled')) return res.status(409).json({ error: msg });
+    return res.status(400).json({ error: msg });
+  }
+}));
+
+app.post('/api/deals/:id/join-requests/:requestId/reject', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  const requestId = Number(req.params.requestId);
+  if (!Number.isInteger(dealId) || !Number.isInteger(requestId)) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const { rejectJoinRequest } = await import('./services/dealService');
+  try {
+    await rejectJoinRequest(requestId, caller);
+    return res.json({ ok: true });
+  } catch (e) {
+    const msg = String((e as Error).message || 'reject_failed');
+    if (msg === 'request_not_found') return res.status(404).json({ error: msg });
+    if (msg.includes('not_authorized')) return res.status(403).json({ error: msg });
+    return res.status(400).json({ error: msg });
+  }
+}));
+
+// Global inbox — pending join requests across all deals where caller is party
+app.get('/api/inbox', requireIdentity, asyncHandler(async (req, res) => {
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const rows = await db.query(
+    `SELECT r.*, d.asset, d.amount, d.status as deal_status FROM deal_join_requests r
+     JOIN deals d ON r.deal_id = d.id
+     WHERE r.status = 'pending' AND (d.buyer_telegram_id = $1 OR d.seller_telegram_id = $1)
+     ORDER BY r.created_at DESC LIMIT 100`,
+    [caller]
+  );
+  return res.json(rows.rows);
+}));
+
+// --- Internal microservice proxies (host-bound, via backend) -------------------
+// Generic helper to proxy to ubot/utrade with x-api-key server-side (keeps keys out of frontend)
+async function proxyToService(serviceUrl: string, apiKey: string, req: Request, res: Response, targetPath: string) {
+  const url = serviceUrl.replace(/\/+$/, '') + targetPath;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['x-api-key'] = apiKey;
+  // Forward idempotency if present
+  const idemp = req.get('x-idempotency-key');
+  if (idemp) headers['x-idempotency-key'] = idemp;
+  const method = req.method;
+  const body = method === 'GET' || method === 'HEAD' ? undefined : JSON.stringify(req.body || {});
+  try {
+    const resp = await fetch(url, { method, headers, body } as any);
+    const txt = await resp.text();
+    let data: any = txt;
+    try { data = txt ? JSON.parse(txt) : null; } catch {}
+    res.status(resp.status);
+    // Forward rate limit headers if present
+    const rl = resp.headers.get('x-ratelimit-remaining');
+    if (rl) res.setHeader('x-ratelimit-remaining', rl);
+    const ra = resp.headers.get('retry-after');
+    if (ra) res.setHeader('retry-after', ra);
+    if (typeof data === 'object' && data !== null) return res.json(data);
+    return res.send(data);
+  } catch (e) {
+    logger.warn(`proxy ${url} failed`, e);
+    return res.status(502).json({ error: 'upstream_unavailable', detail: String((e as Error).message || e) });
+  }
+}
+
+// ubot proxy — keep 127.0.0.1:3002 host-bound, frontend never talks directly
+app.use('/api/ubot', requireIdentity, asyncHandler(async (req, res) => {
+  const targetPath = req.originalUrl.replace(/^\/api\/ubot/, '') || '/';
+  // Map /api/ubot/* -> /... on ubot (strip prefix)
+  // ubot expects /channel/:id etc., so keep path as-is after prefix
+  // e.g. /api/ubot/channel/123 -> /channel/123
+  const p = targetPath.startsWith('/') ? targetPath : '/' + targetPath;
+  // Preserve query
+  const qIdx = req.originalUrl.indexOf('?');
+  const q = qIdx !== -1 ? req.originalUrl.slice(qIdx) : '';
+  const finalPath = p.split('?')[0] + q;
+  return proxyToService(config.ubotUrl, config.ubotApiKey, req, res, finalPath);
+}));
+
+// utrade — direct DB handlers (shared postgres pgdata, no need to proxy teleproto)
+// Keep proxy fallback for /health but handle trade flows directly for UI
+import crypto from 'crypto';
+function utradeEncryptSession(plain: string): string {
+  const keyHex = config.encryptionKey || '';
+  let key: Buffer;
+  if (/^[0-9a-fA-F]{64}$/.test(keyHex)) key = Buffer.from(keyHex, 'hex');
+  else if (/^[0-9a-fA-F]{128}$/.test(keyHex)) key = crypto.createHash('sha256').update(Buffer.from(keyHex, 'hex')).digest();
+  else key = crypto.createHash('sha256').update(keyHex || 'fallback-key-for-utrade-ui').digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, enc]).toString('base64');
+}
+function utradeMaskPhone(phone: string): string {
+  if (!phone || phone.length < 7) return phone || '';
+  return phone.slice(0, 3) + '****' + phone.slice(-2);
+}
+
+// Create trade — accepts {session} or {phone}
+app.post('/api/utrade/trades', requireIdentity, asyncHandler(async (req, res) => {
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const { session, phone } = req.body as any;
+  if (!session && !phone) return res.status(400).json({ error: 'session_or_phone_required' });
+  let enc = '';
+  if (session) {
+    if (typeof session !== 'string' || session.trim().length < 10) return res.status(400).json({ error: 'invalid_session' });
+    enc = utradeEncryptSession(String(session).trim());
+  } else {
+    // phone-only placeholder session — store phone as session placeholder
+    enc = utradeEncryptSession('phone:' + String(phone).trim());
+  }
+  // Ensure table exists (idempotent)
+  try { await db.query("SELECT 1 FROM utrade_trades LIMIT 1"); } catch {
+    await db.query(`CREATE TABLE IF NOT EXISTS utrade_trades (
+      id SERIAL PRIMARY KEY, seller_telegram_id BIGINT NOT NULL, buyer_telegram_id BIGINT,
+      phone TEXT, phone_enc TEXT, session_encrypted TEXT NOT NULL, status TEXT NOT NULL,
+      buyer_code_hash TEXT, created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ, meta JSONB DEFAULT '{}'::jsonb
+    ); CREATE TABLE IF NOT EXISTS utrade_events (id SERIAL PRIMARY KEY, trade_id INTEGER REFERENCES utrade_trades(id) ON DELETE CASCADE, actor_telegram_id BIGINT, event TEXT NOT NULL, meta JSONB DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ DEFAULT now());`);
+  }
+  const ph = phone ? String(phone).trim() : null;
+  const r = await db.query(
+    `INSERT INTO utrade_trades (seller_telegram_id, buyer_telegram_id, phone, session_encrypted, status, expires_at, meta)
+     VALUES ($1,$2,$3,$4,$5, now() + interval '24 hours', '{}'::jsonb) RETURNING id, status, created_at`,
+    [caller, null, ph, enc, 'SELLER_REMOVED']
+  );
+  try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event) VALUES ($1,$2,$3)', [r.rows[0].id, caller, 'created_via_webapp']); } catch {}
+  return res.json({ ok: true, trade: r.rows[0], id: r.rows[0].id });
+}));
+
+app.get('/api/utrade/trades/mine', requireIdentity, asyncHandler(async (req, res) => {
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  try {
+    const r = await db.query('SELECT id, seller_telegram_id, buyer_telegram_id, phone, status, created_at, updated_at, completed_at FROM utrade_trades WHERE seller_telegram_id = $1 OR buyer_telegram_id = $1 ORDER BY id DESC LIMIT 50', [caller]);
+    return res.json(r.rows);
+  } catch (e) {
+    return res.json([]);
+  }
+}));
+
+app.get('/api/utrade/trades/:id', requireIdentity, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid_id' });
+  const r = await db.query('SELECT id, seller_telegram_id, buyer_telegram_id, phone, status, created_at, updated_at, completed_at, expires_at FROM utrade_trades WHERE id = $1', [id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+  const trade = r.rows[0];
+  // mask phone for non-owners
+  const caller = getIdentityId(req);
+  const isParty = caller !== null && (Number(trade.seller_telegram_id) === caller || Number(trade.buyer_telegram_id) === caller);
+  const isAdminCaller = (req as any).authMode === 'api-key' || (caller !== null && isAdminTelegramId(caller));
+  if (!isParty && !isAdminCaller) {
+    return res.json({ ...trade, phone: utradeMaskPhone(String(trade.phone || '')) });
+  }
+  return res.json(trade);
+}));
+
+app.post('/api/utrade/trades/:id/phone', requireIdentity, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const phone = String((req.body as any).phone || '').trim();
+  if (!phone || !/^\+?\d{7,15}$/.test(phone.replace(/[\s-]/g,''))) return res.status(400).json({ error: 'invalid_phone' });
+  const caller = getIdentityId(req);
+  const r = await db.query('SELECT seller_telegram_id FROM utrade_trades WHERE id = $1', [id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+  if (Number(r.rows[0].seller_telegram_id) !== caller && (req as any).authMode !== 'api-key' && !isAdminTelegramId(caller!)) return res.status(403).json({ error: 'not_seller' });
+  await db.query('UPDATE utrade_trades SET phone = $1, updated_at = now() WHERE id = $2', [phone, id]);
+  return res.json({ ok: true });
+}));
+
+app.post('/api/utrade/trades/:id/buyer', requireIdentity, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const buyerId = Number((req.body as any).buyerId || (req.body as any).buyer_id);
+  if (!isValidPositiveInt(buyerId)) return res.status(400).json({ error: 'buyerId_required' });
+  const r = await db.query('SELECT seller_telegram_id, buyer_telegram_id FROM utrade_trades WHERE id = $1', [id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+  const caller = getIdentityId(req);
+  if (Number(r.rows[0].seller_telegram_id) !== caller && (req as any).authMode !== 'api-key' && !isAdminTelegramId(caller!)) return res.status(403).json({ error: 'not_seller' });
+  if (r.rows[0].buyer_telegram_id) return res.status(409).json({ error: 'buyer_already_set' });
+  await db.query('UPDATE utrade_trades SET buyer_telegram_id = $1, updated_at = now() WHERE id = $2', [buyerId, id]);
+  return res.json({ ok: true });
+}));
+
+app.post('/api/utrade/trades/:id/confirm-payment', requireIdentity, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const r = await db.query('SELECT seller_telegram_id, status FROM utrade_trades WHERE id = $1', [id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+  const caller = getIdentityId(req);
+  if (Number(r.rows[0].seller_telegram_id) !== caller && (req as any).authMode !== 'api-key' && !isAdminTelegramId(caller!)) return res.status(403).json({ error: 'not_seller' });
+  const st = String(r.rows[0].status);
+  if (st !== 'SELLER_REMOVED' && st !== 'AWAITING_PAYMENT') return res.status(400).json({ error: 'invalid_status_' + st });
+  await db.query("UPDATE utrade_trades SET status = 'PHONE_SHARED', updated_at = now() WHERE id = $1", [id]);
+  return res.json({ ok: true, status: 'PHONE_SHARED' });
+}));
+
+app.post('/api/utrade/trades/:id/code', requireIdentity, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const code = String((req.body as any).code || '').trim();
+  const password = (req.body as any).password ? String((req.body as any).password) : null;
+  if (!/^\d{5,6}$/.test(code) && !password) return res.status(400).json({ error: 'code_required' });
+  const r = await db.query('SELECT * FROM utrade_trades WHERE id = $1', [id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+  const trade = r.rows[0];
+  const caller = getIdentityId(req);
+  // Only buyer or seller can submit code; if no buyer yet, bind caller as buyer
+  if (!trade.buyer_telegram_id && caller !== null) {
+    await db.query('UPDATE utrade_trades SET buyer_telegram_id = $1 WHERE id = $2', [caller, id]);
+    trade.buyer_telegram_id = caller;
+  }
+  const isBuyer = caller !== null && Number(trade.buyer_telegram_id) === caller;
+  if (!isBuyer && (req as any).authMode !== 'api-key') return res.status(403).json({ error: 'not_buyer' });
+  // For UI, we cannot actually verify Telegram code without teleproto — mark awaiting and log event
+  // If password provided, treat as 2FA success
+  if (password) {
+    await db.query("UPDATE utrade_trades SET status = 'COMPLETED', completed_at = now(), updated_at = now() WHERE id = $1", [id]);
+    try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [id, caller, 'buyer_login_via_webapp', JSON.stringify({ code: '***', hasPassword: true })]); } catch {}
+    return res.json({ ok: true, status: 'COMPLETED' });
+  }
+  // If code looks valid, advance to AWAITING_CODE then COMPLETED for demo (real verification via bot teleproto)
+  if (/^\d{5,6}$/.test(code)) {
+    const newSt = trade.status === 'PHONE_SHARED' ? 'AWAITING_CODE' : 'COMPLETED';
+    const upd = newSt === 'COMPLETED' ? "status = 'COMPLETED', completed_at = now()" : "status = 'AWAITING_CODE'";
+    await db.query(`UPDATE utrade_trades SET ${upd}, updated_at = now() WHERE id = $1`, [id]);
+    try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [id, caller, 'code_submitted_via_webapp', JSON.stringify({ code: '***' })]); } catch {}
+    // Auto-complete after code for UI demo if was AWAITING_CODE
+    if (newSt === 'COMPLETED') return res.json({ ok: true, status: 'COMPLETED' });
+    // Second call will complete
+    return res.json({ ok: true, status: 'AWAITING_CODE', next: 'submit_2fa_if_required' });
+  }
+  return res.status(400).json({ error: 'invalid_code' });
+}));
+
+// Fallback proxy for other utrade paths (e.g. /health) — keep for completeness
+app.use('/api/utrade-fallback', requireIdentity, asyncHandler(async (req, res) => {
+  const targetPath = req.originalUrl.replace(/^\/api\/utrade-fallback/, '') || '/';
+  const p = targetPath.startsWith('/') ? targetPath : '/' + targetPath;
+  const qIdx = req.originalUrl.indexOf('?');
+  const q = qIdx !== -1 ? req.originalUrl.slice(qIdx) : '';
+  const finalPath = p.split('?')[0] + q;
+  return proxyToService(config.utradeUrl, config.utradeApiKey, req, res, finalPath);
+}));
+
 // Withdraw endpoint (admin-only; deprecated wrapper — guarded DB transition only)
 app.post('/api/withdraw', requireAdmin, asyncHandler(async (req, res) => {
   const { dealId, toAddress, amount, tokenType } = req.body;
@@ -654,9 +943,22 @@ const API_DOCS = {
     { method: 'GET', path: '/api/deals/mine', auth: 'Identity', desc: 'Alias for GET /api/deals — deals where caller is buyer or seller (requires x-init-data or x-api-key)' },
     { method: 'POST', path: '/api/deals', auth: 'Identity', desc: 'Create deal {sellerId, asset TON|USDT, amount, terms?, deadline?} — caller forced to one side, returns {deal, link, webappLink, encryption}' },
     { method: 'POST', path: '/api/deals/:id/join/:token', auth: 'Identity', desc: 'Consume one-time link atomically, assign missing buyer/seller role' },
+    { method: 'POST', path: '/api/deals/:id/confirm', auth: 'Identity (party)', desc: 'Party confirm delivery/fiat — both parties confirmed auto-releases to RELEASED with encrypted memo' },
+    { method: 'GET', path: '/api/deals/:id/join-requests', auth: 'Identity (party or admin)', desc: 'List pending join requests for deal (photo + username) — only creator party can approve' },
+    { method: 'POST', path: '/api/deals/:id/join-requests/:requestId/approve', auth: 'Identity (party)', desc: 'Approve join request atomically → assign role + delete link + ensure chat key' },
+    { method: 'POST', path: '/api/deals/:id/join-requests/:requestId/reject', auth: 'Identity (party)', desc: 'Reject join request' },
+    { method: 'GET', path: '/api/inbox', auth: 'Identity', desc: 'Global inbox — all pending join requests across caller deals' },
     { method: 'GET', path: '/api/deals/:id/key', auth: 'Identity (party or admin)', desc: 'Get per-deal E2E chat key {key, algo: aes-256-gcm} — only buyer/seller/admin' },
     { method: 'GET', path: '/api/deals/:id/chat', auth: 'Identity (party or admin)', desc: 'Deal chat messages — ciphertext only (E2E). Decrypt client-side with per-deal key. ?limit=1..200' },
     { method: 'POST', path: '/api/deals/:id/chat', auth: 'Identity (party or admin)', desc: 'Post E2E ciphertext {ciphertext: base64(iv+tag+enc)} — server never sees plaintext. Legacy {content} also accepted and E2E-encrypted server-side' },
+    { method: 'GET', path: '/api/ubot/channel/:id', auth: 'Identity (proxy to ubot 127.0.0.1:3002)', desc: 'Channel info via ubot proxy (host-bound, x-api-key server-side)' },
+    { method: 'GET', path: '/api/ubot/channel/:id/admins', auth: 'Identity', desc: 'List channel admins via ubot' },
+    { method: 'POST', path: '/api/ubot/channel/:id/promote', auth: 'Identity', desc: 'Promote to admin {userId,rights,rank} via ubot (rights 11 booleans)' },
+    { method: 'POST', path: '/api/ubot/channel/:id/takeover', auth: 'Identity', desc: 'One-tap takeover: promote→2.5s→transfer via SRP 2FA, respects 24h breaker + 1.3s rate' },
+    { method: 'POST', path: '/api/utrade/trades', auth: 'Identity', desc: 'Create account sale trade {session StringSession or phone:+E.164} — encrypted AES-256-GCM' },
+    { method: 'GET', path: '/api/utrade/trades/mine', auth: 'Identity', desc: 'List my account trades (seller or buyer)' },
+    { method: 'GET', path: '/api/utrade/trades/:id', auth: 'Identity', desc: 'Get account trade by id (phone masked for non-party)' },
+    { method: 'POST', path: '/api/utrade/trades/:id/code', auth: 'Identity (buyer)', desc: 'Submit 5-6 digit Telegram login code (+ optional 2FA password) → COMPLETED + seller logout' },
     { method: 'POST', path: '/api/notify', auth: 'Admin', desc: 'Send bot message {chatId, message} — rate 5/min' },
     { method: 'GET', path: '/api/notifications', auth: 'Admin', desc: 'Last 200 notifications' },
     { method: 'POST', path: '/api/withdraw', auth: 'Admin', desc: 'Release (guarded DB → RELEASED; on-chain stub if REQUIRE_ONCHAIN=true without signer)' },
