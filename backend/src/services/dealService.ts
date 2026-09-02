@@ -13,6 +13,7 @@ import {
 export const DEAL_STATUS = {
   AWAITING_DEPOSIT: 'AWAITING_DEPOSIT',
   DEPOSIT_CONFIRMED: 'DEPOSIT_CONFIRMED',
+  ITEM_SENT: 'ITEM_SENT',
   BUYER_CONFIRMED: 'BUYER_CONFIRMED',
   RELEASED: 'RELEASED',
   REFUNDED: 'REFUNDED',
@@ -313,16 +314,18 @@ export async function updateJoinRequestStatus(id: number, status: 'approved' | '
   await db.query('UPDATE deal_join_requests SET status = $1, updated_at = now() WHERE id = $2', [status, id]);
 }
 
-/** Approve a join request — atomic: assign role + consume link + mark request approved */
+/** Approve a join request — atomic: assign role + consume link + mark request approved
+ *  Desired flow: ONLY buyer can approve seller joining. Buyer is creator.
+ */
 export async function approveJoinRequest(requestId: number, approverTelegramId: number): Promise<'buyer' | 'seller'> {
   const req = await getJoinRequestById(requestId);
   if (!req) throw new Error('request_not_found');
   if (req.status !== 'pending') throw new Error('request_already_handled');
   const deal = await getDealById(req.deal_id);
   if (!deal) throw new Error('deal_not_found');
-  // Only the creator (existing party) can approve — check that approver is the party who created the deal (the non-null side)
-  const isCreator = Number(deal.buyer_telegram_id) === approverTelegramId || Number(deal.seller_telegram_id) === approverTelegramId;
-  if (!isCreator) throw new Error('not_authorized_to_approve');
+  // Only the BUYER (creator) can approve — per desired flow: bot asks buyer "Are you trading with this person?"
+  const isBuyer = deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === approverTelegramId;
+  if (!isBuyer) throw new Error('not_authorized_to_approve: only_buyer_can_approve');
   // Perform atomic join
   const role = await atomicJoinDeal(req.deal_id, req.token, req.requester_telegram_id);
   await updateJoinRequestStatus(requestId, 'approved');
@@ -335,8 +338,8 @@ export async function rejectJoinRequest(requestId: number, approverTelegramId: n
   if (req.status !== 'pending') throw new Error('request_already_handled');
   const deal = await getDealById(req.deal_id);
   if (!deal) throw new Error('deal_not_found');
-  const isCreator = Number(deal.buyer_telegram_id) === approverTelegramId || Number(deal.seller_telegram_id) === approverTelegramId;
-  if (!isCreator) throw new Error('not_authorized_to_approve');
+  const isBuyer = deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === approverTelegramId;
+  if (!isBuyer) throw new Error('not_authorized_to_approve: only_buyer_can_approve');
   await updateJoinRequestStatus(requestId, 'rejected');
 }
 
