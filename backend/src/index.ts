@@ -25,6 +25,7 @@ import {
   purgeExpiredLinks,
   getDealMessages,
   addEncryptedMessage,
+  createJoinRequest,
 } from './services/dealService';
 import { depositComment, releaseComment } from './utils/comments';
 import { commentToPayloadB64, encryptedCommentToPayloadB64, jettonTransferPayload } from './utils/tonPayload';
@@ -270,27 +271,41 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
   const { asset, amount, terms, deadline } = req.body;
   if (!asset || !amount) return res.status(400).json({ error: 'sellerId, asset, amount required' });
 
-  // The creator must occupy exactly one side of the deal. For identity-auth
-  // callers the authenticated id is forced onto that side; the counterparty
-  // id is taken from whichever side they did NOT claim.
+  // Desired flow: buyer is creator. For identity-auth callers, buyerId is forced to caller.
+  // Seller is counterparty via invite link; link-only is allowed (seller null).
   let sellerId = isValidPositiveInt(req.body.sellerId) ? Number(req.body.sellerId) : null;
   let buyerId = isValidPositiveInt(req.body.buyerId) ? Number(req.body.buyerId) : null;
+  // Support alternative param names from webapp
+  const cpRaw = (req.body as any).counterpartyId ?? (req.body as any).counterparty ?? (req.body as any).cp;
+  const cpId = isValidPositiveInt(Number(cpRaw)) ? Number(cpRaw) : null;
 
   if (req.authMode !== 'api-key') {
     const meId = req.user ? req.user.id : Number(req.headers['x-telegram-user-id']) || null;
     if (!meId) return res.status(401).json({ error: 'identity_required' });
-
+    // Enforce buyer creator per desired flow — buyer is always caller
+    // Keep role hint for backward compat: if role === 'sell' we still treat caller as buyer (webapp compatibility)
     const role = String((req.body as Record<string, unknown>).role || '').toLowerCase();
-    if (buyerId === meId) {
-      // creator claims buyer side; sellerId stays null for link-only
-    } else if (sellerId === meId) {
-      // creator claims seller side
-    } else if (role === 'sell' || (!sellerId && buyerId)) {
-      sellerId = meId;
-    } else {
-      buyerId = meId;
+    if (role === 'sell') {
+      logger.warn(`Deal create with role=sell from ${meId} — coercing to buyer per desired flow`);
     }
-    // Link-only: no counterparty required — missing side will be filled via invite link
+    const origSellerId = sellerId;
+    const origBuyerId = buyerId;
+    // Buyer is always the caller
+    buyerId = meId;
+    // Determine seller counterparty: explicit origSellerId, or cpId, or origBuyerId as counterparty (legacy), else link-only null
+    if (origSellerId !== null && origSellerId !== meId) {
+      sellerId = origSellerId;
+    } else if (cpId !== null && cpId !== meId) {
+      sellerId = cpId;
+    } else if (origBuyerId !== null && origBuyerId !== meId) {
+      sellerId = origBuyerId;
+    } else if (origSellerId !== null && origSellerId === meId) {
+      // self-trade, invalid — treat as link-only
+      sellerId = null;
+    } else {
+      sellerId = null;
+    }
+    // Link-only: no counterparty required — seller will be filled via invite link
   }
 
   // Link-only validation: at least one side must be set, single side via invite is allowed
@@ -364,38 +379,96 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
   });
 }));
 
-// Join a deal via one-time link (atomic, encrypted channel ready)
+// Join a deal via one-time link — REQUEST flow (buyer approval required)
+// Desired flow: seller opens link -> bot asks ONLY buyer "Are you trading with this person?"
+// Webapp must create a pending join request, NOT atomic join. Buyer approves via bot or webapp.
 app.post('/api/deals/:id/join/:token', joinLimiter, requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   const token = String(req.params.token || '');
   if (!Number.isInteger(dealId) || !token) return res.status(400).json({ error: 'invalid_request' });
 
   let telegramId: number | null;
+  let requesterUsername: string | null = null;
+  let requesterFirstName: string | null = null;
   if ((req.authMode === 'telegram' || req.authMode === 'dev') && req.user && isValidPositiveInt(req.user.id)) {
     telegramId = req.user.id;
+    requesterUsername = req.user.username || null;
+    requesterFirstName = (req.user as any).first_name || null;
   } else {
     telegramId = callerTelegramId(req);
+    // Try to get username from body if provided
+    if (req.body && typeof (req.body as any).username === 'string') requesterUsername = String((req.body as any).username);
+    if (req.body && typeof (req.body as any).first_name === 'string') requesterFirstName = String((req.body as any).first_name);
+    // Fallback to x-telegram-username header if present
+    if (!requesterUsername && req.headers['x-telegram-username']) requesterUsername = String(req.headers['x-telegram-username']);
   }
   if (telegramId === null) return res.status(400).json({ error: 'telegramId_required' });
 
+  // Fetch deal & link first for validation
+  const deal = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  if (Number(deal.buyer_telegram_id) === telegramId || Number(deal.seller_telegram_id) === telegramId) {
+    return res.status(400).json({ error: 'already_party_to_deal' });
+  }
+  if (deal.buyer_telegram_id != null && deal.seller_telegram_id != null) {
+    return res.status(409).json({ error: 'deal_already_full' });
+  }
+  // Buyer must be creator per desired flow
+  if (deal.buyer_telegram_id == null) {
+    return res.status(400).json({ error: 'deal_has_no_buyer_creator' });
+  }
+  const link = await getDealLink(token).catch(() => null);
+  if (!link || Number(link.deal_id) !== dealId) return res.status(404).json({ error: 'invalid_token' });
+  if (new Date(link.expires_at).getTime() <= Date.now()) {
+    void markDealLinkUsed(token).catch(() => undefined);
+    return res.status(410).json({ error: 'link_expired' });
+  }
+
+  // Create pending join request (upsert)
   try {
-    const role = await atomicJoinDeal(dealId, token, telegramId);
+    const joinReq = await createJoinRequest({
+      dealId,
+      token,
+      requesterTelegramId: telegramId,
+      requesterUsername,
+      requesterFirstName,
+      requesterPhotoUrl: null,
+    });
+
+    // Notify ONLY buyer for approval (desired flow)
+    const buyerId = Number(deal.buyer_telegram_id);
+    try {
+      const bot = getBot();
+      if (bot) {
+        const { InlineKeyboard } = await import('grammy');
+        const display = requesterFirstName || requesterUsername || String(telegramId);
+        const userLabel = requesterUsername ? `@${requesterUsername}` : `ID ${telegramId}`;
+        const caption = [
+          `🔔 <b>Join request for Deal #${deal.id}</b>`,
+          `━━━━━━━━━━━━━━━━━━━━━━━`,
+          ``,
+          `👤 <b>${display}</b> ${userLabel}`,
+          `🆔 <code>${telegramId}</code> wants to join as <b>seller</b>.`,
+          ``,
+          `  💎 <code>${String(deal.amount)} ${String(deal.asset)}</code>`,
+          `  📝 <i>${String(deal.terms || '').slice(0, 80)}</i>`,
+          ``,
+          `Are you trading with this person?`,
+        ].join('\n');
+        const kb = new InlineKeyboard()
+          .text('✅ Approve', `approve_join:${joinReq.id}`)
+          .text('❌ Decline', `reject_join:${joinReq.id}`);
+        await bot.api.sendMessage(buyerId, caption, { parse_mode: 'HTML', reply_markup: kb });
+      }
+    } catch (notifyErr) {
+      logger.warn(`Could not notify buyer ${buyerId} about join request ${joinReq.id}`, notifyErr);
+    }
+
     void purgeExpiredLinks().catch((err) => logger.warn('purgeExpiredLinks failed', err));
-    // Ensure chat key exists so buyer-seller can immediately chat encrypted
-    try { await getDealChatKey(dealId); } catch {}
-    return res.json({ ok: true, role });
+    return res.status(202).json({ ok: true, pending: true, requestId: joinReq.id, message: 'Join request sent — awaiting buyer approval' });
   } catch (err) {
     const msg = String((err as Error).message || '');
-    if (msg === 'invalid_token') return res.status(404).json({ error: 'invalid_token' });
-    if (msg === 'deal_not_found') return res.status(404).json({ error: 'deal_not_found' });
-    if (msg === 'deal_already_full') return res.status(409).json({ error: 'deal_already_full' });
-    // Expired check via validate: if token exists but expired, mark used
-    const link = await getDealLink(token).catch(() => null);
-    if (link && new Date(link.expires_at).getTime() <= Date.now()) {
-      void markDealLinkUsed(token).catch(() => undefined);
-      return res.status(410).json({ error: 'link_expired' });
-    }
-    logger.warn('join failed', err);
+    logger.warn('join request failed', err);
     return res.status(400).json({ error: msg || 'join_failed' });
   }
 }));
@@ -505,14 +578,50 @@ app.post('/api/deals/:id/chat', chatPostLimiter, requireIdentity, asyncHandler(a
   return res.json({ ok: true, encrypted: true });
 }));
 
-// Confirm endpoint — party-only, triggers recordConfirmation (both confirms auto-release)
+// Confirm endpoint — BUYER-ONLY receipt approval (desired flow)
+// After seller sends item (ITEM_SENT), buyer confirms "Did you receive it?" -> release minus fee.
+// Legacy mutual confirm is deprecated: only buyer can release.
 app.post('/api/deals/:id/confirm', requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
   const caller = getIdentityId(req);
   if (caller === null) return res.status(401).json({ error: 'identity_required' });
-  const { recordConfirmation } = await import('./services/escrowService');
+  const { buyerApproveReceipt, recordConfirmation } = await import('./services/escrowService');
+  const deal = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  // If deal is in ITEM_SENT or DEPOSIT_CONFIRMED, use buyer-only path
+  if (deal.status === 'ITEM_SENT' || deal.status === 'DEPOSIT_CONFIRMED' || deal.status === 'BUYER_CONFIRMED') {
+    const result = await buyerApproveReceipt(caller, dealId);
+    if (!result.success) return res.status(400).json({ error: result.message });
+    return res.json(result);
+  }
+  // Fallback to legacy for AWAITING_DEPOSIT etc. (will return status error)
   const result = await recordConfirmation(caller, dealId);
+  if (!result.success) return res.status(400).json({ error: result.message });
+  return res.json(result);
+}));
+
+// Seller signals "I sent the item" — moves DEPOSIT_CONFIRMED -> ITEM_SENT and notifies buyer
+app.post('/api/deals/:id/ship', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const { markItemSent } = await import('./services/escrowService');
+  const result = await markItemSent(caller, dealId);
+  if (!result.success) return res.status(400).json({ error: result.message });
+  return res.json(result);
+}));
+
+// Buyer confirms receipt — explicit endpoint for webapp (alternative to /confirm)
+// Moves ITEM_SENT (or DEPOSIT_CONFIRMED) -> RELEASED with fee deduction
+app.post('/api/deals/:id/approve', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const { buyerApproveReceipt } = await import('./services/escrowService');
+  const result = await buyerApproveReceipt(caller, dealId);
   if (!result.success) return res.status(400).json({ error: result.message });
   return res.json(result);
 }));
@@ -544,6 +653,28 @@ app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asy
   try {
     const role = await approveJoinRequest(requestId, caller);
     try { await getDealChatKey(dealId); } catch {}
+    // If deal already DEPOSIT_CONFIRMED (buyer deposited before seller joined), immediately notify seller
+    try {
+      const deal = await getDealById(dealId);
+      if (deal && String(deal.status) === 'DEPOSIT_CONFIRMED' && deal.seller_telegram_id != null) {
+        const bot = getBot();
+        if (bot) {
+          const product = deal.terms ? `"${String(deal.terms).slice(0, 80)}"` : 'the item';
+          const text = [
+            `✅ <b>I've received ${String(deal.amount)} ${String(deal.asset)} for deal #${deal.id}</b>`,
+            `Product: ${product}`,
+            ``,
+            `Please send ${product} to the buyer (ID <code>${deal.buyer_telegram_id}</code>).`,
+            `When done, tap "I sent the item" below.`,
+          ].join('\n');
+          const { InlineKeyboard } = await import('grammy');
+          const kb = new InlineKeyboard().text('📦 I sent the item', `item_sent:${deal.id}`);
+          await bot.api.sendMessage(Number(deal.seller_telegram_id), text, { parse_mode: 'HTML', reply_markup: kb });
+        }
+      }
+    } catch (notifyErr) {
+      logger.warn(`Post-approve DEPOSIT_CONFIRMED notify failed for deal #${dealId}`, notifyErr);
+    }
     return res.json({ ok: true, role });
   } catch (e) {
     const msg = String((e as Error).message || 'approve_failed');
