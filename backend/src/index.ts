@@ -282,7 +282,7 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
 
     const role = String((req.body as Record<string, unknown>).role || '').toLowerCase();
     if (buyerId === meId) {
-      // creator claims buyer side; sellerId must be the counterparty
+      // creator claims buyer side; sellerId stays null for link-only
     } else if (sellerId === meId) {
       // creator claims seller side
     } else if (role === 'sell' || (!sellerId && buyerId)) {
@@ -290,13 +290,14 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
     } else {
       buyerId = meId;
     }
-
-    if (sellerId === meId && !buyerId) return res.status(400).json({ error: 'counterparty_id_required' });
-    if (buyerId === meId && !sellerId) return res.status(400).json({ error: 'counterparty_id_required' });
+    // Link-only: no counterparty required — missing side will be filled via invite link
   }
 
-  if (!isValidPositiveInt(sellerId)) return res.status(400).json({ error: 'sellerId_must_be_positive_int' });
-  if (buyerId !== null && sellerId === buyerId) {
+  // Link-only validation: at least one side must be set, single side via invite is allowed
+  if (sellerId === null && buyerId === null) return res.status(400).json({ error: 'seller_or_buyer_required' });
+  if (sellerId !== null && !isValidPositiveInt(sellerId)) return res.status(400).json({ error: 'sellerId_must_be_positive_int' });
+  if (buyerId !== null && !isValidPositiveInt(buyerId)) return res.status(400).json({ error: 'buyerId_must_be_positive_int' });
+  if (sellerId !== null && buyerId !== null && sellerId === buyerId) {
     return res.status(400).json({ error: 'sellerId_must_differ_from_buyerId' });
   }
 

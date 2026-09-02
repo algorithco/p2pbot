@@ -570,7 +570,7 @@ function viewChannels() {
   let currentInfo: any = null;
 
   const idInput = UI.h('input', { class: 'input', placeholder: '@username or -100… or channel ID', type: 'text' }) as HTMLInputElement;
-  const statusEl = UI.h('div', { class: 'small muted', style: 'margin-top:8px', text: 'Paste @username, numeric ID, or t.me link — host-bound ubot via backend proxy.' });
+  const statusEl = UI.h('div', { class: 'small muted', style: 'margin-top:8px', text: 'Paste @username, numeric ID, or t.me link' });
   const resultBox = UI.h('div', { style: 'margin-top:16px' });
 
   const renderRights = () => {
@@ -730,8 +730,7 @@ function viewChannels() {
     resultBox,
     adminListBox,
     actionRow,
-    groupBox,
-    UI.h('div', { class: 'banner info', style: 'margin-top:16px' }, [ UI.h('div', { class: 'small', text: 'Host-bound ubot 127.0.0.1:3002 proxied via backend /api/ubot — respects Bottleneck 30/sec, humanDelay 800-2500ms, per-channel flood breakers.' }) ])
+    groupBox
   ]);
   view.appendChild(root);
 }

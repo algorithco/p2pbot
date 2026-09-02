@@ -327,12 +327,7 @@
       ]),
       stats,
       seg,
-      listBox,
-      UI.h('button', {
-        class: 'fab-inline',
-        'aria-label': 'New deal',
-        onclick: function () { TG.haptic.medium(); go('#/create'); }
-      }, [UI.h('span', { html: '<svg viewBox="0 0 24 24" width="26" height="26"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>' })])
+      listBox
     ].filter(Boolean));
 
     function segBtn(key, label) {
@@ -440,7 +435,7 @@
   ];
 
   function newWizard() {
-    return { step: 1, role: 'buy', cp: '', asset: 'TON', amount: '', terms: '', deadlineH: 24 };
+    return { step: 1, role: 'buy', asset: 'TON', amount: '', terms: '', deadlineH: 24 };
   }
 
   function viewCreate() {
@@ -467,10 +462,6 @@
 
     function validate(step) {
       var w = App.wz;
-      if (step === 1) {
-        var n = Number(String(w.cp).trim());
-        if (!n || n <= 0 || !isFinite(n)) { fail('Enter a valid Telegram ID of the ' + (w.role === 'buy' ? 'seller' : 'buyer')); return false; }
-      }
       if (step === 2) {
         var amt = parseFloat(w.amount);
         if (!isFinite(amt) || amt <= 0) { fail('Enter a valid amount greater than 0'); return false; }
@@ -483,9 +474,11 @@
 
     function submit() {
       var w = App.wz;
+      var me = App.state.meId || (TG.user && TG.user().id) || 0;
       var payload = {
-        sellerId: w.role === 'buy' ? Number(w.cp) : App.state.meId,
-        buyerId: w.role === 'buy' ? App.state.meId : Number(w.cp),
+        sellerId: w.role === 'sell' ? me : null,
+        buyerId: w.role === 'buy' ? me : null,
+        role: w.role,
         asset: w.asset,
         amount: parseFloat(w.amount),
         terms: w.terms || '',
@@ -555,26 +548,12 @@
       var body = null;
 
       if (w.step === 1) {
-        var cpLabel = UI.h('label', { text: (w.role === 'buy' ? 'Seller' : 'Buyer') + ' Telegram ID' });
-        var cpInput = UI.h('input', {
-          class: 'input',
-          type: 'text',
-          inputmode: 'numeric',
-          placeholder: 'e.g. 888281729',
-          value: w.cp,
-          oninput: function () { w.cp = this.value.trim(); }
-        });
         body = [
           UI.h('h3', { style: 'font-size:18px;margin-bottom:4px', text: 'Which side are you?' }),
-          UI.h('p', { class: 'muted small', style: 'margin-bottom:14px', text: 'This decides who deposits funds into escrow.' }),
+          UI.h('p', { class: 'muted small', style: 'margin-bottom:14px', text: 'This decides who deposits funds into escrow. Invite the other party via link after creation.' }),
           UI.h('div', { class: 'choice-row', style: 'margin-bottom:18px' }, [
             choice('buy', '🛒', "I'm Buying", 'You pay crypto into escrow'),
             choice('sell', '💰', "I'm Selling", 'You receive crypto after release')
-          ]),
-          UI.h('div', { class: 'field' }, [
-            cpLabel,
-            cpInput,
-            UI.h('div', { class: 'field-hint', text: 'Numeric ID only. The counterparty can find theirs via @userinfobot.' })
           ])
         ];
 
@@ -586,7 +565,6 @@
               w.role = key;
               Array.prototype.forEach.call(this.parentNode.children, function (c) { c.classList.remove('selected'); });
               this.classList.add('selected');
-              cpLabel.textContent = (key === 'buy' ? 'Seller' : 'Buyer') + ' Telegram ID';
             }
           }, [
             UI.h('span', { class: 'cc-icon', text: icon }),
@@ -704,7 +682,6 @@
           UI.h('h3', { style: 'font-size:18px;margin-bottom:14px', text: 'Review deal' }),
           UI.h('div', { class: 'card review-rows', style: 'padding:6px 14px' }, [
             rrow('Your role', w.role === 'buy' ? 'Buyer (pays first)' : 'Seller (receives)'),
-            rrow((w.role === 'buy' ? 'Seller' : 'Buyer') + ' ID', String(Number(w.cp))),
             rrow('Asset', am.name),
             rrow('Amount', UI.fmtAmount(parseFloat(w.amount)) + ' ' + w.asset),
             rrow('Fee (est.)', UI.fmtAmount(feeOf(w.amount)) + ' ' + w.asset),
