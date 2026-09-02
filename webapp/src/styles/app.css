@@ -53,7 +53,37 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Dark palette locked — ignore light override (user requested dark+blue only) */
+/* Theme overrides — dark is default via :root, light via attribute */
+body[data-theme-mode="light"] {
+  --bg: #ffffff;
+  --surface: #f1f4f9;
+  --surface-2: #e8edf5;
+  --surface-3: #dde5f0;
+  --text: #14212e;
+  --hint: #7d8da1;
+  --link: #2482e0;
+  --btn: #3390ec;
+  --btn-text: #fff;
+  --destructive: #df4059;
+  --border: rgba(20, 40, 70, 0.12);
+  --border-strong: rgba(20, 40, 70, 0.18);
+  --accent-soft: rgba(51, 144, 236, 0.10);
+  --accent-soft-strong: rgba(51, 144, 236, 0.16);
+  --shadow-card: 0 6px 22px rgba(30, 50, 90, 0.10);
+  --shadow-card-lg: 0 10px 24px rgba(30, 50, 90, 0.12);
+}
+body[data-theme-mode="dark"] {
+  --bg: #0b1220;
+  --surface: #101a2e;
+  --surface-2: #16233c;
+  --surface-3: #1c2e52;
+  --text: #eef3fa;
+  --hint: #8494ad;
+  --link: #5aa7ff;
+  --btn: #3390ec;
+  --btn-text: #fff;
+  --destructive: #ef4666;
+}
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 *:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
