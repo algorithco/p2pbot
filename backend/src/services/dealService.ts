@@ -19,7 +19,24 @@ export const DEAL_STATUS = {
   REFUNDED: 'REFUNDED',
 } as const;
 
+export const DEAL_TYPE = {
+  P2P: 'P2P',
+  CHANNEL: 'CHANNEL',
+  GROUP: 'GROUP',
+} as const;
+
 const FINAL_STATUSES = new Set<string>([DEAL_STATUS.RELEASED, DEAL_STATUS.REFUNDED]);
+
+export function normalizeChannelUsername(v: unknown): string | null {
+  if (!v) return null;
+  let s = String(v).trim();
+  if (!s) return null;
+  s = s.replace(/^https?:\/\/t\.me\//i, '').replace(/^t\.me\//i, '').replace(/^@/, '').trim();
+  s = s.split('/')[0].split('?')[0].trim();
+  if (!s) return null;
+  if (!/^[@A-Za-z0-9_]{1,64}$/.test(s.startsWith('@') ? s : `@${s}`)) return null;
+  return s.startsWith('@') ? s : `@${s}`;
+}
 
 /** Create a new deal record with optional role telegram IDs */
 export async function createDealRecord(params: {
@@ -35,6 +52,12 @@ export async function createDealRecord(params: {
   paymentAddress?: string;
   terms?: string;
   deadline?: Date | null;
+  dealType?: string; // P2P | CHANNEL | GROUP
+  channelUsername?: string | null;
+  channelId?: string | null;
+  channelTitle?: string | null;
+  channelSnapshot?: Record<string, unknown> | null;
+  escrowHolderId?: number | null;
 }) {
   const {
     buyerId = null,
@@ -49,8 +72,15 @@ export async function createDealRecord(params: {
     paymentAddress = '',
     terms = '',
     deadline = null,
+    dealType = DEAL_TYPE.P2P,
+    channelUsername = null,
+    channelId = null,
+    channelTitle = null,
+    channelSnapshot = null,
+    escrowHolderId = null,
   } = params;
 
+  const normalizedType = ['P2P','CHANNEL','GROUP'].includes(String(dealType).toUpperCase()) ? String(dealType).toUpperCase() : DEAL_TYPE.P2P;
   const feeAmount = (amount * feeBps) / 10000; // feeBps in basis points (100 = 1%)
 
   // Generate per-deal E2E chat key (32 bytes base64, encrypted at rest if ENCRYPTION_KEY set)
@@ -74,8 +104,15 @@ export async function createDealRecord(params: {
         deadline,
         chat_key,
         chat_key_created_at,
-        created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),now()) RETURNING *`,
+        created_at,
+        deal_type,
+        channel_username,
+        channel_id,
+        channel_title,
+        channel_snapshot,
+        channel_verified,
+        escrow_holder_id
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),now(),$15,$16,$17,$18,$19::jsonb,false,$20) RETURNING *`,
     [
       buyerId,
       sellerId,
@@ -91,6 +128,12 @@ export async function createDealRecord(params: {
       terms,
       deadline,
       chatKeyStored,
+      normalizedType,
+      channelUsername,
+      channelId,
+      channelTitle,
+      channelSnapshot ? JSON.stringify(channelSnapshot) : '{}',
+      escrowHolderId,
     ]
   );
   return res.rows[0];
@@ -346,4 +389,32 @@ export async function rejectJoinRequest(requestId: number, approverTelegramId: n
 /** Cleanup expired deal links */
 export async function purgeExpiredLinks() {
   await db.query('DELETE FROM deal_links WHERE expires_at < now()');
+}
+
+// ── CHANNEL/GROUP escrow helpers (custodial via @gramchioka) ──
+export async function updateChannelVerification(dealId: number, opts: { channelId?: string | null; channelTitle?: string | null; channelSnapshot?: Record<string, unknown> | null; verified?: boolean }) {
+  const sets: string[] = []; const params: unknown[] = []; let idx=1;
+  if (opts.channelId !== undefined) { sets.push(`channel_id = $${idx++}`); params.push(opts.channelId); }
+  if (opts.channelTitle !== undefined) { sets.push(`channel_title = $${idx++}`); params.push(opts.channelTitle); }
+  if (opts.channelSnapshot !== undefined) { sets.push(`channel_snapshot = $${idx++}::jsonb`); params.push(JSON.stringify(opts.channelSnapshot || {})); }
+  if (opts.verified !== undefined) {
+    sets.push(`channel_verified = $${idx++}`); params.push(!!opts.verified);
+    if (opts.verified) sets.push(`channel_verified_at = now()`);
+  }
+  if (!sets.length) return;
+  sets.push(`updated_at = now()`);
+  params.push(dealId);
+  await db.query(`UPDATE deals SET ${sets.join(', ')} WHERE id = $${idx}`, params);
+}
+export async function setEscrowHolder(dealId: number, holderId: number) {
+  await db.query('UPDATE deals SET escrow_holder_id = $1, updated_at = now() WHERE id = $2', [holderId, dealId]);
+}
+export async function setTransferToEscrow(dealId: number) {
+  await db.query('UPDATE deals SET transfer_to_escrow_at = now(), updated_at = now() WHERE id = $1', [dealId]);
+}
+export async function setTransferToBuyer(dealId: number, newOwner: string) {
+  await db.query('UPDATE deals SET transfer_to_buyer_at = now(), pending_new_owner = $1, updated_at = now() WHERE id = $2', [newOwner, dealId]);
+}
+export async function setPendingNewOwner(dealId: number, newOwner: string) {
+  await db.query('UPDATE deals SET pending_new_owner = $1, updated_at = now() WHERE id = $2', [newOwner, dealId]);
 }
