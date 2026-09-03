@@ -858,8 +858,8 @@
 
       var steps = [
         { label: 'Created', time: deal.created_at },
-        { label: 'Deposit received', time: null },
-        { label: iAmSeller ? 'Buyer confirmed' : 'Confirmation', time: null },
+        { label: 'Deposit received', time: deal.status !== 'AWAITING_DEPOSIT' ? deal.updated_at || deal.created_at : null },
+        { label: 'Item sent', time: deal.status === 'ITEM_SENT' || deal.status === 'RELEASED' || deal.status === 'REFUNDED' ? deal.updated_at : null },
         { label: deal.status === 'REFUNDED' ? 'Refunded' : 'Released', time: null }
       ];
       var curStep = sm.step;

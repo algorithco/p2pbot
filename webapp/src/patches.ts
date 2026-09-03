@@ -271,83 +271,159 @@ function filterDealCards() {
 }
 
 function patchViewDeal() {
-  // Patch after viewDeal renders via observer
   const viewEl = document.getElementById('view')!;
   const obs = new MutationObserver(() => {
     const hash = location.hash || '';
     if (/^#\/deal\/\d+$/.test(hash)) {
       const view = document.getElementById('view');
-      if (view && view.querySelector('.deal-head') && !view.querySelector('.confirm-bar')) {
-        injectConfirmBar(view, hash);
+      if (view && view.querySelector('.deal-head') && !view.querySelector('.webapp-bar')) {
+        injectWebappBar(view, hash);
+      }
+      // also retarget existing confirm-bar if legacy injected
+      const legacy = view?.querySelector('.confirm-bar');
+      if (legacy && !view?.querySelector('.webapp-bar')) {
+        try { (legacy as HTMLElement).style.display = 'none'; } catch {}
+        injectWebappBar(view!, hash);
       }
     }
   });
   obs.observe(viewEl, { childList: true, subtree: true });
 }
 
-async function injectConfirmBar(view: HTMLElement, hash: string) {
+async function injectWebappBar(view: HTMLElement, hash: string) {
   const m = hash.match(/^#\/deal\/(\d+)$/);
   if (!m) return;
   const id = m[1];
   let deal: any;
   try { deal = await Api.deal(id); } catch { return; }
   if (!deal) return;
-  const uid = (window as any).App?.state?.meId || TG.user().id;
+  const uid = (window as any).App?.state?.meId || TG.user().id || TG.realUser?.()?.id || 0;
   const isBuyer = Number(deal.buyer_telegram_id) === Number(uid);
   const isSeller = Number(deal.seller_telegram_id) === Number(uid);
   const isParty = isBuyer || isSeller;
   if (!isParty) return;
   const st = String(deal.status || '').toUpperCase();
-  const canConfirm = st === 'DEPOSIT_CONFIRMED' || st === 'BUYER_CONFIRMED';
-  if (!canConfirm) return;
-  // Check if already confirmed by this party via confirmations
-  const conf = deal.confirmations || {};
-  const already = (isBuyer && conf.buyer) || (isSeller && conf.seller);
-  if (already) {
-    const bar = UI.h('div', { class: 'banner info' }, [
-      UI.h('div', { class: 'small', text: '✓ You confirmed — waiting for counterparty. Both confirms auto-release.' })
+  // Always show payout input for seller when not final
+  const payoutAddr = (deal as any).payout_address as string | undefined;
+  const hasPayout = !!(payoutAddr && payoutAddr.trim());
+  let userTon: string | null = null;
+  if (isSeller) {
+    try { const me: any = await (Api as any).me?.() || await (Api as any).getMyProfile?.(); userTon = me?.ton_address || me?.tonAddress || null; } catch {}
+  }
+
+  const actionsTitle = Array.from(view.querySelectorAll('.section-title')).find(e => e.textContent?.includes('Actions')) as HTMLElement;
+  const anchor = actionsTitle || view.querySelector('.deal-head') as HTMLElement;
+  if (!anchor) return;
+
+  // --- Seller: DEPOSIT_CONFIRMED -> show payout + ship ---
+  if (isSeller && st === 'DEPOSIT_CONFIRMED') {
+    const hasAnyPayout = hasPayout || !!userTon;
+    const bar = UI.h('div', { class: 'webapp-bar', style: 'margin:12px 0;display:flex;flex-direction:column;gap:10px' }) as HTMLElement;
+    if (!hasAnyPayout) {
+      const warn = UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: '⚠️ Set your TON payout address before marking shipped — otherwise buyer approval will stall.' }) ]);
+      bar.appendChild(warn);
+    } else if (payoutAddr) {
+      bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `Payout address: ${payoutAddr.slice(0, 8)}…${payoutAddr.slice(-6)}` }) ]));
+    }
+    // payout input
+    const input = UI.h('input', { class: 'input', placeholder: 'UQ... / EQ... TON payout address', value: payoutAddr || userTon || '' }) as HTMLInputElement;
+    const setBtn = UI.h('button', { class: 'btn btn-soft', text: '💾 Save payout address' }) as HTMLButtonElement;
+    const row = UI.h('div', { style: 'display:flex;gap:8px' }, [input, setBtn]);
+    const payoutBox = UI.h('div', { style: 'display:flex;flex-direction:column;gap:6px' }, [
+      UI.h('label', { text: 'Seller payout address (TON)', style: 'font-weight:600;font-size:13px' }),
+      row,
+      UI.h('div', { class: 'field-hint', text: 'We will send TON minus fee here when buyer confirms. Connect wallet or paste address.' })
     ]);
-    const actionsTitle = Array.from(view.querySelectorAll('.section-title')).find(e => e.textContent?.includes('Actions')) as HTMLElement;
-    if (actionsTitle) actionsTitle.parentNode!.insertBefore(bar, actionsTitle);
+    bar.appendChild(payoutBox);
+    setBtn.addEventListener('click', async () => {
+      const v = input.value.trim();
+      if (!v) { UI.toast('Enter TON address','err'); return; }
+      setBtn.setAttribute('disabled',''); const orig=setBtn.textContent!; setBtn.textContent='Saving…';
+      try {
+        await (Api as any).payoutAddress(id, v);
+        try { await (Api as any).setTonAddress(v); } catch {}
+        TG.haptic.success(); UI.toast('Payout saved','ok');
+        setTimeout(()=> location.reload(), 600);
+      } catch (e: any) { TG.haptic.error(); UI.toast(e.message || 'Save failed','err'); }
+      finally { setBtn.removeAttribute('disabled'); setBtn.textContent=orig; }
+    });
+    // quick connect wallet fill
+    try {
+      const fillBtn = UI.h('button', { class: 'btn btn-ghost', style: 'width:auto;padding:6px 10px;font-size:12px', text: 'Use connected wallet' }) as HTMLButtonElement;
+      fillBtn.addEventListener('click', async () => {
+        try { const wAddr = (Wallet as any).addressFriendly?.() || (Wallet as any).address?.(); if (wAddr) { input.value = wAddr; UI.toast('Filled from wallet','ok'); } else UI.toast('Connect wallet first','err'); } catch {}
+      });
+      row.appendChild(fillBtn);
+    } catch {}
+    const shipBtn = UI.h('button', { class: 'btn btn-primary', text: '📦 I sent the item — notify buyer' }) as HTMLButtonElement;
+    const hint = UI.h('div', { class: 'field-hint', style: 'text-align:center', text: hasAnyPayout ? 'After sending NFT/item off-chain, tap to move to ITEM_SENT. Buyer will be asked to confirm in web app.' : 'Save payout address first — then you can mark sent.' });
+    if (!hasAnyPayout) shipBtn.setAttribute('disabled','');
+    bar.appendChild(shipBtn); bar.appendChild(hint);
+    shipBtn.addEventListener('click', async () => {
+      shipBtn.setAttribute('disabled',''); const o=shipBtn.textContent!; shipBtn.textContent='Sending…'; TG.haptic.medium();
+      try { const r:any = await (Api as any).shipDeal(id); TG.haptic.success(); UI.toast(r.message || 'Marked sent','ok'); setTimeout(()=>location.reload(),700); }
+      catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Ship failed','err'); shipBtn.removeAttribute('disabled'); shipBtn.textContent=o; if(String(e.message).includes('seller_ton_address_required')) UI.toast('Save payout first','err'); }
+    });
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
     return;
   }
 
-  const btn = UI.h('button', { class: 'btn btn-primary', text: '✅ Confirm & Release' }) as HTMLButtonElement;
-  const hint = UI.h('div', { class: 'field-hint', style: 'text-align:center;margin-top:6px', text: st === 'BUYER_CONFIRMED' ? 'Counterparty confirmed — your confirm will auto-release funds.' : 'Confirm delivery / fiat received. Funds release when both confirm.' });
-  const bar = UI.h('div', { class: 'confirm-bar', style: 'flex-direction:column' }, [UI.h('div', { style: 'display:flex;gap:10px' }, [btn]), hint]);
-
-  const actionsTitle = Array.from(view.querySelectorAll('.section-title')).find(e => e.textContent?.includes('Actions')) as HTMLElement;
-  if (actionsTitle) actionsTitle.parentNode!.insertBefore(bar, actionsTitle);
-  else view.appendChild(bar);
-
-  btn.addEventListener('click', async () => {
-    const orig = btn.textContent!;
-    btn.setAttribute('disabled', '');
-    btn.textContent = 'Confirming…';
-    TG.haptic.medium();
-    try {
-      const res = await Api.confirmDeal(id);
-      TG.haptic.success();
-      UI.toast(res.message || 'Confirmed', 'ok');
-      // Refresh deal view
-      setTimeout(() => { location.hash = '#/deal/' + id; location.reload(); }, 600);
-    } catch (e: any) {
-      TG.haptic.error();
-      UI.toast(e.message || 'Confirm failed', 'err');
-      btn.removeAttribute('disabled');
-      btn.textContent = orig;
-    }
-  });
-
-  // Enhance pay sheet chain polling if buyer and awaiting
-  if (isBuyer && st === 'AWAITING_DEPOSIT') {
-    // Add post-pay verification note
-    const payBtn = Array.from(view.querySelectorAll('button')).find(b => b.textContent?.includes('Pay ')) as HTMLElement;
-    if (payBtn) {
-      const note = view.querySelector('.field-hint');
-      if (note) (note as HTMLElement).textContent += ' Wallet memo is encrypted auto-injected.';
-    }
+  // --- Buyer: ITEM_SENT -> show approve ---
+  if (isBuyer && st === 'ITEM_SENT') {
+    const bar = UI.h('div', { class: 'webapp-bar', style: 'margin:12px 0;display:flex;flex-direction:column;gap:10px' }) as HTMLElement;
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: '📦 Seller marked item as sent. Confirm receipt to release TON minus fee to seller.' }) ]));
+    const btnRow = UI.h('div', { style: 'display:flex;gap:10px' }) as HTMLElement;
+    const yesBtn = UI.h('button', { class: 'btn btn-primary', text: '✅ Yes, received — Release' }) as HTMLButtonElement;
+    const noBtn = UI.h('button', { class: 'btn btn-ghost', text: '❌ Not yet (open chat)' }) as HTMLButtonElement;
+    btnRow.appendChild(yesBtn); btnRow.appendChild(noBtn);
+    const hint = UI.h('div', { class: 'field-hint', style: 'text-align:center', text: 'Releases escrow minus fee via signer. Check chat if item missing.' });
+    bar.appendChild(btnRow); bar.appendChild(hint);
+    yesBtn.addEventListener('click', async ()=>{
+      yesBtn.setAttribute('disabled',''); const o=yesBtn.textContent!; yesBtn.textContent='Releasing…'; TG.haptic.medium();
+      try { const r:any = await (Api as any).approveDeal(id); TG.haptic.success(); UI.toast(r.message||'Released','ok'); setTimeout(()=>location.reload(),700); }
+      catch(e:any){ TG.haptic.error(); const m=String(e.message||'Approve failed'); UI.toast(m,'err'); yesBtn.removeAttribute('disabled'); yesBtn.textContent=o; if(m.includes('seller_ton_address_required')) UI.toast('Seller payout missing — seller notified','err'); }
+    });
+    noBtn.addEventListener('click', ()=>{ TG.haptic.tap(); location.hash = '#/deal/'+id+'/chat'; });
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
+    return;
   }
+
+  // --- Seller: ITEM_SENT awaiting buyer ---
+  if (isSeller && st === 'ITEM_SENT') {
+    const bar = UI.h('div', { class: 'banner info webapp-bar', style: 'margin:12px 0' }, [
+      UI.h('div', { class: 'small', text: '⏳ You marked sent — awaiting buyer confirmation in web app. Funds release automatically when buyer taps Yes.' })
+    ]);
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
+    return;
+  }
+
+  // --- Buyer: DEPOSIT_CONFIRMED waiting seller ship ---
+  if (isBuyer && st === 'DEPOSIT_CONFIRMED') {
+    const bar = UI.h('div', { class: 'banner info webapp-bar', style: 'margin:12px 0' }, [
+      UI.h('div', { class: 'small', text: '⏳ Funded — waiting seller to send item. You will be asked to confirm in web app when seller marks sent.' })
+    ]);
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
+    return;
+  }
+
+  // --- Legacy BUYER_CONFIRMED handling (show legacy) ---
+  if (st === 'BUYER_CONFIRMED' && (isBuyer||isSeller)) {
+    const conf = deal.confirmations||{};
+    const already = (isBuyer&&conf.buyer)||(isSeller&&conf.seller);
+    if (!already) {
+      const bar = UI.h('div', { class: 'webapp-bar', style: 'margin:12px 0' }) as HTMLElement;
+      const b = UI.h('button', { class: 'btn btn-primary', text: '✅ Confirm (legacy) — move to webapp flow' }) as HTMLButtonElement;
+      b.addEventListener('click', async ()=>{ b.setAttribute('disabled',''); try{ await (Api as any).approveDeal(id); UI.toast('Confirmed','ok'); setTimeout(()=>location.reload(),600);} catch(e:any){ UI.toast(e.message||'failed','err'); b.removeAttribute('disabled'); }});
+      bar.appendChild(b); anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
+    } else {
+      const bar = UI.h('div', { class: 'banner info webapp-bar', style: 'margin:12px 0' }, [ UI.h('div', { class: 'small', text: '✓ You confirmed — waiting counterparty.' }) ]);
+      anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
+    }
+    return;
+  }
+}
+async function injectConfirmBar(view: HTMLElement, hash: string){
+  return injectWebappBar(view, hash);
 }
 
 // ---------------- Inbox View ----------------
@@ -825,8 +901,7 @@ function viewTrade() {
         createBtn,
         statusEl
       ]),
-      UI.h('div', { class: 'card' }, [ UI.h('b', { text: 'After creation' }), UI.h('p', { class: 'small muted', text: 'Set buyer & phone separately, then confirm payment when buyer paid outside bot (TON/USDT).' }), setPhoneRow, confirmRow ]),
-      UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: 'Status flow: PENDING→SELLER_REMOVED (kicked others)→AWAITING_PAYMENT→PHONE_SHARED→AWAITING_CODE→COMPLETED. Sessions encrypted AES-256-GCM.' }) ])
+      UI.h('div', { class: 'card' }, [ UI.h('b', { text: 'After creation' }), UI.h('p', { class: 'small muted', text: 'Set buyer & phone separately, then confirm payment when buyer paid outside bot (TON/USDT).' }), setPhoneRow, confirmRow ])
     ]);
   }
 

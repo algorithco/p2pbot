@@ -110,11 +110,12 @@
   /* ---------- Domain meta ---------- */
 
   var STATUSES = {
-    AWAITING_DEPOSIT:  { label: 'Awaiting deposit', cls: 'st-awaiting',  step: 0 },
-    DEPOSIT_CONFIRMED: { label: 'Funded',           cls: 'st-funded',    step: 1 },
-    BUYER_CONFIRMED:   { label: 'Buyer confirmed',  cls: 'st-confirmed', step: 2 },
-    RELEASED:          { label: 'Released',         cls: 'st-released',  step: 3 },
-    REFUNDED:          { label: 'Refunded',         cls: 'st-refunded',  step: 3 }
+    AWAITING_DEPOSIT:  { label: 'Awaiting deposit',       cls: 'st-awaiting',  step: 0 },
+    DEPOSIT_CONFIRMED: { label: 'Funded — send item',     cls: 'st-funded',    step: 1 },
+    ITEM_SENT:         { label: 'Item sent — await buyer',cls: 'st-sent',      step: 2 },
+    BUYER_CONFIRMED:   { label: 'Buyer confirmed',        cls: 'st-confirmed', step: 2 },
+    RELEASED:          { label: 'Released',               cls: 'st-released',  step: 3 },
+    REFUNDED:          { label: 'Refunded',               cls: 'st-refunded',  step: 3 }
   };
 
   UI.statusMeta = function (status) {

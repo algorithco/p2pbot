@@ -171,6 +171,39 @@
       return request('GET', path);
     },
 
+    /** POST /api/deals/:id/ship — seller marks item sent (DEPOSIT_CONFIRMED -> ITEM_SENT) */
+    shipDeal: function (id) {
+      return request('POST', '/api/deals/' + encodeURIComponent(id) + '/ship', {});
+    },
+
+    /** POST /api/deals/:id/approve — buyer confirms receipt (ITEM_SENT -> RELEASED minus fee) */
+    approveDeal: function (id) {
+      return request('POST', '/api/deals/' + encodeURIComponent(id) + '/approve', {});
+    },
+
+    /** POST /api/deals/:id/confirm — deprecated alias to approveDeal (buyer-only) */
+    confirmDeal: function (id) {
+      return request('POST', '/api/deals/' + encodeURIComponent(id) + '/approve', {}).catch(function(e){
+        if(e && e.status===404) return request('POST','/api/deals/'+encodeURIComponent(id)+'/confirm',{});
+        throw e;
+      });
+    },
+
+    /** GET /api/users/me -> { telegram_id, username, ton_address } */
+    getMyProfile: function () {
+      return request('GET', '/api/users/me');
+    },
+
+    /** POST /api/users/me/ton-address {tonAddress} */
+    setMyTonAddress: function (tonAddress) {
+      return request('POST', '/api/users/me/ton-address', { tonAddress: tonAddress });
+    },
+
+    /** POST /api/deals/:id/payout-address {tonAddress} — per-deal override */
+    setPayoutAddress: function (dealId, tonAddress) {
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/payout-address', { tonAddress: tonAddress });
+    },
+
     /** Admin: POST /api/notify */
     notify: function (chatId, message) {
       return request('POST', '/api/notify', { chatId: Number(chatId), message: message });

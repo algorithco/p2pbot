@@ -107,7 +107,26 @@ export const Api = {
     return request('GET', path);
   },
   confirmDeal(dealId: number | string): Promise<any> {
-    return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/confirm', {});
+    // legacy alias — prefer approveDeal
+    return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/approve', {}).catch((e: any) => {
+      if (e && e.status === 404) return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/confirm', {});
+      throw e;
+    });
+  },
+  shipDeal(dealId: number | string): Promise<any> {
+    return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/ship', {});
+  },
+  approveDeal(dealId: number | string): Promise<any> {
+    return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/approve', {});
+  },
+  payoutAddress(dealId: number | string, tonAddress: string): Promise<any> {
+    return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/payout-address', { tonAddress });
+  },
+  setTonAddress(tonAddress: string): Promise<any> {
+    return request('POST', '/api/users/me/ton-address', { tonAddress });
+  },
+  me(): Promise<any> {
+    return request('GET', '/api/users/me');
   },
   joinRequests(dealId: number | string): Promise<any[]> {
     return request('GET', '/api/deals/' + encodeURIComponent(String(dealId)) + '/join-requests').then(d => Array.isArray(d) ? d : Array.isArray(d?.requests) ? d.requests : []);
