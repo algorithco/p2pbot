@@ -370,6 +370,23 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
     return res.status(400).json({ error: 'sellerId_must_differ_from_buyerId' });
   }
 
+  // CHANNEL/GROUP escrow: optional dealType and channelUsername (additive, P2P untouched)
+  const rawDealType = String((req.body as any).dealType || (req.body as any).deal_type || 'P2P').toUpperCase();
+  const dealType = ['P2P','CHANNEL','GROUP'].includes(rawDealType) ? rawDealType : 'P2P';
+  const rawChannelUsername = (req.body as any).channelUsername || (req.body as any).channel_username || (req.body as any).username || null;
+  let channelUsername: string | null = null;
+  let channelId: string | null = null;
+  let channelTitle: string | null = null;
+  let channelSnapshot: Record<string,unknown> | null = null;
+  let escrowHolderId: number | null = null;
+  if (dealType === 'CHANNEL' || dealType === 'GROUP') {
+    const { normalizeChannelUsername } = await import('./services/dealService');
+    channelUsername = normalizeChannelUsername(rawChannelUsername);
+    if (!channelUsername) return res.status(400).json({ error: 'channel_username_required: enter @username or t.me link (CHANNEL/GROUP deals require channel)' });
+    // escrow holder is @gramchioka (ubot) for custodial flow
+    escrowHolderId = Number(process.env.ESCROW_HOLDER_ID || 8992814642);
+  }
+
   const deal = await createDealRecord({
     buyerId,
     sellerId,
@@ -383,6 +400,12 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
     paymentAddress: resolvePaymentAddress() || '',
     terms: terms || '',
     deadline: deadline ? new Date(deadline) : null,
+    dealType,
+    channelUsername: channelUsername as any,
+    channelId,
+    channelTitle,
+    channelSnapshot,
+    escrowHolderId,
   });
   const linkToken = await generateDealLink(deal.id);
   const memo = depositComment(deal.id);
@@ -762,6 +785,120 @@ app.post('/api/deals/:id/join-requests/:requestId/reject', requireIdentity, asyn
     if (msg.includes('not_authorized')) return res.status(403).json({ error: msg });
     return res.status(400).json({ error: msg });
   }
+}));
+
+// ── CHANNEL/GROUP custodial escrow (via @gramchioka) — additive, P2P untouched ──
+const channelLimiter = rateLimit({ windowMs: 60_000, max: 20, name: 'channel-verify' });
+app.post('/api/deals/:id/channel/verify', channelLimiter, requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal: any = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const isSeller = deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller;
+  const isAdminCaller = (req as any).authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isSeller && !isAdminCaller) return res.status(403).json({ error: 'only_seller_can_verify' });
+  const dealType = String(deal.deal_type || 'P2P').toUpperCase();
+  if (dealType !== 'CHANNEL' && dealType !== 'GROUP') return res.status(400).json({ error: 'not_channel_deal' });
+  const { verifyChannelOwnershipForDeal } = await import('./services/escrowService');
+  const result = await verifyChannelOwnershipForDeal(dealId, caller);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  return res.json(result);
+}));
+app.post('/api/deals/:id/channel/request-escrow', channelLimiter, requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal: any = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  if (String(deal.deal_type).toUpperCase() !== 'CHANNEL' && String(deal.deal_type).toUpperCase() !== 'GROUP') return res.status(400).json({ error: 'not_channel_deal' });
+  const { requestTransferToEscrow } = await import('./services/escrowService');
+  const r = await requestTransferToEscrow(dealId, caller);
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  return res.json(r);
+}));
+app.post('/api/deals/:id/channel/confirm-escrow', channelLimiter, requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal: any = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const isSeller = deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller;
+  const isAdminCaller = (req as any).authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isSeller && !isAdminCaller) return res.status(403).json({ error: 'only_seller_can_confirm' });
+  const { confirmTransferToEscrow } = await import('./services/escrowService');
+  const r = await confirmTransferToEscrow(caller, dealId);
+  if (!r.ok) return res.status(400).json({ error: r.error, detail: (r as any).currentCreatorId });
+  return res.json(r);
+}));
+app.post('/api/deals/:id/channel/payout', channelLimiter, requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal: any = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const isSeller = deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller;
+  const isAdminCaller = (req as any).authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isSeller && !isAdminCaller) return res.status(403).json({ error: 'only_seller_can_payout' });
+  const rawAddr = String((req.body as any).tonAddress || (req.body as any).ton_address || (req.body as any).address || '').trim();
+  if (rawAddr) {
+    try { Address.parse(rawAddr); } catch { return res.status(400).json({ error: 'invalid_ton_address' }); }
+    try { await db.query('UPDATE deals SET payout_address = $1, updated_at = now() WHERE id = $2', [rawAddr, dealId]); } catch {}
+    try { await db.query(`INSERT INTO users (telegram_id, username, ton_address) VALUES ($1,$2,$3) ON CONFLICT (telegram_id) DO UPDATE SET ton_address = EXCLUDED.ton_address`, [caller, (req as any).user?.username||null, rawAddr]); } catch {}
+  }
+  const { payoutSellerForChannel } = await import('./services/escrowService');
+  const r: any = await payoutSellerForChannel(dealId, caller);
+  if (!r.success) {
+    if (String(r.error||'').includes('seller_ton_address_required')) return res.status(402).json({ error: r.error, code:'seller_ton_address_required' });
+    if (String(r.error||'').includes('escrow_not_yet_received')) return res.status(409).json({ error: r.error, code:'escrow_not_yet_received' });
+    return res.status(400).json({ error: r.error });
+  }
+  return res.json(r);
+}));
+app.post('/api/deals/:id/channel/set-new-owner', channelLimiter, requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal: any = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const isBuyer = deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller;
+  const isAdminCaller = (req as any).authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isBuyer && !isAdminCaller) return res.status(403).json({ error: 'only_buyer_can_set_new_owner' });
+  if (String(deal.status) !== 'RELEASED') return res.status(409).json({ error: `invalid_status ${deal.status} need RELEASED` });
+  const raw = String((req.body as any).newOwner || (req.body as any).new_owner || (req.body as any).username || '').trim();
+  if (!raw) return res.status(400).json({ error: 'newOwner_required: enter @username' });
+  const uname = raw.startsWith('@') ? raw : '@' + raw;
+  if (!/^@[A-Za-z0-9_]{4,32}$/.test(uname)) return res.status(400).json({ error: 'invalid_username' });
+  const { setPendingNewOwner } = await import('./services/dealService');
+  await setPendingNewOwner(dealId, uname);
+  try { const { addDealMessage } = await import('./services/dealService'); await addDealMessage(dealId, caller, `🔑 Buyer set new owner for ${deal.channel_username} → ${uname}.`);} catch {}
+  return res.json({ ok:true, pending_new_owner: uname });
+}));
+app.post('/api/deals/:id/channel/transfer-to-buyer', channelLimiter, requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal: any = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const isBuyer = deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller;
+  const isAdminCaller = (req as any).authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isBuyer && !isAdminCaller) return res.status(403).json({ error: 'only_buyer_can_transfer' });
+  const raw = String((req.body as any).newOwner || (req.body as any).new_owner || (req.body as any).username || deal.pending_new_owner || '').trim();
+  if (!raw) return res.status(400).json({ error: 'newOwner_required: call set-new-owner first' });
+  const { transferChannelToBuyer } = await import('./services/escrowService');
+  const r = await transferChannelToBuyer(dealId, raw, caller);
+  if (!r.ok) {
+    const status = r.error === 'fresh_forbidden_wait_24h' ? 429 : r.error === 'user_not_participant_try_invite' ? 409 : 400;
+    if (status===429) res.setHeader('Retry-After', '86400');
+    return res.status(status).json({ error: r.error, detail: (r as any).detail, hint: r.error==='user_not_participant_try_invite' ? 'New owner must join channel first or add as contact' : undefined });
+  }
+  return res.json(r);
 }));
 
 // Global inbox — pending join requests across all deals where caller is party
