@@ -56,9 +56,10 @@ let globalFloodUntil = 0;
 export const channelBreakers = new Map<string, number>();
 
 // Bottleneck limiter: serialized, human-like pacing to avoid ban
+// minTime from config.globalRateMs (default 1300) to allow tuning without rebuild
 export const limiter = new Bottleneck({
   maxConcurrent: 1,
-  minTime: 1300,
+  minTime: Math.max(100, config.globalRateMs || 1300),
   reservoir: 30,
   reservoirRefreshInterval: 1000,
   reservoirRefreshAmount: 30,
@@ -256,17 +257,41 @@ export async function ensureClient(): Promise<TelegramClient> {
     }
 
     const stringSession = new StringSession(sessionStr);
+    // Optional proxy: only MTProxy is natively supported by teleproto; for SOCKS5/HTTP log hint
+    let proxyConf: unknown = undefined;
+    if (config.proxyUrl) {
+      try {
+        const u = new URL(config.proxyUrl);
+        if (u.protocol === 'mtproxy:' || u.searchParams.has('secret')) {
+          const secret = u.searchParams.get('secret') || u.password || '';
+          proxyConf = { ip: u.hostname, port: parseInt(u.port || '443', 10), MTProxy: true, secret };
+          logger.info(`Using MTProxy ${u.hostname}:${u.port}`);
+        } else {
+          // Generic SOCKS5/HTTP proxy not natively handled by teleproto TCP layer; log and use without proxy
+          // Teleproto will attempt direct connection; recommend running a SOCKS5 wrapper (e.g. tun2socks) if needed
+          logger.warn(`PROXY_URL set (${u.protocol}//${u.hostname}) but teleproto supports only MTProxy natively — attempting direct connection; set MTProxy or use sidecar`);
+        }
+      } catch {
+        logger.warn(`Invalid PROXY_URL ${config.proxyUrl} — ignoring`);
+      }
+    }
     const c = new TelegramClient(stringSession, config.apiId, config.apiHash, {
       connectionRetries: 5,
       retryDelay: 2000 + Math.random() * 1000,
       autoReconnect: true,
-      floodSleepThreshold: 60,
+      floodSleepThreshold: config.floodThreshold || 60,
+      requestRetries: 5,
+      timeout: 15,
+      keepAliveInterval: 30000, // avoid NAT idle close (Docker NAT ~5min) by pinging every 30s
+      sequentialUpdates: false,
+      useIPV6: false,
+      proxy: proxyConf as never,
       deviceModel: config.deviceModel || 'Pixel 7',
       systemVersion: config.systemVersion || '14',
       appVersion: config.appVersion || '10.2.1',
       langCode: 'en',
       systemLangCode: 'en-US',
-    });
+    } as never);
 
     logger.info('Connecting TelegramClient (teleproto)...');
     try {
@@ -314,18 +339,22 @@ export async function ensureClient(): Promise<TelegramClient> {
       logger.info(`Userbot connected as ${(me as unknown as { username?: string })?.username || (me as unknown as { id: number })?.id}`);
     } catch {}
 
-    // Warmup: iterDialogs to ensure session is fully ready and avoid cold-start flood
-    try {
-      const iter = (c as unknown as { iterDialogs: (p: unknown) => AsyncIterable<unknown> }).iterDialogs({ limit: 5 });
-      let count = 0;
-      for await (const _ of iter) {
-        count += 1;
-        if (count >= 1) break;
+    // Warmup: iterDialogs to ensure session is fully ready and avoid cold-start flood (skippable via WARMUP=false)
+    if (config.warmupEnabled) {
+      try {
+        const iter = (c as unknown as { iterDialogs: (p: unknown) => AsyncIterable<unknown> }).iterDialogs({ limit: 5 });
+        let count = 0;
+        for await (const _ of iter) {
+          count += 1;
+          if (count >= 1) break;
+        }
+        // small human delay after warmup
+        await sleep(400 + Math.random() * 600);
+      } catch (e) {
+        logger.warn('Warmup iterDialogs failed (non-fatal)', e);
       }
-      // small human delay after warmup
-      await sleep(400 + Math.random() * 600);
-    } catch (e) {
-      logger.warn('Warmup iterDialogs failed (non-fatal)', e);
+    } else {
+      logger.info('Warmup disabled (WARMUP=false)');
     }
 
     try {

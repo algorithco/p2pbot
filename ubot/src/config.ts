@@ -61,6 +61,13 @@ export const config = {
   floodThreshold: num(process.env.FLOOD_THRESHOLD as string | undefined, 60),
   maxPromotePerMin: num(process.env.MAX_PROMOTE_PER_MIN as string | undefined, 10),
   maxTransferPerMin: num(process.env.MAX_TRANSFER_PER_MIN as string | undefined, 2),
+  proxyUrl: str(
+    (process.env.PROXY_URL ?? process.env.HTTP_PROXY ?? process.env.HTTPS_PROXY ?? process.env.http_proxy ?? process.env.https_proxy) as
+      | string
+      | undefined,
+    '',
+  ),
+  warmupEnabled: str(process.env.WARMUP, 'true').toLowerCase() !== 'false',
 };
 
 // Optional zod schema if zod is available
