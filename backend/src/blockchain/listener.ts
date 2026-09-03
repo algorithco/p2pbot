@@ -76,18 +76,35 @@ function addressesEqual(a: string, b: string): boolean {
   }
 }
 
+async function postChatSystemMessage(dealId: number, text: string) {
+  try {
+    const { addDealMessage } = await import('../services/dealService');
+    await addDealMessage(dealId, 0, text);
+  } catch (e) {
+    logger.warn(`Could not post chat system message for deal #${dealId}`, e);
+  }
+}
+
 async function notifySellerOnly(deal: DealRow, text: string) {
+  // Also post to deal chat so webapp shows it even if bot blocked
+  void postChatSystemMessage(deal.id, text.replace(/<[^>]*>/g, ''));
   const bot = getBot();
   if (!bot) return;
   const sellerId = deal.seller_telegram_id;
   if (sellerId == null) return;
   try {
     const { InlineKeyboard } = await import('grammy');
-    const kb = new InlineKeyboard().text('📦 I sent the item', `item_sent:${deal.id}`);
+    const { config } = await import('../config');
+    const webappUrl = (config as any).webappUrl || (config as any).frontendUrl;
+    const kb = new InlineKeyboard();
+    if (webappUrl) {
+      const dealUrl = `${String(webappUrl).replace(/\/$/, '')}/#/deal/${deal.id}`;
+      kb.webApp('📲 Open Web App — Deal', dealUrl).row();
+    }
+    kb.text('📦 I sent the item (bot)', `item_sent:${deal.id}`);
     await bot.api.sendMessage(sellerId, text, { parse_mode: 'HTML', reply_markup: kb });
   } catch (err) {
     logger.warn(`Could not notify seller ${sellerId} about deal #${deal.id}`, err);
-    // Fallback without keyboard
     try {
       const bot2 = getBot();
       if (bot2) await bot2.api.sendMessage(sellerId, text, { parse_mode: 'HTML' });
@@ -139,23 +156,23 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     }
   }
 
-  // Fallback: find latest awaiting deal for this paymentAddress
+  // Fallback ONLY if no valid expectedId: find latest awaiting deal for this paymentAddress
+  // If we had an expectedId but it didn't match, do NOT fallback to wrong deal — ignore tx to avoid mis-attribution for shared custodial wallet
   if (!deal) {
+    if (expectedId != null) {
+      logger.warn(`Deposit to ${addr} with comment escrow#${expectedId} had no matching AWAITING_DEPOSIT — ignoring (avoid shared-wallet mis-match)`);
+      return;
+    }
     deal = await findAwaitingDeal(addr);
     if (!deal) return;
-    // If we expected a comment but didn't get one, log but still allow (backwards compat)
     const expectedMemo = depositComment(deal.id);
     if (decryptedComment == null || decryptedComment.trim() === '') {
       logger.info(`Deal #${deal.id}: TON deposit without comment (expected encrypted memo) from ${src?.toString() || 'unknown'} — accepting by amount`);
     } else if (parseDepositComment(decryptedComment) == null) {
-      // Comment present but not matching escrow# pattern — could be user error, but still check amount
       logger.warn(`Deal #${deal.id}: TON deposit with unexpected comment "${commentForLog}" (expected "${expectedMemo}") — checking amount`);
     } else if (expectedId == null || expectedId !== deal.id) {
-      // Comment is escrow# but for different deal id
       logger.warn(`Deal #${deal.id}: TON deposit comment "${commentForLog}" does not match this deal's expected "${expectedMemo}" — checking amount anyway`);
     }
-  } else {
-    // We already matched by comment, but still need to ensure paymentAddress matches (already checked)
   }
 
   if (!deal) return;
@@ -172,7 +189,7 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     return;
   }
 
-  // If the buyer's TON address is known, require the funds to come from them.
+  // If buyer's TON address is known, log mismatch but do NOT block deposit when comment+amount match (buyer may use different wallet)
   if (src && deal.buyer_telegram_id != null) {
     const userRes = await db.query(
       'SELECT ton_address FROM users WHERE telegram_id = $1 LIMIT 1',
@@ -180,20 +197,23 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     );
     const buyerTon = userRes.rows[0]?.ton_address;
     if (buyerTon && !addressesEqual(buyerTon, src.toString())) {
-      logger.warn(`Deal #${deal.id}: TON deposit from unexpected source ${src.toString()} (expected ${buyerTon})`);
-      return;
+      logger.warn(`Deal #${deal.id}: TON deposit from unexpected source ${src.toString()} (expected ${buyerTon}) — accepting by amount+comment, please verify sender`);
+      // Optionally persist src as buyer Ton for future correlation
+      try { await db.query('UPDATE users SET ton_address = $1 WHERE telegram_id = $2 AND (ton_address IS NULL OR ton_address = \'\')', [src.toString(), deal.buyer_telegram_id]); } catch {}
     }
   }
 
   await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
-  // Desired flow: notify ONLY seller "I've received the TON; please send the item to the buyer" with product type
-  const productTon = deal.terms ? `"${String(deal.terms).slice(0, 100)}"` : 'the item';
+  // Desired flow: notify ONLY seller "I've received the TON; please send the item to the buyer" with product type (NFT)
+  // Explicitly tell seller to send the NFT/item now, including product type selected at deal creation.
+  const productTonRaw = String(deal.terms || '').trim() || 'the item';
+  const productTon = productTonRaw.length > 100 ? `"${productTonRaw.slice(0, 97)}..."` : `"${productTonRaw}"`;
   const sellerMsgTon = [
     `✅ <b>I've received ${String(deal.amount)} ${String(deal.asset)} for deal #${deal.id}</b>`,
     `Product: ${productTon}`,
     ``,
-    `Please send ${productTon} to the buyer (ID <code>${deal.buyer_telegram_id}</code>).`,
-    `When done, tap "I sent the item" below or in the web app.`,
+    `Please send the NFT / item ${productTon} to the buyer (ID <code>${deal.buyer_telegram_id}</code>) as agreed.`,
+    `After you have sent it, tap "📦 I sent the item" below or in the web app so the buyer can confirm receipt.`,
   ].join('\n');
   await notifySellerOnly(deal, sellerMsgTon);
 }
@@ -233,6 +253,10 @@ async function processJettonDeposit(addr: string, note: JettonNotification, forw
     }
   }
   if (!deal) {
+    if (expectedId != null) {
+      logger.warn(`Jetton to ${addr} with comment escrow#${expectedId} had no matching AWAITING_DEPOSIT — ignoring`);
+      return;
+    }
     deal = await findAwaitingDeal(addr);
     if (!deal) return;
     const expectedMemo = depositComment(deal.id);
@@ -258,13 +282,14 @@ async function processJettonDeposit(addr: string, note: JettonNotification, forw
   }
 
   await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
-  const productJetton = deal.terms ? `"${String(deal.terms).slice(0, 100)}"` : 'the item';
+  const productJettonRaw = String(deal.terms || '').trim() || 'the item';
+  const productJetton = productJettonRaw.length > 100 ? `"${productJettonRaw.slice(0, 97)}..."` : `"${productJettonRaw}"`;
   const sellerMsgUsdt = [
     `✅ <b>I've received ${String(deal.amount)} ${String(deal.asset)} for deal #${deal.id}</b>`,
     `Product: ${productJetton}`,
     ``,
-    `Please send ${productJetton} to the buyer (ID <code>${deal.buyer_telegram_id}</code>).`,
-    `When done, tap "I sent the item" below.`,
+    `Please send the NFT / item ${productJetton} to the buyer (ID <code>${deal.buyer_telegram_id}</code>) as agreed.`,
+    `After you have sent it, tap "📦 I sent the item" below or in the web app so the buyer can confirm receipt.`,
   ].join('\n');
   await notifySellerOnly(deal, sellerMsgUsdt);
 }
