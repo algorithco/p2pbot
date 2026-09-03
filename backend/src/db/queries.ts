@@ -89,6 +89,8 @@ export async function ensureTables() {
   // Encrypted seller-buyer channel: per-deal symmetric key (base64 32B encrypted at rest if ENCRYPTION_KEY set)
   await ensureColumn('deals', 'chat_key TEXT');
   await ensureColumn('deals', 'chat_key_created_at TIMESTAMPTZ');
+  // Seller payout address via web app (for buyer-approved release)
+  await ensureColumn('deals', 'payout_address TEXT');
 
   // Messages E2E: ciphertext-only at rest, plus legacy content for migration
   await ensureColumn('messages', 'encrypted_content TEXT');

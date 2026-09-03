@@ -1,7 +1,7 @@
 -- Canonical backend schema — mirrors src/db/queries.ts ensureTables().
 -- ensureTables() is authoritative at boot; this file documents/creates the same shape.
--- Deal statuses (canonical strings): AWAITING_DEPOSIT, DEPOSIT_CONFIRMED,
--- BUYER_CONFIRMED, RELEASED, REFUNDED.
+-- Deal statuses (canonical webapp-first): AWAITING_DEPOSIT, DEPOSIT_CONFIRMED,
+-- ITEM_SENT, BUYER_CONFIRMED (legacy), RELEASED, REFUNDED.
 
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -30,7 +30,10 @@ CREATE TABLE IF NOT EXISTS deals (
   tx_hash TEXT,
   resolved_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
-  confirmations JSONB DEFAULT '{}'::jsonb
+  confirmations JSONB DEFAULT '{}'::jsonb,
+  payout_address TEXT,
+  chat_key TEXT,
+  chat_key_created_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
@@ -45,6 +48,10 @@ CREATE TABLE IF NOT EXISTS messages (
   deal_id INTEGER REFERENCES deals(id) ON DELETE CASCADE,
   sender_telegram_id BIGINT,
   content TEXT,
+  encrypted_content TEXT,
+  iv TEXT,
+  auth_tag TEXT,
+  is_encrypted BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -54,3 +61,20 @@ CREATE TABLE IF NOT EXISTS deal_links (
   token TEXT UNIQUE,
   expires_at TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS deal_join_requests (
+  id SERIAL PRIMARY KEY,
+  deal_id INTEGER REFERENCES deals(id) ON DELETE CASCADE,
+  token TEXT,
+  requester_telegram_id BIGINT,
+  requester_username TEXT,
+  requester_first_name TEXT,
+  requester_photo_url TEXT,
+  status TEXT DEFAULT 'pending',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_messages_deal_created ON messages(deal_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_deal_links_expires ON deal_links(expires_at);
+CREATE INDEX IF NOT EXISTS idx_join_requests_deal_token ON deal_join_requests(deal_id, token);
+CREATE INDEX IF NOT EXISTS idx_join_requests_status ON deal_join_requests(status);
