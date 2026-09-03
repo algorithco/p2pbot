@@ -424,35 +424,61 @@ export function registerCommands(bot: Bot) {
     }
   });
 
-  // Seller taps "I sent the item" — mark ITEM_SENT and ask buyer
+  // Seller taps "I sent the item" — webapp-first: bot is notification only, action must be in web app
   bot.callbackQuery(/^item_sent:(\d+)$/, async (ctx) => {
     const dealId = Number(ctx.match?.[1]);
     const sellerId = ctx.from?.id;
     if (!dealId || !sellerId) return ctx.answerCallbackQuery({ text: 'Invalid' });
+    const webappUrl = config.webappUrl || config.frontendUrl;
+    const dealUrl = webappUrl ? `${String(webappUrl).replace(/\/$/, '')}/#/deal/${dealId}` : null;
     try {
-      const { markItemSent } = await import('../../services/escrowService');
-      const res = await markItemSent(sellerId, dealId);
-      if (!res.success) return ctx.answerCallbackQuery({ text: res.message.slice(0, 60), show_alert: true });
-      await ctx.answerCallbackQuery({ text: 'Marked as sent — buyer notified!' });
-      try { await ctx.editMessageReplyMarkup({ reply_markup: undefined } as any); } catch {}
-      await ctx.reply(`✅ <b>Deal #${dealId}</b> marked as <code>ITEM_SENT</code> — buyer has been asked "Did you receive it?"`, { parse_mode: 'HTML' });
+      const { InlineKeyboard } = await import('grammy');
+      const kb = new InlineKeyboard();
+      if (dealUrl) kb.webApp('📲 Open Web App — I sent item', dealUrl);
+      await ctx.answerCallbackQuery({ text: 'Open web app to confirm — bot is notifications only' });
+      await ctx.reply(
+        [
+          `📲 <b>Deal #${dealId}</b> — please confirm in the <b>Web App</b>`,
+          `━━━━━━━━━━━━━━━━━━━━━━━`,
+          `This action is now <b>webapp + deal chat only</b> (bot is notifications).`,
+          `Open Deal #${dealId} → <b>📦 I sent the item</b> to notify buyer.`,
+          dealUrl ? `🔗 ${escapeHtml(dealUrl)}` : '',
+          ``,
+          `Tip: also post proof (tracking, photo) in the deal chat.`,
+        ].filter(Boolean).join('\n'),
+        { parse_mode: 'HTML', reply_markup: kb as any }
+      );
+      // Optional fallback: if webapp unavailable, seller can retry via bot using webapp — we do NOT auto-execute here to avoid split-brain
+      // If you need bot fallback, enable by calling markItemSent directly (commented).
+      // const { markItemSent } = await import('../../services/escrowService'); const res = await markItemSent(sellerId, dealId); ...
     } catch (e) {
       await ctx.answerCallbackQuery({ text: String((e as Error).message || 'Failed'), show_alert: true });
     }
   });
 
-  // Buyer approves receipt — release funds minus fee
+  // Buyer approves receipt — webapp-first: bot is notification only
   bot.callbackQuery(/^buyer_approve:(\d+)$/, async (ctx) => {
     const dealId = Number(ctx.match?.[1]);
     const buyerId = ctx.from?.id;
     if (!dealId || !buyerId) return ctx.answerCallbackQuery({ text: 'Invalid' });
+    const webappUrl = config.webappUrl || config.frontendUrl;
+    const dealUrl = webappUrl ? `${String(webappUrl).replace(/\/$/, '')}/#/deal/${dealId}` : null;
     try {
-      const { buyerApproveReceipt } = await import('../../services/escrowService');
-      const res = await buyerApproveReceipt(buyerId, dealId);
-      if (!res.success) return ctx.answerCallbackQuery({ text: res.message.slice(0, 60), show_alert: true });
-      await ctx.answerCallbackQuery({ text: 'Approved — funds released!' });
-      try { await ctx.editMessageReplyMarkup({ reply_markup: undefined } as any); } catch {}
-      await ctx.reply(`✅ <b>Deal #${dealId} closed</b> — funds released to seller minus fee.`, { parse_mode: 'HTML' });
+      const { InlineKeyboard } = await import('grammy');
+      const kb = new InlineKeyboard();
+      if (dealUrl) kb.webApp('📲 Open Web App — Confirm Receipt', dealUrl);
+      await ctx.answerCallbackQuery({ text: 'Open web app to release — bot is notifications only' });
+      await ctx.reply(
+        [
+          `📲 <b>Deal #${dealId}</b> — confirm receipt in the <b>Web App</b>`,
+          `━━━━━━━━━━━━━━━━━━━━━━━`,
+          `Tap <b>✅ Yes, received — Release</b> in Deal Detail or Chat to release TON minus fee to seller.`,
+          dealUrl ? `🔗 ${escapeHtml(dealUrl)}` : '',
+          ``,
+          `Bot will notify both parties when funds are sent.`,
+        ].filter(Boolean).join('\n'),
+        { parse_mode: 'HTML', reply_markup: kb as any }
+      );
     } catch (e) {
       await ctx.answerCallbackQuery({ text: String((e as Error).message || 'Failed'), show_alert: true });
     }
@@ -461,8 +487,20 @@ export function registerCommands(bot: Bot) {
   bot.callbackQuery(/^buyer_dispute:(\d+)$/, async (ctx) => {
     const dealId = Number(ctx.match?.[1]);
     if (!dealId) return ctx.answerCallbackQuery({ text: 'Invalid' });
-    await ctx.answerCallbackQuery({ text: 'Not yet — contact seller or admin if item not received.' });
-    await ctx.reply(`⏳ <b>Deal #${dealId}</b> — you marked as not received. Contact seller via chat or wait. An admin can refund if needed.`, { parse_mode: 'HTML' });
+    const webappUrl = config.webappUrl || config.frontendUrl;
+    const dealUrl = webappUrl ? `${String(webappUrl).replace(/\/$/, '')}/#/deal/${dealId}/chat` : null;
+    const { InlineKeyboard } = await import('grammy');
+    const kb = new InlineKeyboard();
+    if (dealUrl) kb.webApp('💬 Open Deal Chat', dealUrl);
+    await ctx.answerCallbackQuery({ text: 'Open chat to discuss — bot is notifications only' });
+    await ctx.reply(
+      [
+        `⏳ <b>Deal #${dealId}</b> — you marked as not received.`,
+        `Please discuss with seller in the <b>deal chat</b> (web app) or contact admin for dispute/refund.`,
+        dealUrl ? `🔗 ${escapeHtml(dealUrl)}` : '',
+      ].filter(Boolean).join('\n'),
+      { parse_mode: 'HTML', reply_markup: kb as any }
+    );
   });
 
   // aliases

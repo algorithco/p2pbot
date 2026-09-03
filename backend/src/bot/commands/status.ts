@@ -42,16 +42,25 @@ export function registerStatus(bot: Bot) {
       `Deadline:  ${fmtDate(deal.deadline)}`,
     ].join('\n');
 
+    const webappUrl = config.webappUrl || config.frontendUrl;
+    const dealUrl = webappUrl ? `${String(webappUrl).replace(/\/$/, '')}/#/deal/${deal.id}` : null;
+    const { InlineKeyboard } = await import('grammy');
+    const kb = new InlineKeyboard();
+    if (dealUrl) kb.webApp('📲 Open in Web App', dealUrl);
     await ctx.reply(
       [
         `Deal #${deal.id}`,
         `Status: ${deal.status}`,
         `Amount: ${deal.amount} ${deal.asset} (fee ${deal.fee_bps ?? 0} bps)`,
         deal.contract_address ? `Contract: ${deal.contract_address}` : 'Mode: off-chain',
+        dealUrl ? `Web: ${dealUrl}` : '',
         '',
         'Timeline:',
         timeline,
-      ].join('\n')
+        '',
+        dealUrl ? '👉 All actions in Web App + Deal Chat (bot is notifications only).' : '',
+      ].filter(Boolean).join('\n'),
+      kb as any ? { reply_markup: kb } : undefined
     );
   });
 }

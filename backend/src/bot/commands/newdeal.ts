@@ -21,6 +21,27 @@ function escapeHtml(s: string): string {
 
 export function registerNewDeal(bot: Bot) {
   bot.command('newdeal', async (ctx) => {
+    // Webapp-first: redirect to web app for deal creation; keep bot command only as fallback guide
+    const webappUrl = config.webappUrl || config.frontendUrl;
+    if (webappUrl) {
+      const { InlineKeyboard } = await import('grammy');
+      const kb = new InlineKeyboard().webApp('📲 Open Web App — Create Deal', webappUrl);
+      kb.row().text('ℹ️ Show legacy syntax', 'menu:create');
+      return ctx.reply(
+        [
+          `📲 <b>Create deals in the Web App</b> (bot is notifications only)`,
+          `━━━━━━━━━━━━━━━━━━━━━━━`,
+          `Tap <b>Open Web App</b> below → <b>Create Deal</b> → choose TON/USDT, amount, terms.`,
+          `You will get a <b>t.me invite link</b> to share with seller; buyer approves in Inbox.`,
+          ``,
+          `🔗 Web App: ${escapeHtml(webappUrl)}`,
+          ``,
+          `Tip: To use legacy <code>/newdeal</code> syntax anyway, tap "Show legacy syntax".`,
+          webappUrl ? '' : `Set WEBAPP_URL for direct button.`,
+        ].filter(Boolean).join('\n'),
+        { parse_mode: 'HTML', reply_markup: kb }
+      );
+    }
     const parts = (ctx.match || '').trim().split(/\s+/).filter(Boolean);
     if (parts.length < 3) {
       return ctx.reply(USAGE_HTML, { parse_mode: 'HTML' });
