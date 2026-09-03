@@ -441,3 +441,168 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
   notifyAdmins(`Deal #${id} RELEASED by buyer ${buyerTelegramId} approval (fee deducted)`);
   return { success: true, message: 'Receipt confirmed — funds released to seller minus fee. Deal closed.', released: true, status: DEAL_STATUS.RELEASED };
 }
+
+// ── CHANNEL/GROUP custodial escrow (via @gramchioka) ──
+// P2P flow untouched — these helpers only run when deal.deal_type in (CHANNEL,GROUP)
+const ESCROW_HOLDER_USERNAME = process.env.ESCROW_HOLDER_USERNAME || '@gramchioka';
+const ESCROW_HOLDER_ID = Number(process.env.ESCROW_HOLDER_ID || 8992814642);
+
+function isChannelDeal(deal: any): boolean {
+  const t = String(deal?.deal_type || deal?.dealType || 'P2P').toUpperCase();
+  return t === 'CHANNEL' || t === 'GROUP';
+}
+
+async function ubotFetch(path: string, init?: RequestInit): Promise<any> {
+  const base = (config as any).ubotUrl || process.env.UBOT_URL || 'http://ubot:3002';
+  const key = (config as any).ubotApiKey || process.env.UBOT_API_KEY || '';
+  const headers: Record<string,string> = { 'Content-Type':'application/json' };
+  if (key) headers['x-api-key']=key;
+  const url = base.replace(/\/+$/,'') + path;
+  const res = await fetch(url, { ...init, headers:{ ...headers, ...(init?.headers as any||{}) } } as any);
+  const txt = await res.text();
+  let data:any = txt; try{ data=txt?JSON.parse(txt):null;}catch{}
+  if (!res.ok) {
+    const err: any = new Error(data?.error || txt || `ubot ${res.status}`);
+    err.status = res.status; err.body = data;
+    if (data?.retryAfter) err.retryAfter = data.retryAfter;
+    throw err;
+  }
+  return data;
+}
+
+export async function verifyChannelOwnershipForDeal(dealId: number | string, sellerTelegramId?: number | null): Promise<{ ok:boolean; verified:boolean; channelId?:string; title?:string; username?:string; members?:number; error?:string; }> {
+  const deal:any = await getDealById(dealId);
+  if (!deal) return { ok:false, verified:false, error:'deal_not_found' };
+  if (!isChannelDeal(deal)) return { ok:false, verified:false, error:'not_channel_deal' };
+  const rawUsername = deal.channel_username || deal.channelUsername;
+  if (!rawUsername) return { ok:false, verified:false, error:'channel_username_required' };
+  const channelId = rawUsername as string;
+  try {
+    const info: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}`, { method:'GET' });
+    const admins: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/admins`, { method:'GET' });
+    const creator = Array.isArray(admins) ? admins.find((a:any)=> a.isCreator) : null;
+    const creatorId = creator ? Number(creator.id) : null;
+    const expected = sellerTelegramId != null ? Number(sellerTelegramId) : Number(deal.seller_telegram_id);
+    const verified = creatorId != null && expected != null && creatorId === expected;
+    const snapshot = { title: info.title, username: info.username, channelId: String(info.id), isChannel: info.isChannel, creatorId, verifiedAt: new Date().toISOString() };
+    const { updateChannelVerification } = await import('./dealService');
+    await updateChannelVerification(Number(dealId), { channelId: String(info.id), channelTitle: String(info.title||''), channelSnapshot: snapshot as any, verified });
+    try {
+      const { addDealMessage } = await import('./dealService');
+      if (verified) await addDealMessage(Number(dealId), 0, `✅ Channel ${rawUsername} verified — owner ${creatorId} matches seller ${expected}.`);
+      else await addDealMessage(Number(dealId), 0, `⚠️ Channel ${rawUsername} owner mismatch: creator ${creatorId ?? 'unknown'} vs seller ${expected}. Please ensure @gramchioka is admin and seller is creator.`);
+    } catch {}
+    return { ok:true, verified, channelId: String(info.id), title: info.title, username: info.username, error: verified ? undefined : 'owner_mismatch' };
+  } catch (e:any) {
+    const msg = String(e?.message||e);
+    if (msg.includes('FLOOD_WAIT') || msg.includes('429') || msg.includes('FloodWait')) {
+      return { ok:false, verified:false, error: msg };
+    }
+    return { ok:false, verified:false, error: msg };
+  }
+}
+
+export async function checkEscrowHolderOwnership(dealId: number | string): Promise<{ ok:boolean; isEscrowOwner:boolean; currentCreatorId?: number; error?:string }> {
+  const deal:any = await getDealById(dealId);
+  if (!deal) return { ok:false, isEscrowOwner:false, error:'deal_not_found' };
+  if (!isChannelDeal(deal)) return { ok:false, isEscrowOwner:false, error:'not_channel_deal' };
+  const channelId = deal.channel_username || deal.channel_id;
+  if (!channelId) return { ok:false, isEscrowOwner:false, error:'channel_username_required' };
+  try {
+    const admins: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/admins`, { method:'GET' });
+    const creator = Array.isArray(admins) ? admins.find((a:any)=> a.isCreator) : null;
+    const creatorId = creator ? Number(creator.id) : null;
+    const isEscrowOwner = creatorId === ESCROW_HOLDER_ID;
+    if (isEscrowOwner) {
+      const { setTransferToEscrow } = await import('./dealService');
+      await setTransferToEscrow(Number(dealId));
+      try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `🔒 Escrow received channel ${channelId} — holder ${ESCROW_HOLDER_USERNAME} is now creator.`);} catch {}
+    }
+    return { ok:true, isEscrowOwner, currentCreatorId: creatorId ?? undefined };
+  } catch (e:any) {
+    return { ok:false, isEscrowOwner:false, error: String(e?.message||e) };
+  }
+}
+
+export async function requestTransferToEscrow(dealId: number | string, sellerTelegramId: number): Promise<{ ok:boolean; message?:string; error?:string }> {
+  const deal:any = await getDealById(dealId);
+  if (!deal) return { ok:false, error:'deal_not_found' };
+  if (Number(deal.seller_telegram_id) !== Number(sellerTelegramId)) return { ok:false, error:'only_seller_can_transfer' };
+  if (String(deal.status) !== DEAL_STATUS.DEPOSIT_CONFIRMED && String(deal.status) !== DEAL_STATUS.AWAITING_DEPOSIT) return { ok:false, error:`invalid_status ${deal.status} need DEPOSIT_CONFIRMED` };
+  const channelId = deal.channel_username || deal.channel_id;
+  try {
+    const { addDealMessage } = await import('./dealService');
+    await addDealMessage(Number(dealId), 0, `📢 Seller please transfer ownership of ${channelId} to ${ESCROW_HOLDER_USERNAME} now. After transfer, tap "I transferred".`);
+    // notify seller via bot
+    try {
+      const { getBot } = await import('../bot/bot');
+      const bot = getBot();
+      if (bot) await bot.api.sendMessage(sellerTelegramId, `📢 <b>Deal #${dealId}</b> — please transfer ownership of ${channelId} to <b>${ESCROW_HOLDER_USERNAME}</b> now (Telegram -> Channel Info -> Administrators -> Transfer ownership). After done, press "I transferred" in webapp.`, { parse_mode:'HTML' });
+    } catch {}
+    return { ok:true, message:'transfer_requested' };
+  } catch (e:any) { return { ok:false, error: String(e?.message||e)}; }
+}
+
+export async function confirmTransferToEscrow(sellerTelegramId: number, dealId: number | string): Promise<{ ok:boolean; verified?:boolean; message?:string; error?:string }> {
+  const res = await checkEscrowHolderOwnership(dealId);
+  if (!res.ok) return { ok:false, error: res.error };
+  if (!res.isEscrowOwner) return { ok:false, verified:false, error:`not_yet_transferred: current creator ${res.currentCreatorId} != escrow ${ESCROW_HOLDER_ID}` };
+  return { ok:true, verified:true, message:'escrow_received' };
+}
+
+export async function payoutSellerForChannel(dealId: number | string, sellerTelegramId?: number | null): Promise<{ success:boolean; message?:string; error?:string }> {
+  const deal:any = await getDealById(dealId);
+  if (!deal) return { success:false, error:'deal_not_found' };
+  if (!isChannelDeal(deal)) return { success:false, error:'not_channel_deal' };
+  if (!deal.transfer_to_escrow_at) return { success:false, error:'escrow_not_yet_received' };
+  if (String(deal.status) === DEAL_STATUS.RELEASED || String(deal.status) === DEAL_STATUS.REFUNDED) return { success:false, error:`already_${String(deal.status).toLowerCase()}` };
+  // reuse guardedTransition for payout
+  try {
+    await guardedTransition(Number(dealId), DEAL_STATUS.RELEASED, { amount: deal.amount, asset: deal.asset, terms: deal.terms });
+    try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `💸 Payout sent to seller for channel ${deal.channel_username} — ${deal.amount} ${deal.asset} (fee deducted).`);} catch {}
+    return { success:true, message:'payout_sent' };
+  } catch (e:any) {
+    return { success:false, error: String(e?.message||e) };
+  }
+}
+
+export async function transferChannelToBuyer(dealId: number | string, newOwnerUsername: string, callerTelegramId?: number | null): Promise<{ ok:boolean; error?:string; detail?:string }> {
+  const deal:any = await getDealById(dealId);
+  if (!deal) return { ok:false, error:'deal_not_found' };
+  if (!isChannelDeal(deal)) return { ok:false, error:'not_channel_deal' };
+  if (String(deal.status) !== DEAL_STATUS.RELEASED) return { ok:false, error:`invalid_status ${deal.status} need RELEASED (seller already paid)` };
+  const channelId = deal.channel_username || deal.channel_id;
+  if (!channelId) return { ok:false, error:'channel_username_required' };
+  const raw = String(newOwnerUsername).trim().replace(/^@/, '');
+  if (!raw || !/^([A-Za-z0-9_]{4,32})$/.test(raw)) return { ok:false, error:'invalid_username' };
+  const target = '@' + raw;
+  // attempt invite first if seller paid path, to avoid USER_NOT_PARTICIPANT
+  try { await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/invite`, { method:'POST', body: JSON.stringify({ userId: target })}); } catch {}
+  await new Promise(r=> setTimeout(r, 1200));
+  try {
+    // use takeover for idempotency if buyer not yet admin
+    const idemp = `channel-deal-${dealId}-${target}`;
+    const res: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/takeover`, { method:'POST', body: JSON.stringify({ newOwnerId: target }), headers:{ 'x-idempotency-key': idemp }});
+    const { setTransferToBuyer } = await import('./dealService');
+    await setTransferToBuyer(Number(dealId), target);
+    try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `🎉 Channel ${channelId} transferred to new owner ${target}.`);} catch {}
+    return { ok:true };
+  } catch (e:any) {
+    const msg = String(e?.message||e);
+    if (msg.includes('USER_NOT_PARTICIPANT')) return { ok:false, error:'user_not_participant_try_invite', detail: msg };
+    if (msg.includes('FRESH_CHANGE_ADMINS_FORBIDDEN') || msg.includes('86400')) return { ok:false, error:'fresh_forbidden_wait_24h', detail: msg };
+    if (msg.includes('CHANNELS_TOO_MUCH')) return { ok:false, error:'channels_too_much', detail: msg };
+    if (msg.includes('not_admin') || msg.includes('CHAT_ADMIN_REQUIRED')) return { ok:false, error:'not_admin', detail: msg };
+    // fallback try group transfer (for GROUP type)
+    if (String(deal.deal_type).toUpperCase()==='GROUP') {
+      try {
+        const idemp = `group-deal-${dealId}-${target}`;
+        await ubotFetch(`/group/${encodeURIComponent(String(channelId))}/takeover`, { method:'POST', body: JSON.stringify({ newOwnerId: target }), headers:{ 'x-idempotency-key': idemp }});
+        const { setTransferToBuyer } = await import('./dealService');
+        await setTransferToBuyer(Number(dealId), target);
+        return { ok:true };
+      } catch (e2:any) { return { ok:false, error: String(e2?.message||e2) } }
+    }
+    return { ok:false, error: msg };
+  }
+}
