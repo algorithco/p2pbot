@@ -91,6 +91,21 @@ export async function ensureTables() {
   await ensureColumn('deals', 'chat_key_created_at TIMESTAMPTZ');
   // Seller payout address via web app (for buyer-approved release)
   await ensureColumn('deals', 'payout_address TEXT');
+  // CHANNEL/GROUP escrow (custodial via @gramchioka) — additive, P2P untouched
+  await ensureColumn('deals', "deal_type TEXT DEFAULT 'P2P'");
+  await ensureColumn('deals', 'channel_username TEXT');
+  await ensureColumn('deals', 'channel_id TEXT');
+  await ensureColumn('deals', 'channel_title TEXT');
+  await ensureColumn('deals', 'channel_snapshot JSONB DEFAULT \'{}\'::jsonb');
+  await ensureColumn('deals', 'channel_verified BOOLEAN DEFAULT false');
+  await ensureColumn('deals', 'channel_verified_at TIMESTAMPTZ');
+  await ensureColumn('deals', 'escrow_holder_id BIGINT');
+  await ensureColumn('deals', 'transfer_to_escrow_at TIMESTAMPTZ');
+  await ensureColumn('deals', 'transfer_to_buyer_at TIMESTAMPTZ');
+  await ensureColumn('deals', 'pending_new_owner TEXT');
+  await pool.query("UPDATE deals SET deal_type='P2P' WHERE deal_type IS NULL");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_deals_type ON deals(deal_type)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_deals_channel_id ON deals(channel_id) WHERE channel_id IS NOT NULL");
 
   // Messages E2E: ciphertext-only at rest, plus legacy content for migration
   await ensureColumn('messages', 'encrypted_content TEXT');

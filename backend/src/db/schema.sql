@@ -33,8 +33,21 @@ CREATE TABLE IF NOT EXISTS deals (
   confirmations JSONB DEFAULT '{}'::jsonb,
   payout_address TEXT,
   chat_key TEXT,
-  chat_key_created_at TIMESTAMPTZ
+  chat_key_created_at TIMESTAMPTZ,
+  deal_type TEXT DEFAULT 'P2P',
+  channel_username TEXT,
+  channel_id TEXT,
+  channel_title TEXT,
+  channel_snapshot JSONB DEFAULT '{}'::jsonb,
+  channel_verified BOOLEAN DEFAULT false,
+  channel_verified_at TIMESTAMPTZ,
+  escrow_holder_id BIGINT,
+  transfer_to_escrow_at TIMESTAMPTZ,
+  transfer_to_buyer_at TIMESTAMPTZ,
+  pending_new_owner TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_deals_type ON deals(deal_type);
+CREATE INDEX IF NOT EXISTS idx_deals_channel_id ON deals(channel_id) WHERE channel_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS notifications (
   id SERIAL PRIMARY KEY,
