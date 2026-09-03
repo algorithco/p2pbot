@@ -116,12 +116,24 @@ async function main() {
     logger.info(`ubot listening on http://localhost:${port} (apiId=${config.apiId ? 'set' : 'missing'}, health at /health, ready at /ready, metrics at /metrics, verified at /health/verified)`);
     if (config.apiKey) logger.info('UBOT_API_KEY auth enabled (timing-safe, header only)');
     else logger.warn('UBOT_API_KEY not set — internal API is OPEN (dev only) — set a 32+ char random key');
-    // Periodic auth check with jitter 60-75s to avoid bot signature
+    // Periodic auth check with jitter 60-75s to avoid bot signature; attempt auto-reconnect if disconnected (NAT idle close)
     periodicTimer = setInterval(
       async () => {
         try {
           const ok = await checkAuthorized();
-          if (!ok) logger.warn('Periodic check: session no longer authorized — may need re-login');
+          if (!ok) {
+            logger.warn('Periodic check: session no longer authorized — attempting ensureClient reconnect');
+            try {
+              await ensureClient();
+              logger.info('Periodic reconnect succeeded');
+            } catch (e) {
+              const msg = String((e as Error).message || e);
+              // Don't spam on expected not_authorized / FloodWait - already handled in ensureClient
+              if (!msg.includes('not_authorized') && !msg.includes('FLOOD_WAIT')) {
+                logger.warn(`Periodic reconnect failed: ${msg.slice(0, 200)}`);
+              }
+            }
+          }
         } catch {}
       },
       60_000 + Math.random() * 15000

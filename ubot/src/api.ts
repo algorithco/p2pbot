@@ -241,29 +241,34 @@ export function createApi() {
   try {
     const fn = helmet?.default || helmet;
     if (typeof fn === 'function') {
-      helmetMw = fn();
+      helmetMw = fn({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, hsts: config.isProduction ? { maxAge: 31536000 } : false });
     } else if (helmet) {
       // helmet may be the middleware factory itself
-      const maybe = helmet as unknown as () => (req: Request, res: Response, next: NextFunction) => void;
-      if (typeof maybe === 'function') helmetMw = maybe();
+      const maybe = helmet as unknown as (opts?: unknown) => (req: Request, res: Response, next: NextFunction) => void;
+      if (typeof maybe === 'function') helmetMw = maybe({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false });
     }
   } catch {
     helmetMw = (_req, _res, next) => next();
   }
   app.use(helmetMw);
 
-  // cors (allow internal, reflect origin) — imported at top via dynamic require
+  // cors: allow frontend origin if set, otherwise reflect origin but no credentials (internal)
   let corsMw: (req: Request, res: Response, next: NextFunction) => void = (_req, _res, next) => next();
   try {
     const fn = cors?.default || cors;
-    if (typeof fn === 'function') corsMw = fn({ origin: true, credentials: false });
+    if (typeof fn === 'function') {
+      const allowed = process.env.FRONTEND_URL || process.env.WEBAPP_URL;
+      corsMw = allowed
+        ? fn({ origin: [allowed, 'http://localhost:8080', 'http://127.0.0.1:8080'], credentials: false })
+        : fn({ origin: true, credentials: false });
+    }
   } catch {
     corsMw = (_req, _res, next) => next();
   }
   app.use(corsMw);
 
   app.use(express.json({ limit: '256kb' }));
-  app.set('trust proxy', 1);
+  app.set('trust proxy', 'loopback');
 
   // morgan-like request logger with reqId
   app.use((req: Request, res: Response, next: NextFunction) => {
@@ -285,9 +290,9 @@ export function createApi() {
 
   const healthLimiter = rateLimit({ windowMs: 60_000, max: 60, name: 'health' });
   const verifiedLimiter = rateLimit({ windowMs: 60_000, max: 10, name: 'verified' });
-  const promoteLimiter = rateLimit({ windowMs: 60_000, max: 5, name: 'promote' });
-  const transferLimiter = rateLimit({ windowMs: 60_000, max: 2, name: 'transfer' });
-  const takeoverLimiter = rateLimit({ windowMs: 60_000, max: 2, name: 'takeover' });
+  const promoteLimiter = rateLimit({ windowMs: 60_000, max: config.maxPromotePerMin || 5, name: 'promote' });
+  const transferLimiter = rateLimit({ windowMs: 60_000, max: config.maxTransferPerMin || 2, name: 'transfer' });
+  const takeoverLimiter = rateLimit({ windowMs: 60_000, max: config.maxTransferPerMin || 2, name: 'takeover' });
   const migrateLimiter = rateLimit({ windowMs: 60_000, max: 2, name: 'migrate' });
   const inviteLimiter = rateLimit({ windowMs: 60_000, max: 3, name: 'invite' });
   const apiLimiter = rateLimit({ windowMs: 60_000, max: 60, name: 'api' });
