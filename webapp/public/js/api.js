@@ -214,6 +214,14 @@
       return request('GET', '/api/notifications').then(function (d) {
         return Array.isArray(d) ? d : [];
       });
-    }
+    },
+
+    // CHANNEL/GROUP escrow via @gramchioka (additive)
+    channelVerify: function (dealId) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/verify', {}); },
+    channelRequestEscrow: function (dealId) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/request-escrow', {}); },
+    channelConfirmEscrow: function (dealId) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/confirm-escrow', {}); },
+    channelPayout: function (dealId, tonAddress) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/payout', tonAddress ? { tonAddress: tonAddress } : {}); },
+    channelSetNewOwner: function (dealId, newOwner) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/set-new-owner', { newOwner: newOwner }); },
+    channelTransferToBuyer: function (dealId, newOwner) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/transfer-to-buyer', newOwner ? { newOwner: newOwner } : {}); }
   };
 })();

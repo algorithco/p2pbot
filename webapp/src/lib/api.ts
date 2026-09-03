@@ -128,6 +128,13 @@ export const Api = {
   me(): Promise<any> {
     return request('GET', '/api/users/me');
   },
+  // CHANNEL/GROUP escrow (custodial via @gramchioka) — P2P untouched
+  channelVerify(dealId: number | string): Promise<any> { return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/channel/verify', {}); },
+  channelRequestEscrow(dealId: number | string): Promise<any> { return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/channel/request-escrow', {}); },
+  channelConfirmEscrow(dealId: number | string): Promise<any> { return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/channel/confirm-escrow', {}); },
+  channelPayout(dealId: number | string, tonAddress?: string): Promise<any> { return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/channel/payout', tonAddress ? { tonAddress } : {}); },
+  channelSetNewOwner(dealId: number | string, newOwner: string): Promise<any> { return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/channel/set-new-owner', { newOwner }); },
+  channelTransferToBuyer(dealId: number | string, newOwner?: string): Promise<any> { return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/channel/transfer-to-buyer', newOwner ? { newOwner } : {}); },
   joinRequests(dealId: number | string): Promise<any[]> {
     return request('GET', '/api/deals/' + encodeURIComponent(String(dealId)) + '/join-requests').then(d => Array.isArray(d) ? d : Array.isArray(d?.requests) ? d.requests : []);
   },

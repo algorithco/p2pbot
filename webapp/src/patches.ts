@@ -51,6 +51,7 @@ function enhanceApp(App: any) {
 
   // Patch viewHome to add search + inbox entry
   patchViewHome();
+  patchViewCreate();
 
   // Expose new views to legacy router (added to ROUTES in src/legacy/app.js)
   (window as any).__viewInbox = viewInbox;
@@ -270,6 +271,82 @@ function filterDealCards() {
   });
 }
 
+function patchViewCreate() {
+  // Intercept create deal to inject CHANNEL/GROUP selector + username
+  const viewEl = document.getElementById('view')!;
+  const obs = new MutationObserver(() => {
+    if (location.hash !== '#/create') return;
+    const view = document.getElementById('view');
+    if (!view || view.querySelector('#channel-type-wrap')) return;
+    // legacy create has .segmented role + asset/amount/terms - inject after terms
+    const termsLabel = Array.from(view.querySelectorAll('label')).find(l => (l.textContent||'').toLowerCase().includes('terms') || (l.textContent||'').toLowerCase().includes('description'));
+    const anchor = (termsLabel?.parentElement as HTMLElement) || view.querySelector('.card') as HTMLElement;
+    if (!anchor) return;
+    const wrap = UI.h('div', { id:'channel-type-wrap', style:'display:flex;flex-direction:column;gap:8px;margin-top:12px' }, [
+      UI.h('label', { text:'Trade what? (Channel/Group escrow — adds @gramchioka as escrow holder)', style:'font-weight:600;font-size:13px' }),
+      UI.h('select', { id:'deal-type-sel', class:'input' }, [
+        UI.h('option', { value:'P2P', text:'P2P — item / service (default)' } as any),
+        UI.h('option', { value:'CHANNEL', text:'CHANNEL — Telegram channel (@username)' } as any),
+        UI.h('option', { value:'GROUP', text:'GROUP — Telegram supergroup/channel' } as any),
+      ]),
+      UI.h('input', { id:'channel-username-input', class:'input', placeholder:'@username or t.me link (required for CHANNEL/GROUP)', style:'display:none' }) as any,
+      UI.h('div', { id:'channel-hint', class:'field-hint', style:'display:none;text-align:center', text:'Seller must add '+ '@gramchioka' +' to channel as admin — mandatory verification.' })
+    ]) as HTMLElement;
+    const sel = wrap.querySelector('#deal-type-sel') as HTMLSelectElement;
+    const inp = wrap.querySelector('#channel-username-input') as HTMLInputElement;
+    const hint = wrap.querySelector('#channel-hint') as HTMLElement;
+    sel.addEventListener('change', ()=>{ const v=sel.value; const show=v==='CHANNEL'||v==='GROUP'; inp.style.display=show?'':'none'; hint.style.display=show?'':'none'; if(show) inp.focus(); });
+    anchor.parentNode!.insertBefore(wrap, anchor.nextSibling);
+    // Wrap Api.createDeal to inject dealType/channelUsername from DOM
+    const origCreate = (Api as any).createDeal?.bind(Api);
+    if (origCreate && !(origCreate as any).__patchedChannel) {
+      const wrapper = async (payload:any)=>{
+        try{
+          const selEl = document.getElementById('deal-type-sel') as HTMLSelectElement | null;
+          const inpEl = document.getElementById('channel-username-input') as HTMLInputElement | null;
+          if (selEl && inpEl) {
+            const dt = selEl.value;
+            if (dt === 'CHANNEL' || dt === 'GROUP') {
+              const uname = inpEl.value.trim();
+              if (!uname) throw new Error('Channel username required for CHANNEL/GROUP');
+              payload.dealType = dt;
+              payload.deal_type = dt;
+              payload.channelUsername = uname;
+              payload.channel_username = uname;
+            }
+          }
+        }catch(e){ /* let backend validate */ }
+        return origCreate(payload);
+      };
+      (wrapper as any).__patchedChannel = true;
+      (Api as any).createDeal = wrapper;
+      // also patch legacy window.Api if present
+      const wApi: any = (window as any).Api;
+      if (wApi && wApi.createDeal && !(wApi.createDeal as any).__patchedChannel) {
+        const wOrig = wApi.createDeal.bind(wApi);
+        const wWrapper = async (payload:any)=>{
+          try{
+            const selEl = document.getElementById('deal-type-sel') as HTMLSelectElement | null;
+            const inpEl = document.getElementById('channel-username-input') as HTMLInputElement | null;
+            if (selEl && inpEl) {
+              const dt = selEl.value;
+              if (dt === 'CHANNEL' || dt === 'GROUP') {
+                const uname = inpEl.value.trim();
+                if (!uname) throw new Error('Channel username required');
+                payload.dealType = dt; payload.deal_type = dt; payload.channelUsername = uname; payload.channel_username = uname;
+              }
+            }
+          }catch{}
+          return wOrig(payload);
+        };
+        (wWrapper as any).__patchedChannel = true;
+        wApi.createDeal = wWrapper;
+      }
+    }
+  });
+  obs.observe(viewEl, { childList:true, subtree:true });
+}
+
 function patchViewDeal() {
   const viewEl = document.getElementById('view')!;
   const obs = new MutationObserver(() => {
@@ -302,7 +379,16 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
   const isSeller = Number(deal.seller_telegram_id) === Number(uid);
   const isParty = isBuyer || isSeller;
   if (!isParty) return;
+  const actionsTitle = Array.from(view.querySelectorAll('.section-title')).find(e => e.textContent?.includes('Actions')) as HTMLElement;
+  const anchor = actionsTitle || view.querySelector('.deal-head') as HTMLElement;
+  if (!anchor) return;
   const st = String(deal.status || '').toUpperCase();
+  const dealType = String((deal as any).deal_type || (deal as any).dealType || 'P2P').toUpperCase();
+  const isChannelDeal = dealType === 'CHANNEL' || dealType === 'GROUP';
+  // ── CHANNEL/GROUP custodial flow (via @gramchioka) — isolated, P2P below unchanged ──
+  if (isChannelDeal) {
+    return await renderChannelEscrow(deal, isBuyer, isSeller, uid, anchor, st);
+  }
   // Always show payout input for seller when not final
   const payoutAddr = (deal as any).payout_address as string | undefined;
   const hasPayout = !!(payoutAddr && payoutAddr.trim());
@@ -310,10 +396,6 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
   if (isSeller) {
     try { const me: any = await (Api as any).me?.() || await (Api as any).getMyProfile?.(); userTon = me?.ton_address || me?.tonAddress || null; } catch {}
   }
-
-  const actionsTitle = Array.from(view.querySelectorAll('.section-title')).find(e => e.textContent?.includes('Actions')) as HTMLElement;
-  const anchor = actionsTitle || view.querySelector('.deal-head') as HTMLElement;
-  if (!anchor) return;
 
   // --- Seller: DEPOSIT_CONFIRMED -> show payout + ship ---
   if (isSeller && st === 'DEPOSIT_CONFIRMED') {
@@ -422,6 +504,108 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
     return;
   }
 }
+
+async function renderChannelEscrow(deal: any, isBuyer: boolean, isSeller: boolean, uid: number, anchor: HTMLElement, st: string) {
+  const escrowHolder = '@gramchioka';
+  const chan = String(deal.channel_username || deal.channelUsername || '').trim() || '—';
+  const verified = !!deal.channel_verified;
+  const escrowAt = deal.transfer_to_escrow_at;
+  const payoutAddr = deal.payout_address as string | undefined;
+  const pendingOwner = String(deal.pending_new_owner || '').trim();
+  const bar = UI.h('div', { class: 'webapp-bar', style: 'margin:12px 0;display:flex;flex-direction:column;gap:10px' }) as HTMLElement;
+
+  // 1) Seller must add @gramchioka — verify ownership
+  if (!verified && isSeller) {
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `📢 Channel ${chan} — add ${escrowHolder} to channel/group as admin (mandatory). Then tap Verify.` }) ]));
+    const verifyBtn = UI.h('button', { class: 'btn btn-primary', text: '🔍 Verify — check I am creator & bot is admin' }) as HTMLButtonElement;
+    verifyBtn.addEventListener('click', async () => {
+      verifyBtn.setAttribute('disabled',''); const o=verifyBtn.textContent!; verifyBtn.textContent='Verifying…';
+      try { const r:any = await (Api as any).channelVerify(deal.id); if (r.verified) { TG.haptic.success(); UI.toast('Verified — owner matches seller','ok'); setTimeout(()=>location.reload(),700);} else { TG.haptic.error(); UI.toast(r.error || 'Owner mismatch — ensure you are creator and '+escrowHolder+' is admin','err'); } } catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Verify failed','err'); } finally{ verifyBtn.removeAttribute('disabled'); verifyBtn.textContent=o; }
+    });
+    bar.appendChild(verifyBtn);
+    bar.appendChild(UI.h('div', { class: 'field-hint', style:'text-align:center', text: 'Ubot checks via getChannelInfo + admins (isCreator).' }));
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+  }
+  if (!verified && isBuyer) {
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `⏳ Channel ${chan} — waiting seller to add ${escrowHolder} and verify ownership.` }) ]));
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+  }
+  // 2) Verified — show channel card in chat hint
+  if (verified) {
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `✅ Channel ${chan} verified${deal.channel_title ? ' — '+deal.channel_title : ''}. ${deal.channel_snapshot ? '' : ''}` }) ]));
+  }
+  // 3) After verification, buyer must deposit (show deposit hint while AWAITING_DEPOSIT)
+  if (verified && st === 'AWAITING_DEPOSIT' && isBuyer) {
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `💸 Send ${deal.amount} ${deal.asset} to escrow payment address (see payment section above). After TON/USDT receipt, seller will be asked to transfer to ${escrowHolder}.` }) ]));
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+  }
+  if (verified && st === 'AWAITING_DEPOSIT' && isSeller) {
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: '⏳ Awaiting buyer deposit — you will be notified to transfer to '+escrowHolder+' after funds arrive.' }) ]));
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+  }
+  // 4) DEPOSIT_CONFIRMED => ask seller to transfer to escrow holder
+  if (st === 'DEPOSIT_CONFIRMED' && isSeller) {
+    if (!escrowAt) {
+      bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `💰 Buyer deposited — now transfer ownership of ${chan} to ${escrowHolder} in Telegram (Channel Info → Administrators → Transfer ownership). Then tap I transferred.` }) ]));
+      const reqBtn = UI.h('button', { class: 'btn btn-soft', text: `📢 I will transfer to ${escrowHolder}` }) as HTMLButtonElement;
+      reqBtn.addEventListener('click', async ()=>{ reqBtn.setAttribute('disabled',''); try{ await (Api as any).channelRequestEscrow(deal.id); UI.toast('Noted — transfer now','ok'); }catch(e:any){ UI.toast(e.message||'failed','err'); } finally{ reqBtn.removeAttribute('disabled'); }});
+      const confBtn = UI.h('button', { class: 'btn btn-primary', text: '✅ I transferred — Confirm escrow received' }) as HTMLButtonElement;
+      confBtn.addEventListener('click', async ()=>{ confBtn.setAttribute('disabled',''); const o=confBtn.textContent!; confBtn.textContent='Checking…'; try{ const r:any = await (Api as any).channelConfirmEscrow(deal.id); TG.haptic.success(); UI.toast('Escrow received — now set payout','ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Not yet — ensure you transferred to '+escrowHolder,'err'); confBtn.removeAttribute('disabled'); confBtn.textContent=o; }});
+      bar.appendChild(reqBtn); bar.appendChild(confBtn);
+      anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+    }
+  }
+  if (st === 'DEPOSIT_CONFIRMED' && isBuyer) {
+    const msg = escrowAt ? `🔒 Escrow holds ${chan} — awaiting seller payout.` : `⏳ Funds escrowed — seller must transfer ${chan} to ${escrowHolder} now.`;
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: msg }) ]));
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+  }
+  // 5) Escrow received but not yet released — ask seller payout address
+  if (escrowAt && st !== 'RELEASED' && st !== 'REFUNDED' && isSeller) {
+    const hasPayout = !!(payoutAddr && payoutAddr.trim());
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `🔒 Escrow received ${chan} — enter TON/USDT payout address to receive ${deal.amount} ${deal.asset} minus fee.` }) ]));
+    const input = UI.h('input', { class:'input', placeholder:'UQ... / EQ... TON address', value: payoutAddr||''}) as HTMLInputElement;
+    const saveBtn = UI.h('button', { class:'btn btn-soft', text:'💾 Save address' }) as HTMLButtonElement;
+    saveBtn.addEventListener('click', async()=>{ const v=input.value.trim(); if(!v){UI.toast('Enter address','err');return;} saveBtn.setAttribute('disabled',''); try{ await (Api as any).payoutAddress(deal.id, v); UI.toast('Saved','ok'); }catch(e:any){UI.toast(e.message||'failed','err');} finally{saveBtn.removeAttribute('disabled');}});
+    const payoutBtn = UI.h('button', { class:'btn btn-primary', text:'💸 Request payout (fee deducted)' }) as HTMLButtonElement;
+    payoutBtn.addEventListener('click', async()=>{ const v=input.value.trim(); payoutBtn.setAttribute('disabled',''); const o=payoutBtn.textContent!; payoutBtn.textContent='Paying…'; try{ const r:any = await (Api as any).channelPayout(deal.id, v||undefined); TG.haptic.success(); UI.toast('Payout sent','ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Payout failed','err'); payoutBtn.removeAttribute('disabled'); payoutBtn.textContent=o; }});
+    const row = UI.h('div', { style:'display:flex;gap:8px' }, [input, saveBtn]);
+    bar.appendChild(row); bar.appendChild(payoutBtn);
+    if (!hasPayout) bar.appendChild(UI.h('div', { class:'field-hint', style:'text-align:center', text:'Connect wallet or paste address — required for release.' }));
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+  }
+  if (escrowAt && st !== 'RELEASED' && isBuyer) {
+    bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:'⏳ Escrow holds channel — seller payout pending. Next you will set new owner.' }) ]));
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+  }
+  // 6) RELEASED → buyer sets new owner
+  if (st === 'RELEASED' && isBuyer) {
+    const already = pendingOwner;
+    if (!already) {
+      bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`✅ Seller paid — now enter username of new owner for ${chan} (e.g. @hamroqulovv). Ubot will transfer ownership.` }) ]));
+      const inp = UI.h('input', { class:'input', placeholder:'@username of new owner' }) as HTMLInputElement;
+      const setBtn = UI.h('button', { class:'btn btn-soft', text:'Save new owner' }) as HTMLButtonElement;
+      setBtn.addEventListener('click', async()=>{ const v=inp.value.trim(); if(!v){UI.toast('Enter @username','err');return;} setBtn.setAttribute('disabled',''); try{ await (Api as any).channelSetNewOwner(deal.id, v); UI.toast('Saved — now Transfer','ok'); setTimeout(()=>location.reload(),700);} catch(e:any){UI.toast(e.message||'failed','err'); setBtn.removeAttribute('disabled');}});
+      bar.appendChild(inp); bar.appendChild(setBtn);
+    } else {
+      bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`New owner set: ${already} — tap Transfer.` }) ]));
+      const goBtn = UI.h('button', { class:'btn btn-primary', text:`🚀 Transfer ${chan} to ${already}` }) as HTMLButtonElement;
+      goBtn.addEventListener('click', async()=>{ goBtn.setAttribute('disabled',''); const o=goBtn.textContent!; goBtn.textContent='Transferring…'; try{ const r:any = await (Api as any).channelTransferToBuyer(deal.id, already); TG.haptic.success(); UI.toast('Transferred to '+already,'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); const m=String(e.message||''); UI.toast(m,'err'); if(m.includes('join')) UI.toast('New owner must join channel first','err'); goBtn.removeAttribute('disabled'); goBtn.textContent=o; }});
+      bar.appendChild(goBtn);
+      bar.appendChild(UI.h('div', { class:'field-hint', style:'text-align:center', text:'If ubot cannot invite (privacy), ask new owner to join channel first via invite link.' }));
+    }
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+  }
+  if (st === 'RELEASED' && isSeller) {
+    const dest = pendingOwner || 'buyer-chosen owner';
+    bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`✅ You were paid — channel ${chan} will be transferred to ${dest} by escrow.` }) ]));
+    anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+  }
+  // fallback — show channel snapshot
+  bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`Channel ${chan} — status ${st}${verified ? ' ✓ verified' : ''}${escrowAt ? ' · escrow holds' : ''}` }) ]));
+  anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
+}
+
 async function injectConfirmBar(view: HTMLElement, hash: string){
   return injectWebappBar(view, hash);
 }
