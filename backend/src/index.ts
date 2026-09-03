@@ -200,6 +200,60 @@ app.get('/api/info', (_req, res) => {
   });
 });
 
+// User TON payout address — seller sets via web app after buyer confirms receipt
+app.get('/api/users/me', requireIdentity, asyncHandler(async (req, res) => {
+  const telegramId = getIdentityId(req);
+  if (telegramId === null) return res.status(401).json({ error: 'identity_required' });
+  const user = await db.query('SELECT telegram_id, username, ton_address, created_at FROM users WHERE telegram_id = $1 LIMIT 1', [telegramId]);
+  if (!user.rows[0]) return res.json({ telegram_id: telegramId, username: req.user?.username || null, ton_address: null });
+  return res.json(user.rows[0]);
+}));
+
+app.post('/api/users/me/ton-address', requireIdentity, asyncHandler(async (req, res) => {
+  const telegramId = getIdentityId(req);
+  if (telegramId === null) return res.status(401).json({ error: 'identity_required' });
+  const raw = String((req.body as any).tonAddress || (req.body as any).ton_address || (req.body as any).address || '').trim();
+  if (!raw) return res.status(400).json({ error: 'tonAddress_required' });
+  try {
+    Address.parse(raw);
+  } catch {
+    return res.status(400).json({ error: 'invalid_ton_address' });
+  }
+  // Ensure user exists then update
+  await db.query(
+    `INSERT INTO users (telegram_id, username, ton_address) VALUES ($1,$2,$3)
+     ON CONFLICT (telegram_id) DO UPDATE SET ton_address = EXCLUDED.ton_address`,
+    [telegramId, req.user?.username || null, raw]
+  );
+  logger.info(`User ${telegramId} set ton_address ${raw.slice(0,12)}...`);
+  return res.json({ ok: true, ton_address: raw });
+}));
+
+// Per-deal payout address override (seller can set for specific deal)
+app.post('/api/deals/:id/payout-address', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const isSeller = deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller;
+  const isAdminCaller = (req as any).authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isSeller && !isAdminCaller) return res.status(403).json({ error: 'only_seller_can_set_payout' });
+  const raw = String((req.body as any).tonAddress || (req.body as any).ton_address || (req.body as any).address || '').trim();
+  if (!raw) return res.status(400).json({ error: 'tonAddress_required' });
+  try { Address.parse(raw); } catch { return res.status(400).json({ error: 'invalid_ton_address' }); }
+  // Persist to users table and also store in deals.terms? Use payout_address column if exists, else fallback to users
+  try { await db.query('ALTER TABLE deals ADD COLUMN IF NOT EXISTS payout_address TEXT'); } catch {}
+  await db.query('UPDATE deals SET payout_address = $1, updated_at = now() WHERE id = $2', [raw, dealId]);
+  await db.query(
+    `INSERT INTO users (telegram_id, username, ton_address) VALUES ($1,$2,$3)
+     ON CONFLICT (telegram_id) DO UPDATE SET ton_address = EXCLUDED.ton_address`,
+    [caller, req.user?.username || null, raw]
+  );
+  return res.json({ ok: true, payout_address: raw });
+}));
+
 // Deals belonging to the caller (must come before /api/deals/:id)
 app.get('/api/deals/mine', requireIdentity, asyncHandler(async (req, res) => {
   const telegramId = getIdentityId(req);
@@ -578,51 +632,58 @@ app.post('/api/deals/:id/chat', chatPostLimiter, requireIdentity, asyncHandler(a
   return res.json({ ok: true, encrypted: true });
 }));
 
-// Confirm endpoint — BUYER-ONLY receipt approval (desired flow)
-// After seller sends item (ITEM_SENT), buyer confirms "Did you receive it?" -> release minus fee.
-// Legacy mutual confirm is deprecated: only buyer can release.
+// Confirm endpoint — DEPRECATED alias to /approve (buyer-only)
+// Legacy mutual confirm (both parties) removed. Web app should use POST /approve.
+// Kept for TG fallback with deprecation warning. Always calls buyerApproveReceipt.
 app.post('/api/deals/:id/confirm', requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
   const caller = getIdentityId(req);
   if (caller === null) return res.status(401).json({ error: 'identity_required' });
-  const { buyerApproveReceipt, recordConfirmation } = await import('./services/escrowService');
-  const deal = await getDealById(dealId);
-  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
-  // If deal is in ITEM_SENT or DEPOSIT_CONFIRMED, use buyer-only path
-  if (deal.status === 'ITEM_SENT' || deal.status === 'DEPOSIT_CONFIRMED' || deal.status === 'BUYER_CONFIRMED') {
-    const result = await buyerApproveReceipt(caller, dealId);
-    if (!result.success) return res.status(400).json({ error: result.message });
-    return res.json(result);
+  logger.warn(`POST /api/deals/${dealId}/confirm called by ${caller} — deprecated, use /approve (buyer-only)`);
+  const { buyerApproveReceipt } = await import('./services/escrowService');
+  const result: any = await buyerApproveReceipt(caller, dealId);
+  res.setHeader('X-Deprecated', 'use POST /api/deals/:id/approve');
+  if (!result.success) {
+    if (result.needSellerAddress) return res.status(402).json({ error: result.message, needSellerAddress: true, code: 'seller_ton_address_required', deprecated: true });
+    return res.status(400).json({ error: result.message, deprecated: true, hint: 'Use web app: Deal -> Yes, received' });
   }
-  // Fallback to legacy for AWAITING_DEPOSIT etc. (will return status error)
-  const result = await recordConfirmation(caller, dealId);
-  if (!result.success) return res.status(400).json({ error: result.message });
-  return res.json(result);
+  return res.json({ ...result, deprecated: true, hint: 'Use POST /api/deals/:id/approve' });
 }));
 
-// Seller signals "I sent the item" — moves DEPOSIT_CONFIRMED -> ITEM_SENT and notifies buyer
+// Seller signals "I sent the item" — webapp-first: moves DEPOSIT_CONFIRMED -> ITEM_SENT and notifies buyer via chat + bot
 app.post('/api/deals/:id/ship', requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
   const caller = getIdentityId(req);
   if (caller === null) return res.status(401).json({ error: 'identity_required' });
   const { markItemSent } = await import('./services/escrowService');
-  const result = await markItemSent(caller, dealId);
-  if (!result.success) return res.status(400).json({ error: result.message });
+  const result: any = await markItemSent(caller, dealId);
+  if (!result.success) {
+    if (result.needSellerAddress) return res.status(402).json({ error: result.message, needSellerAddress: true, code: 'seller_ton_address_required' });
+    return res.status(400).json({ error: result.message });
+  }
   return res.json(result);
 }));
 
-// Buyer confirms receipt — explicit endpoint for webapp (alternative to /confirm)
-// Moves ITEM_SENT (or DEPOSIT_CONFIRMED) -> RELEASED with fee deduction
+// Buyer confirms receipt — webapp-first: moves ITEM_SENT -> RELEASED minus fee
+// If seller TON address missing, returns 402 needSellerAddress so web app can prompt seller to set payout
 app.post('/api/deals/:id/approve', requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
   const caller = getIdentityId(req);
   if (caller === null) return res.status(401).json({ error: 'identity_required' });
   const { buyerApproveReceipt } = await import('./services/escrowService');
-  const result = await buyerApproveReceipt(caller, dealId);
-  if (!result.success) return res.status(400).json({ error: result.message });
+  const result: any = await buyerApproveReceipt(caller, dealId);
+  if (!result.success) {
+    if (result.needSellerAddress) {
+      return res.status(402).json({ error: result.message, needSellerAddress: true, code: 'seller_ton_address_required' });
+    }
+    if (result.needItemSent) {
+      return res.status(409).json({ error: result.message, needItemSent: true, code: 'item_not_sent' });
+    }
+    return res.status(400).json({ error: result.message });
+  }
   return res.json(result);
 }));
 
