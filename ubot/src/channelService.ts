@@ -5,6 +5,42 @@ import { config } from './config';
 import { humanDelay, sleep, jitteredDelay } from './humanDelay';
 import { cachedGetEntity, cachedGetPassword, entityCache } from './entityCache';
 
+// --- Patch for missing channels.EditCreator in teleproto 1.229 (removed from TL) ---
+// Telegram still supports channels.editCreator (0x8f38cd1f) but generated TL dropped it.
+// We inject it at runtime so transferChannelOwnership works.
+try {
+  const apiAny = Api as unknown as Record<string, unknown>;
+  const channels = apiAny['channels'] as Record<string, unknown> | undefined;
+  if (!channels || !channels['EditCreator']) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createApiFromDefinitions } = require('teleproto/tl/runtime/createApi') as {
+      createApiFromDefinitions: (defs: unknown[]) => Record<string, Record<string, unknown>>;
+    };
+    const editCreatorDef = {
+      name: 'EditCreator',
+      constructorId: 2402864415,
+      argsConfig: {
+        channel: { isVector: false, isFlag: false, skipConstructorId: false, flagName: null, flagIndex: -1, flagIndicator: false, type: 'InputChannel', useVectorId: null },
+        userId: { isVector: false, isFlag: false, skipConstructorId: false, flagName: null, flagIndex: -1, flagIndicator: false, type: 'InputUser', useVectorId: null },
+        password: { isVector: false, isFlag: false, skipConstructorId: false, flagName: null, flagIndex: -1, flagIndicator: false, type: 'InputCheckPasswordSRP', useVectorId: null },
+      },
+      subclassOfId: 2331323052,
+      result: 'Updates',
+      isFunction: true,
+      namespace: 'channels',
+    };
+    const tmpApi = createApiFromDefinitions([editCreatorDef]);
+    const patched = (tmpApi as Record<string, Record<string, unknown>>)['channels']?.['EditCreator'];
+    if (patched) {
+      if (!apiAny['channels']) (apiAny['channels'] as unknown) = {};
+      ((apiAny['channels'] as Record<string, unknown>)['EditCreator'] as unknown) = patched;
+      logger.info('Patched Api.channels.EditCreator (0x8f38cd1f) — ownership transfer enabled');
+    }
+  }
+} catch (e) {
+  logger.warn('Failed to patch Api.channels.EditCreator', e);
+}
+
 /**
  * Channel takeover helpers.
  * All methods assume client is connected as a user with sufficient rights.
@@ -560,13 +596,28 @@ export async function listChannelAdmins(channel: string | number): Promise<Array
         hash: 0 as unknown as any,
       })
     )
-  )) as unknown as { participants: Array<{ userId: unknown; participant: { className: string } }> };
-  return res.participants.map((p) => {
-    const raw = p.userId as unknown as { toJSNumber?: () => number; toString?: () => string };
-    const id = toSafeId(raw);
+  )) as unknown as {
+    participants: Array<{
+      className?: string;
+      userId?: unknown;
+      participant?: { className: string };
+      peer?: { userId?: unknown };
+    }>;
+    users?: Array<{ id: unknown; username?: string }>;
+  };
+  // Handle both shapes: channels.ChannelParticipants (participants[].className) and channels.ChannelParticipant (participant)
+  // Telethon/teleproto admin list returns ChannelParticipantCreator / ChannelParticipantAdmin at top level
+  return (res.participants || []).map((p) => {
+    const cls = p.className || p.participant?.className || '';
+    // For Banned/Left the id is in peer.userId
+    const raw = ((p as { userId?: unknown }).userId ?? (p as { peer?: { userId?: unknown } }).peer?.userId) as unknown as {
+      toJSNumber?: () => number;
+      toString?: () => string;
+    };
+    const id = raw !== undefined && raw !== null ? toSafeId(raw) : toSafeId((p as unknown as { toString: () => string }).toString?.() || '0');
     return {
       id,
-      isCreator: p.participant.className === 'ChannelParticipantCreator',
+      isCreator: cls === 'ChannelParticipantCreator',
     };
   });
 }
