@@ -40,9 +40,9 @@ export function registerCommands(bot: Bot) {
         if (dealId && token && base) {
           const joinUrl = `${base}/#/deal/${dealId}/join/${token}`;
           const kb = webAppButton(joinUrl, 'Ilovani ochish');
-          await ctx.reply(`🤝 Sherik taklifini qabul qilish webapp'da.\nPastdagi tugmani bosing.`, { reply_markup: kb });
+          await ctx.reply(`🤝 Sherik taklifini qabul qilish ilovada.\nPastdagi tugmani bosing.`, { reply_markup: kb });
         } else {
-          await ctx.reply(`🤝 Sherik taklifini qabul qilish webapp'da.\nIlovani oching.`);
+          await ctx.reply(`🤝 Sherik taklifini qabul qilish ilovada.\nIlovani oching.`);
         }
       }
     }

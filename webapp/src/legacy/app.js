@@ -1514,7 +1514,7 @@
       box.appendChild(UI.h('div', { class: 'success-panel' }, [
         UI.h('div', { class: 'check-ring', html: '<svg viewBox="0 0 34 34" width="44" height="44"><path d="M8 18l6 6L26 11"/></svg>' }),
         UI.h('h2', { text: "So'rov yuborildi" }),
-        UI.h('p', { text: "Yaratuvchi inbox'da tasdiqlaydi. Tasdiqlangach bitim boshlanadi." }),
+        UI.h('p', { text: "Yaratuvchi kiruvchi so'rovlarda tasdiqlaydi. Tasdiqlangach bitim boshlanadi." }),
         UI.h('div', { class: 'btn-row' }, [
           UI.h('button', { class: 'btn btn-primary', onclick: function () { go('#/home'); } }, ['Bosh sahifa'])
         ])
@@ -1539,7 +1539,7 @@
           class: 'btn btn-primary',
           onclick: doJoin
         }, ["Qo'shilish"]),
-        UI.h('div', { class: 'field-hint', style: 'text-align:center;margin-top:8px', text: "Yaratuvchi inbox'da tasdiqlaydi" })
+        UI.h('div', { class: 'field-hint', style: 'text-align:center;margin-top:8px', text: "Yaratuvchi kiruvchi so'rovlarda tasdiqlaydi" })
       ]);
 
       UI.sheetOpen(content, {});
@@ -1551,7 +1551,7 @@
             TG.haptic.success();
             UI.sheetClose();
             if (res && (res.pending || res.requestId)) {
-              UI.toast("So'rov yuborildi — yaratuvchi inbox'da tasdiqlaydi", 'ok');
+              UI.toast("So'rov yuborildi — yaratuvchi kiruvchi so'rovlarda tasdiqlaydi", 'ok');
               showPending();
             } else {
               UI.toast("Bitimga qo'shildingiz", 'ok');

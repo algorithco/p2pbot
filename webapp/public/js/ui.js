@@ -120,7 +120,7 @@
 
   UI.statusMeta = function (status) {
     var m = STATUSES[String(status || '').toUpperCase()];
-    return m || { label: String(status || 'Unknown'), cls: 'st-unknown', step: -1 };
+    return m || { label: String(status || "Noma'lum"), cls: 'st-unknown', step: -1 };
   };
 
   UI.isFinalStatus = function (status) {
@@ -132,7 +132,7 @@
     var a = String(asset || '').toUpperCase();
     if (a === 'TON')  return { name: 'Toncoin', symbol: 'TON',  glyph: '\u25C8', cls: 'asset-ton' };
     if (a === 'USDT') return { name: 'Tether',  symbol: 'USDT', glyph: '\u20AE', cls: 'asset-usdt' };
-    return { name: a || 'Asset', symbol: a || '?', glyph: '\u25C6', cls: 'asset-any' };
+    return { name: a || 'Aktiv', symbol: a || '?', glyph: '\u25C6', cls: 'asset-any' };
   };
 
   UI.feeBpsEstimate = 100; // display-only estimate; backend default FEE_BPS=100

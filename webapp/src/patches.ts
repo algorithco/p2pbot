@@ -229,7 +229,7 @@ function injectHomeSearch(view: HTMLElement) {
     }, [
       UI.h('div', { class: 'li-icon', text: '📥' }),
       UI.h('div', { class: 'li-main' }, [
-        UI.h('b', { text: "Inbox — qo'shilish so'rovlari" }),
+        UI.h('b', { text: "Kiruvchi — qo'shilish so'rovlari" }),
         UI.h('span', { text: "Sherik tasdig'i (rasm + username)" })
       ]),
       UI.h('span', { class: 'li-value', text: '→' })
@@ -250,7 +250,7 @@ function injectInboxEntry(view: HTMLElement) {
   }, [
     UI.h('div', { class: 'li-icon', text: '📥' }),
     UI.h('div', { class: 'li-main' }, [
-      UI.h('b', { text: 'Inbox' }),
+      UI.h('b', { text: 'Kiruvchi' }),
       UI.h('span', { text: "Kutilayotgan qo'shilish so'rovlari" })
     ]),
     UI.h('span', { class: 'li-value', text: '→' })
@@ -446,7 +446,7 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
       row.appendChild(fillBtn);
     } catch {}
     const shipBtn = UI.h('button', { class: 'btn btn-primary', text: '📦 Yetkazdim' }) as HTMLButtonElement;
-    const hint = UI.h('div', { class: 'field-hint', style: 'text-align:center', text: "Mahsulot/xizmatni topshirgach bosing — bitim ITEM_SENT holatiga o'tadi. Manzilni hozir yoki keyin saqlashingiz mumkin." });
+    const hint = UI.h('div', { class: 'field-hint', style: 'text-align:center', text: "Mahsulot/xizmatni topshirgach bosing — bitim \"Yuborildi\" holatiga o'tadi. Manzilni hozir yoki keyin saqlashingiz mumkin." });
     bar.appendChild(shipBtn); bar.appendChild(hint);
     shipBtn.addEventListener('click', async () => {
       shipBtn.setAttribute('disabled',''); const o=shipBtn.textContent!; shipBtn.textContent='Yuborilmoqda…'; TG.haptic.medium();
@@ -532,7 +532,7 @@ async function renderChannelEscrow(deal: any, isBuyer: boolean, isSeller: boolea
       try { const r:any = await (Api as any).channelVerify(deal.id); if (r.verified) { TG.haptic.success(); UI.toast('Tasdiqlandi — egasi sotuvchiga mos','ok'); setTimeout(()=>location.reload(),700);} else { TG.haptic.error(); UI.toast("Mos kelmadi — siz yaratuvchi ekaningiz va "+escrowHolder+" adminligiga ishonch hosil qiling",'err'); } } catch(e:any){ TG.haptic.error(); UI.toast("Tekshirilmadi — qayta urinib ko'ring",'err'); } finally{ verifyBtn.removeAttribute('disabled'); verifyBtn.textContent=o; }
     });
     bar.appendChild(verifyBtn);
-    bar.appendChild(UI.h('div', { class: 'field-hint', style:'text-align:center', text: 'Ubot getChannelInfo + adminlar orqali tekshiradi (isCreator).' }));
+      bar.appendChild(UI.h('div', { class: 'field-hint', style:'text-align:center', text: "Ubot kanal ma'lumoti va adminlar orqali tekshiradi (yaratuvchi ekanligingiz)." }));
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
   }
   if (!verified && isBuyer) {
@@ -622,7 +622,7 @@ async function injectConfirmBar(view: HTMLElement, hash: string){
 // ---------------- Inbox View ----------------
 async function viewInbox() {
   setTabbarPatched(true);
-  setTopbarPatched('Inbox', { back: () => navBack('#/home') });
+  setTopbarPatched('Kiruvchi', { back: () => navBack('#/home') });
   TG.showBack(() => navBack('#/home'));
   const view = document.getElementById('view')!;
   view.innerHTML = '';
@@ -649,7 +649,7 @@ async function viewInbox() {
     }
   } catch (e: any) {
     root.innerHTML = '';
-    root.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || 'Inbox yuklanmadi' }) ]));
+      root.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || "Kiruvchi so'rovlar yuklanmadi" }) ]));
     return;
   }
 
@@ -782,7 +782,7 @@ async function pollInboxBadge() {
     if (count > prev && prev >= 0 && count > 0) {
       try {
         // Faqat yaratuvchi ko'radi — inbox unga tegishli so'rovlar
-        if (prev > 0 || (window as any).__inboxInit) UI.toast("Yangi qo'shilish so'rovi — inboxni tekshiring", 'ok');
+        if (prev > 0 || (window as any).__inboxInit) UI.toast("Yangi qo'shilish so'rovi — kiruvchi so'rovlarni tekshiring", 'ok');
       } catch {}
     }
     (window as any).__inboxPrev = count;
@@ -1086,9 +1086,7 @@ function viewTrade() {
         const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent="Bog'lanmoqda…";
         try {
           const t = await Api.utrade.trade(tid);
-          // try to bind buyer implicitly via backend — if trade has no buyer, backend will bind on buy
-          // attempt buy flow: call trade to trigger bind if needed
-          await fetch('/api/utrade/trades/' + tid + '/buy', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-telegram-user-id': String(TG.user().id) } }).catch(()=>{});
+          // Backend binds buyer implicitly on POST /api/utrade/trades/:id/code when trade has no buyer — no separate buy call needed.
           statusEl.textContent = "Bitim #" + tid + ' — telefon ' + (t.phone ? (t.phone.slice(0,6)+'****') : 'tez orada ulashiladi') + ' — Telegramga kelgan kodni kiriting.';
           UI.toast("Bog'landi — Telegramga kelgan login kodni tekshiring",'ok');
         } catch (err: any) { UI.toast(err.message || "Bog'lanmadi",'err'); }

@@ -99,7 +99,7 @@ const STATUSES: Record<string, { label: string; cls: string; step: number }> = {
 };
 export function statusMeta(status: string) {
   const m = STATUSES[String(status || '').toUpperCase()];
-  return m || { label: String(status || 'Unknown'), cls: 'st-unknown', step: -1 };
+  return m || { label: String(status || "Noma'lum"), cls: 'st-unknown', step: -1 };
 }
 export function isFinalStatus(status: string) {
   const u = String(status || '').toUpperCase();
@@ -109,7 +109,7 @@ export function assetMeta(asset: string) {
   const a = String(asset || '').toUpperCase();
   if (a === 'TON') return { name: 'Toncoin', symbol: 'TON', glyph: '◈', cls: 'asset-ton' };
   if (a === 'USDT') return { name: 'Tether', symbol: 'USDT', glyph: '₮', cls: 'asset-usdt' };
-  return { name: a || 'Asset', symbol: a || '?', glyph: '◆', cls: 'asset-any' };
+  return { name: a || 'Aktiv', symbol: a || '?', glyph: '◆', cls: 'asset-any' };
 }
 export const feeBpsEstimate = 100;
 export function avatarClass(seed: any): string { return 'av-' + (Math.abs(Number(seed) || 0) % 4); }
