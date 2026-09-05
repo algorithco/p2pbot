@@ -207,7 +207,7 @@
         if (Wallet.connected()) walletSheet();
         else Wallet.connect().catch(function (err) {
           console.warn('[App] connect failed', err);
-          UI.toast(err && err.message ? err.message : 'Hamyon ulanmadi', 'err');
+          UI.toast('Hamyon ulanmadi', 'err');
         });
       }
     }, ['🔌 Hamyonni ulash']);
@@ -501,7 +501,7 @@
           TG.haptic.error();
           TG.main.hide();
           renderStep();
-          UI.toast(err.status === 0 ? "Tarmoqqa ulanib bo'lmadi" : ('Xatolik: ' + err.message), 'err');
+          UI.toast(err.status === 0 ? "Tarmoqqa ulanib bo'lmadi" : "Yaratilmadi — qayta urinib ko'ring", 'err');
         });
     }
 
@@ -928,7 +928,7 @@
             }
           }).catch(function (err) {
             TG.haptic.error();
-            UI.toast((err && err.message) || "Tekshirib bo'lmadi", 'err');
+            UI.toast("Tekshirib bo'lmadi — qayta urinib ko'ring", 'err');
             rcBtn.removeAttribute('disabled');
             rcBtn.textContent = orig;
           });
@@ -982,11 +982,13 @@
             state = 'fallback';
             fallbackNote = "Avtomatik to'lov bo'lmadi — qo'lda yuboring va tekshiring.";
             render();
+            UI.toast("Avtomatik to'lov bo'lmadi — qo'lda to'lang", 'err');
             return;
           }
           console.warn('[Pay] send failed', err);
           state = 'rejected';
           render();
+          UI.toast("Bekor qilindi, qayta urinib ko'ring", 'err');
         });
       });
     }
@@ -1298,6 +1300,18 @@
     var consecutiveFails = 0;
 
     function bubble(msg) {
+      var isSys = Number(msg.sender_telegram_id) === 0;
+      if (isSys) {
+        var sysText = msg.decrypted || msg.content || '';
+        if (msg.is_encrypted && !msg.decrypted && msg.ciphertext) sysText = '🔒 Shifrlangan xabar';
+        if (!sysText) sysText = 'Tizim xabari';
+        return UI.h('div', { class: 'msg sys', style: 'justify-content:center' }, [
+          UI.h('div', { class: 'bubble sys-bubble', style: 'background:var(--accent-soft);border:1px solid var(--border);text-align:center;max-width:92%' }, [
+            UI.h('div', { text: sysText, style: 'word-break:break-word;white-space:pre-wrap;font-size:13px' }),
+            UI.h('div', { class: 'm-meta', style: 'text-align:center', text: 'Tizim · ' + UI.fmtTime(msg.created_at) })
+          ])
+        ]);
+      }
       var mine = Number(msg.sender_telegram_id) === App.state.meId;
       var displayText = msg.decrypted || msg.content || '';
       if (msg.is_encrypted && !msg.decrypted && msg.ciphertext) displayText = '🔒 Shifrlangan xabar';
@@ -1394,7 +1408,7 @@
           statusBar.textContent = '⛔ Telegram ichida oching';
         } else {
           // Transient: keep existing messages, show toast after 2 fails
-          if (consecutiveFails >= 2) UI.toast(msg || 'Chat yuklanmadi', 'err');
+          if (consecutiveFails >= 2) UI.toast('Chat yuklanmadi — qayta urinib ko\'ring', 'err');
         }
         // Exponential backoff for polling on repeated failures
         if (consecutiveFails >= 3 && App.chatTimer) {
@@ -1425,7 +1439,7 @@
         } else if (err && err.status === 401) {
           keyError = 'Shifrlangan chat uchun Telegram ichida oching';
         } else {
-          keyError = m || "Shifrlangan kanal o'rnatilmadi";
+          keyError = "Shifrlangan kanal o'rnatilmadi — qayta urinib ko'ring";
         }
         updateStatus();
         // Still try to load to show proper banner from load()
@@ -1455,13 +1469,10 @@
         await load();
         scroller.scrollTop = scroller.scrollHeight;
       } catch (err) {
-        var em = err && err.message ? err.message : 'Yuborilmadi';
-        UI.toast(em, 'err');
+        UI.toast('Yuborilmadi — qayta urinib ko\'ring', 'err');
         input.value = text;
         // If encryption failed due to key, try refresh key once
-        if (String(em).indexOf('key') !== -1) {
-          try { dealKey = await Api.dealKey(id); keyReady = !!dealKey; updateStatus(); } catch (e) {}
-        }
+        try { var em2 = String((err && err.message) || ''); if (em2.indexOf('key') !== -1 || em2.indexOf('kalit') !== -1) { try { dealKey = await Api.dealKey(id); keyReady = !!dealKey; updateStatus(); } catch (e) {} } } catch (e2) {}
       } finally {
         sendBtn.removeAttribute('disabled');
         updateStatus();
@@ -1485,7 +1496,7 @@
     if (m.indexOf('link_expired') !== -1) return "Havola muddati o'tgan";
     if (m.indexOf('invalid_token') !== -1) return "Havola noto'g'ri";
     if (m.indexOf('deal_has_no_buyer_creator') !== -1) return "Bitimda yaratuvchi yo'q";
-    return m || "Qo'shilib bo'lmadi";
+    return "Qo'shilib bo'lmadi — qayta urinib ko'ring";
   }
 
   function viewJoin(id, token) {
@@ -1660,7 +1671,7 @@
               if (!Wallet.available()) { UI.toast('Hamyon SDK yuklanmoqda…'); return; }
               Wallet.connect().catch(function (err) {
                 console.warn('[App] wallet connect failed', err);
-                UI.toast(err && err.message ? err.message : 'Hamyon ulanmadi', 'err');
+                UI.toast('Hamyon ulanmadi', 'err');
               });
             }
           }, [
@@ -1802,7 +1813,7 @@
               })
               .catch(function (err) {
                 TG.haptic.error();
-                UI.toast(err.status === 401 ? "Ruxsatsiz — API ruxsat kerak" : (err.message || 'Xatolik'), 'err');
+                UI.toast(err.status === 401 ? "Ruxsatsiz — API ruxsat kerak" : "Yuborilmadi — qayta urinib ko'ring", 'err');
               });
           }
         }, ['Bot orqali yuborish'])
@@ -1823,7 +1834,7 @@
 
   function boot() {
     window.addEventListener('error', function (e) {
-      try { UI.toast('Xato: ' + (e.message || "noma'lum"), 'err'); } catch (x) { /* ignore */ }
+      try { UI.toast("Xatolik yuz berdi — qayta urinib ko'ring", 'err'); } catch (x) { /* ignore */ }
     });
     console.log('[TonEscrow] build v3 — ' + new Date().toISOString());
 

@@ -576,6 +576,10 @@ img.avatar { object-fit: cover; }
   border-radius: 16px 16px 5px 16px;
 }
 .bubble .m-meta { font-size: 10.5px; opacity: .65; text-align: right; margin-top: 3px; }
+/* Tizim xabarlari (sender 0) — ikkala tomonga ko'rinadi, markazda ajralib turadi */
+.msg.sys { justify-content: center; }
+.msg.sys .bubble.sys-bubble { background: var(--accent-soft); border: 1px solid var(--border); text-align: center; max-width: 92%; border-radius: 14px; }
+.msg.sys .bubble.sys-bubble .m-meta { text-align: center; }
 .composer {
   display: flex; gap: 9px; align-items: flex-end;
   padding: 10px 0 calc(var(--sab) + 10px);

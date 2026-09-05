@@ -133,7 +133,7 @@ export function toast(message: string, type?: 'ok' | 'err') {
     setTimeout(() => t.remove(), 260);
   }, type === 'err' ? 3400 : 2200);
 }
-export function copy(text: string, label = 'Copied to clipboard') {
+export function copy(text: string, label = 'Nusxalandi') {
   function fallbackCopy(t: string) {
     const ta = document.createElement('textarea');
     ta.value = t;

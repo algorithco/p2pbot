@@ -383,6 +383,16 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
   const st = String(deal.status || '').toUpperCase();
   const dealType = String((deal as any).deal_type || (deal as any).dealType || 'P2P').toUpperCase();
   const isChannelDeal = dealType === 'CHANNEL' || dealType === 'GROUP';
+  // ── Yakuniy holatlar — har ikki tomonga toast + banner (admin qarori ham shu yerda ko'rinadi) ──
+  if (st === 'RELEASED' || st === 'REFUNDED') {
+    const doneText = st === 'RELEASED' ? "Yakunlandi — bitim yopildi" : "Qaytarildi — pul xaridorga qaytdi";
+    try { UI.toast(doneText, 'ok'); } catch {}
+    const doneBar = UI.h('div', { class: 'banner info webapp-bar', style: 'margin:12px 0' }, [
+      UI.h('div', { class: 'small', text: st === 'RELEASED' ? "✅ Yakunlandi — pul sotuvchiga chiqarildi. Chatda Tizim xabarini tekshiring." : "↩️ Qaytarildi — pul xaridorga qaytdi. Chatda Tizim xabarini tekshiring." })
+    ]);
+    try { anchor.parentNode!.insertBefore(doneBar, anchor.nextSibling); } catch {}
+    return;
+  }
   // ── CHANNEL/GROUP custodial flow (via @gramchioka) — isolated, P2P below unchanged ──
   if (isChannelDeal) {
     return await renderChannelEscrow(deal, isBuyer, isSeller, uid, anchor, st);
@@ -422,9 +432,9 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
       try {
         await (Api as any).payoutAddress(id, v);
         try { await (Api as any).setTonAddress(v); } catch {}
-        TG.haptic.success(); UI.toast('Saqlandi','ok');
+        TG.haptic.success(); UI.toast("To'lov manzili saqlandi",'ok');
         setTimeout(()=> location.reload(), 600);
-      } catch (e: any) { TG.haptic.error(); UI.toast(e.message || 'Saqlanmadi','err'); }
+      } catch (e: any) { TG.haptic.error(); UI.toast("Saqlanmadi — qayta urinib ko'ring",'err'); }
       finally { setBtn.removeAttribute('disabled'); setBtn.textContent=orig; }
     });
     // ulangan hamyon manzilini tez kiritish
@@ -440,10 +450,11 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
     bar.appendChild(shipBtn); bar.appendChild(hint);
     shipBtn.addEventListener('click', async () => {
       shipBtn.setAttribute('disabled',''); const o=shipBtn.textContent!; shipBtn.textContent='Yuborilmoqda…'; TG.haptic.medium();
-      try { const r:any = await (Api as any).shipDeal(id); TG.haptic.success(); UI.toast(r.message || 'Yetkazildi deb belgilandi','ok'); setTimeout(()=>location.reload(),700); }
-      catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Yuborilmadi','err'); shipBtn.removeAttribute('disabled'); shipBtn.textContent=o; if(String(e.message).includes('seller_ton_address_required')) UI.toast("To'lov manzilini saqlang",'err'); }
+      try { const r:any = await (Api as any).shipDeal(id); TG.haptic.success(); UI.toast("Yetkazildi deb belgilandi", 'ok'); setTimeout(()=>location.reload(),700); }
+      catch(e:any){ TG.haptic.error(); UI.toast("Yuborilmadi — qayta urinib ko'ring",'err'); shipBtn.removeAttribute('disabled'); shipBtn.textContent=o; if(String(e.message).includes('seller_ton_address_required')) UI.toast("To'lov manzilini saqlang",'err'); }
     });
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
+    try { UI.toast("To'lov qabul qilindi — mahsulotni yuboring", 'ok'); } catch {}
     return;
   }
 
@@ -459,11 +470,12 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
     bar.appendChild(btnRow); bar.appendChild(hint);
     yesBtn.addEventListener('click', async ()=>{
       yesBtn.setAttribute('disabled',''); const o=yesBtn.textContent!; yesBtn.textContent='Chiqarilmoqda…'; TG.haptic.medium();
-      try { const r:any = await (Api as any).approveDeal(id); TG.haptic.success(); UI.toast(r.message||'Chiqarildi','ok'); setTimeout(()=>location.reload(),700); }
-      catch(e:any){ TG.haptic.error(); const m=String(e.message||'Tasdiqlanmadi'); UI.toast(m,'err'); yesBtn.removeAttribute('disabled'); yesBtn.textContent=o; if(m.includes('seller_ton_address_required')) UI.toast("Sotuvchi to'lov manzili yo'q — sotuvchi xabardor qilindi",'err'); }
+      try { const r:any = await (Api as any).approveDeal(id); TG.haptic.success(); UI.toast("Chiqarildi — yakunlandi",'ok'); setTimeout(()=>location.reload(),700); }
+      catch(e:any){ TG.haptic.error(); UI.toast("Tasdiqlanmadi — qayta urinib ko'ring",'err'); yesBtn.removeAttribute('disabled'); yesBtn.textContent=o; if(String(e.message).includes('seller_ton_address_required')) UI.toast("Sotuvchi to'lov manzili yo'q — sotuvchi xabardor qilindi",'err'); }
     });
     noBtn.addEventListener('click', ()=>{ TG.haptic.tap(); location.hash = '#/deal/'+id+'/chat'; });
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
+    try { UI.toast("Sotuvchi yetkazdi — qabulni tasdiqlang", 'ok'); } catch {}
     return;
   }
 
@@ -492,7 +504,7 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
     if (!already) {
       const bar = UI.h('div', { class: 'webapp-bar', style: 'margin:12px 0' }) as HTMLElement;
       const b = UI.h('button', { class: 'btn btn-primary', text: '✅ Tasdiqlash' }) as HTMLButtonElement;
-      b.addEventListener('click', async ()=>{ b.setAttribute('disabled',''); try{ await (Api as any).approveDeal(id); UI.toast('Tasdiqlandi','ok'); setTimeout(()=>location.reload(),600);} catch(e:any){ UI.toast(e.message||'Xatolik','err'); b.removeAttribute('disabled'); }});
+      b.addEventListener('click', async ()=>{ b.setAttribute('disabled',''); try{ await (Api as any).approveDeal(id); UI.toast('Tasdiqlandi','ok'); setTimeout(()=>location.reload(),600);} catch(e:any){ UI.toast("Tasdiqlanmadi — qayta urinib ko'ring",'err'); b.removeAttribute('disabled'); }});
       bar.appendChild(b); anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
     } else {
       const bar = UI.h('div', { class: 'banner info webapp-bar', style: 'margin:12px 0' }, [ UI.h('div', { class: 'small', text: '✓ Siz tasdiqladingiz — sherik kutilmoqda.' }) ]);
@@ -517,7 +529,7 @@ async function renderChannelEscrow(deal: any, isBuyer: boolean, isSeller: boolea
     const verifyBtn = UI.h('button', { class: 'btn btn-primary', text: '🔍 Tekshirish — yaratuvchi men va bot adminligini tekshirish' }) as HTMLButtonElement;
     verifyBtn.addEventListener('click', async () => {
       verifyBtn.setAttribute('disabled',''); const o=verifyBtn.textContent!; verifyBtn.textContent='Tekshirilmoqda…';
-      try { const r:any = await (Api as any).channelVerify(deal.id); if (r.verified) { TG.haptic.success(); UI.toast('Tasdiqlandi — egasi sotuvchiga mos','ok'); setTimeout(()=>location.reload(),700);} else { TG.haptic.error(); UI.toast(r.error || "Mos kelmadi — siz yaratuvchi ekaningiz va "+escrowHolder+" adminligiga ishonch hosil qiling",'err'); } } catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Tekshirilmadi','err'); } finally{ verifyBtn.removeAttribute('disabled'); verifyBtn.textContent=o; }
+      try { const r:any = await (Api as any).channelVerify(deal.id); if (r.verified) { TG.haptic.success(); UI.toast('Tasdiqlandi — egasi sotuvchiga mos','ok'); setTimeout(()=>location.reload(),700);} else { TG.haptic.error(); UI.toast("Mos kelmadi — siz yaratuvchi ekaningiz va "+escrowHolder+" adminligiga ishonch hosil qiling",'err'); } } catch(e:any){ TG.haptic.error(); UI.toast("Tekshirilmadi — qayta urinib ko'ring",'err'); } finally{ verifyBtn.removeAttribute('disabled'); verifyBtn.textContent=o; }
     });
     bar.appendChild(verifyBtn);
     bar.appendChild(UI.h('div', { class: 'field-hint', style:'text-align:center', text: 'Ubot getChannelInfo + adminlar orqali tekshiradi (isCreator).' }));
@@ -545,9 +557,9 @@ async function renderChannelEscrow(deal: any, isBuyer: boolean, isSeller: boolea
     if (!escrowAt) {
       bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `💰 Xaridor to'ladi — endi Telegram'da ${chan} egaligini ${escrowHolder} ga o'tkazing (Kanal info → Administratorlar → Egalikni topshirish). Keyin O'tkazdim ni bosing.` }) ]));
       const reqBtn = UI.h('button', { class: 'btn btn-soft', text: `📢 ${escrowHolder} ga o'tkazaman` }) as HTMLButtonElement;
-      reqBtn.addEventListener('click', async ()=>{ reqBtn.setAttribute('disabled',''); try{ await (Api as any).channelRequestEscrow(deal.id); UI.toast("Qayd qilindi — hozir o'tkazing",'ok'); }catch(e:any){ UI.toast(e.message||'Xatolik','err'); } finally{ reqBtn.removeAttribute('disabled'); }});
-      const confBtn = UI.h('button', { class: 'btn btn-primary', text: "✅ O'tkazdim — escrow qabul qilganini tasdiqlash" }) as HTMLButtonElement;
-      confBtn.addEventListener('click', async ()=>{ confBtn.setAttribute('disabled',''); const o=confBtn.textContent!; confBtn.textContent='Tekshirilmoqda…'; try{ const r:any = await (Api as any).channelConfirmEscrow(deal.id); TG.haptic.success(); UI.toast("Escrow qabul qildi — endi to'lov manzilini kiriting",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Hali emas — '+escrowHolder+" ga o'tkazganingizga ishonch hosil qiling",'err'); confBtn.removeAttribute('disabled'); confBtn.textContent=o; }});
+      reqBtn.addEventListener('click', async ()=>{ reqBtn.setAttribute('disabled',''); try{ await (Api as any).channelRequestEscrow(deal.id); UI.toast("Qayd qilindi — hozir o'tkazing",'ok'); }catch(e:any){ UI.toast("Qayd qilinmadi — qayta urinib ko'ring",'err'); } finally{ reqBtn.removeAttribute('disabled'); }});
+      const confBtn = UI.h('button', { class:'btn btn-primary', text:"✅ O'tkazdim — escrow qabul qilganini tasdiqlash" }) as HTMLButtonElement;
+      confBtn.addEventListener('click', async ()=>{ confBtn.setAttribute('disabled',''); const o=confBtn.textContent!; confBtn.textContent='Tekshirilmoqda…'; try{ const r:any = await (Api as any).channelConfirmEscrow(deal.id); TG.haptic.success(); UI.toast("Escrow qabul qildi — endi to'lov manzilini kiriting",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast("Hali emas — "+escrowHolder+" ga o'tkazganingizga ishonch hosil qiling",'err'); confBtn.removeAttribute('disabled'); confBtn.textContent=o; }});
       bar.appendChild(reqBtn); bar.appendChild(confBtn);
       anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
     }
@@ -563,9 +575,9 @@ async function renderChannelEscrow(deal: any, isBuyer: boolean, isSeller: boolea
     bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `🔒 Escrow ${chan} ni qabul qildi — ${deal.amount} ${deal.asset} (komissiya chegirilgan) olishi uchun TON/USDT to'lov manzilini kiriting.` }) ]));
     const input = UI.h('input', { class:'input', placeholder:"UQ... / EQ... TON manzil", value: payoutAddr||''}) as HTMLInputElement;
     const saveBtn = UI.h('button', { class:'btn btn-soft', text:"💾 Manzilni saqlash" }) as HTMLButtonElement;
-    saveBtn.addEventListener('click', async()=>{ const v=input.value.trim(); if(!v){UI.toast('Manzil kiriting','err');return;} saveBtn.setAttribute('disabled',''); try{ await (Api as any).payoutAddress(deal.id, v); UI.toast('Saqlandi','ok'); }catch(e:any){UI.toast(e.message||'Xatolik','err');} finally{saveBtn.removeAttribute('disabled');}});
+    saveBtn.addEventListener('click', async()=>{ const v=input.value.trim(); if(!v){UI.toast('Manzil kiriting','err');return;} saveBtn.setAttribute('disabled',''); try{ await (Api as any).payoutAddress(deal.id, v); UI.toast("To'lov manzili saqlandi",'ok'); }catch(e:any){UI.toast("Saqlanmadi — qayta urinib ko'ring",'err');} finally{saveBtn.removeAttribute('disabled');}});
     const payoutBtn = UI.h('button', { class:'btn btn-primary', text:"💸 To'lovni so'rash (komissiya chegiriladi)" }) as HTMLButtonElement;
-    payoutBtn.addEventListener('click', async()=>{ const v=input.value.trim(); payoutBtn.setAttribute('disabled',''); const o=payoutBtn.textContent!; payoutBtn.textContent='Chiqarilmoqda…'; try{ const r:any = await (Api as any).channelPayout(deal.id, v||undefined); TG.haptic.success(); UI.toast("To'lov yuborildi",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast(e.message||"To'lov chiqarilmadi",'err'); payoutBtn.removeAttribute('disabled'); payoutBtn.textContent=o; }});
+    payoutBtn.addEventListener('click', async()=>{ const v=input.value.trim(); payoutBtn.setAttribute('disabled',''); const o=payoutBtn.textContent!; payoutBtn.textContent='Chiqarilmoqda…'; try{ const r:any = await (Api as any).channelPayout(deal.id, v||undefined); TG.haptic.success(); UI.toast("To'lov yuborildi",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast("To'lov chiqarilmadi — qayta urinib ko'ring",'err'); payoutBtn.removeAttribute('disabled'); payoutBtn.textContent=o; }});
     const row = UI.h('div', { style:'display:flex;gap:8px' }, [input, saveBtn]);
     bar.appendChild(row); bar.appendChild(payoutBtn);
     if (!hasPayout) bar.appendChild(UI.h('div', { class:'field-hint', style:'text-align:center', text:"Hamyonni ulang yoki manzilni yozing — chiqarish uchun shart." }));
@@ -582,12 +594,12 @@ async function renderChannelEscrow(deal: any, isBuyer: boolean, isSeller: boolea
       bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`✅ Sotuvchiga to'landi — endi ${chan} uchun yangi ega username ni kiriting (masalan @hamroqulovv). Ubot egalikni o'tkazadi.` }) ]));
       const inp = UI.h('input', { class:'input', placeholder:"Yangi ega @username" }) as HTMLInputElement;
       const setBtn = UI.h('button', { class:'btn btn-soft', text:"Yangi egani saqlash" }) as HTMLButtonElement;
-      setBtn.addEventListener('click', async()=>{ const v=inp.value.trim(); if(!v){UI.toast('@username kiriting','err');return;} setBtn.setAttribute('disabled',''); try{ await (Api as any).channelSetNewOwner(deal.id, v); UI.toast("Saqlandi — endi O'tkazish ni bosing",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){UI.toast(e.message||'Xatolik','err'); setBtn.removeAttribute('disabled');}});
+      setBtn.addEventListener('click', async()=>{ const v=inp.value.trim(); if(!v){UI.toast('@username kiriting','err');return;} setBtn.setAttribute('disabled',''); try{ await (Api as any).channelSetNewOwner(deal.id, v); UI.toast("Saqlandi — endi O'tkazish ni bosing",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){UI.toast("Saqlanmadi — qayta urinib ko'ring",'err'); setBtn.removeAttribute('disabled');}});
       bar.appendChild(inp); bar.appendChild(setBtn);
     } else {
       bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`Yangi ega: ${already} — O'tkazish ni bosing.` }) ]));
       const goBtn = UI.h('button', { class:'btn btn-primary', text:`🚀 ${chan} ni ${already} ga o'tkazish` }) as HTMLButtonElement;
-      goBtn.addEventListener('click', async()=>{ goBtn.setAttribute('disabled',''); const o=goBtn.textContent!; goBtn.textContent="O'tkazilmoqda…"; try{ const r:any = await (Api as any).channelTransferToBuyer(deal.id, already); TG.haptic.success(); UI.toast(already+" ga o'tkazildi",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); const m=String(e.message||''); UI.toast(m,'err'); if(m.includes('join')) UI.toast("Yangi ega avval kanalga qo'shilishi kerak",'err'); goBtn.removeAttribute('disabled'); goBtn.textContent=o; }});
+      goBtn.addEventListener('click', async()=>{ goBtn.setAttribute('disabled',''); const o=goBtn.textContent!; goBtn.textContent="O'tkazilmoqda…"; try{ const r:any = await (Api as any).channelTransferToBuyer(deal.id, already); TG.haptic.success(); UI.toast(already+" ga o'tkazildi",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast("O'tkazilmadi — qayta urinib ko'ring",'err'); try { if(String((e as any).message||'').includes('join')) UI.toast("Yangi ega avval kanalga qo'shilishi kerak",'err'); } catch {} goBtn.removeAttribute('disabled'); goBtn.textContent=o; }});
       bar.appendChild(goBtn);
       bar.appendChild(UI.h('div', { class:'field-hint', style:'text-align:center', text:"Ubot taklif qila olmasa (maxfiylik), yangi egadan avval taklif havola orqali kanalga qo'shilishini so'rang." }));
     }
@@ -671,7 +683,7 @@ async function viewInbox() {
             const btn = e.currentTarget as HTMLButtonElement;
             btn.setAttribute('disabled',''); btn.textContent='Tasdiqlanmoqda…';
             try { await Api.approveJoin(deal.id, r.id); TG.haptic.success(); UI.toast('Tasdiqlandi — bitim boshlandi', 'ok'); viewInbox(); }
-            catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Tasdiqlanmadi','err'); btn.removeAttribute('disabled'); btn.textContent='Tasdiqlash'; }
+            catch (err: any) { TG.haptic.error(); UI.toast("Tasdiqlanmadi — qayta urinib ko'ring",'err'); btn.removeAttribute('disabled'); btn.textContent='Tasdiqlash'; }
           }
         }, ['Tasdiqlash']),
         UI.h('button', {
@@ -680,7 +692,7 @@ async function viewInbox() {
             const btn = e.currentTarget as HTMLButtonElement;
             btn.setAttribute('disabled',''); btn.textContent='Rad etilmoqda…';
             try { await Api.rejectJoin(deal.id, r.id); TG.haptic.success(); UI.toast('Rad etildi','ok'); viewInbox(); }
-            catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Rad etilmadi','err'); btn.removeAttribute('disabled'); btn.textContent='Rad etish'; }
+            catch (err: any) { TG.haptic.error(); UI.toast("Rad etilmadi — qayta urinib ko'ring",'err'); btn.removeAttribute('disabled'); btn.textContent='Rad etish'; }
           }
         }, ['Rad etish'])
       ])
@@ -766,6 +778,15 @@ async function pollInboxBadge() {
         try { const reqs = await Api.joinRequests(d.id); count += reqs.length; } catch {}
       }
     }
+    const prev = Number((window as any).__inboxPrev || 0);
+    if (count > prev && prev >= 0 && count > 0) {
+      try {
+        // Faqat yaratuvchi ko'radi — inbox unga tegishli so'rovlar
+        if (prev > 0 || (window as any).__inboxInit) UI.toast("Yangi qo'shilish so'rovi — inboxni tekshiring", 'ok');
+      } catch {}
+    }
+    (window as any).__inboxPrev = count;
+    (window as any).__inboxInit = true;
     const tab = document.querySelector('.tab-btn[data-tab="#/home"]');
     // Bitimlar tabida inbox soni nishoni
     let badge = document.getElementById('inbox-badge');
