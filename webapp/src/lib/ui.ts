@@ -50,22 +50,22 @@ export function timeAgo(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
   const s = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (s < 45) return 'just now';
-  if (s < 3600) return Math.max(1, Math.floor(s / 60)) + 'm ago';
-  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-  if (s < 86400 * 30) return Math.floor(s / 86400) + 'd ago';
+  if (s < 45) return 'hozir';
+  if (s < 3600) return Math.max(1, Math.floor(s / 60)) + ' daqiqa oldin';
+  if (s < 86400) return Math.floor(s / 3600) + ' soat oldin';
+  if (s < 86400 * 30) return Math.floor(s / 86400) + ' kun oldin';
   return fmtDate(iso);
 }
 export function countdown(iso: string): { expired: boolean; text: string } | null {
   const t = new Date(iso).getTime();
   if (!iso || isNaN(t)) return null;
   const diff = t - Date.now();
-  if (diff <= 0) return { expired: true, text: 'Expired' };
+  if (diff <= 0) return { expired: true, text: "Muddati o'tgan" };
   const mins = Math.floor(diff / 60000);
-  if (mins < 60) return { expired: false, text: mins + 'm left' };
+  if (mins < 60) return { expired: false, text: mins + ' daqiqa qoldi' };
   const hours = Math.floor(mins / 60);
-  if (hours < 48) return { expired: false, text: hours + 'h left' };
-  return { expired: false, text: Math.floor(hours / 24) + 'd left' };
+  if (hours < 48) return { expired: false, text: hours + ' soat qoldi' };
+  return { expired: false, text: Math.floor(hours / 24) + ' kun qoldi' };
 }
 export function truncate(s: string, head: number, tail: number): string {
   s = String(s || '');
@@ -90,12 +90,12 @@ export function shortAddr(a: string): string {
 }
 
 const STATUSES: Record<string, { label: string; cls: string; step: number }> = {
-  AWAITING_DEPOSIT: { label: 'Awaiting deposit', cls: 'st-awaiting', step: 0 },
-  DEPOSIT_CONFIRMED: { label: 'Funded — send item', cls: 'st-funded', step: 1 },
-  ITEM_SENT: { label: 'Item sent — await buyer', cls: 'st-sent', step: 2 },
-  BUYER_CONFIRMED: { label: 'Buyer confirmed', cls: 'st-confirmed', step: 2 },
-  RELEASED: { label: 'Released', cls: 'st-released', step: 3 },
-  REFUNDED: { label: 'Refunded', cls: 'st-refunded', step: 3 },
+  AWAITING_DEPOSIT: { label: "To'lov kutilmoqda", cls: 'st-awaiting', step: 0 },
+  DEPOSIT_CONFIRMED: { label: "Mablag' tushdi — mahsulotni yuboring", cls: 'st-funded', step: 1 },
+  ITEM_SENT: { label: 'Yuborildi — xaridor tasdiqlaydi', cls: 'st-sent', step: 2 },
+  BUYER_CONFIRMED: { label: 'Xaridor tasdiqladi', cls: 'st-confirmed', step: 2 },
+  RELEASED: { label: 'Yakunlandi', cls: 'st-released', step: 3 },
+  REFUNDED: { label: 'Qaytarildi', cls: 'st-refunded', step: 3 },
 };
 export function statusMeta(status: string) {
   const m = STATUSES[String(status || '').toUpperCase()];
@@ -116,8 +116,8 @@ export function avatarClass(seed: any): string { return 'av-' + (Math.abs(Number
 export function counterpartyLabel(deal: any): string {
   try {
     const uid = Number((window as any).TG?.user()?.id);
-    if (Number(deal.buyer_telegram_id) === uid) return 'You are the Buyer';
-    if (Number(deal.seller_telegram_id) === uid) return 'You are the Seller';
+    if (Number(deal.buyer_telegram_id) === uid) return 'Siz xaridorsiz';
+    if (Number(deal.seller_telegram_id) === uid) return 'Siz sotuvchisiz';
   } catch {}
   return '';
 }

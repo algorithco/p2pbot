@@ -67,16 +67,15 @@ function enhanceApp(App: any) {
     if (location.hash.startsWith('#/admin')) {
       setTimeout(() => {
         if (location.hash.startsWith('#/admin')) {
-          UI.toast('Admin control is via Telegram bot — use /admin_release etc.', 'err');
+          UI.toast("Admin boshqaruv faqat Telegram bot orqali — /admin_release va boshqalar", 'err');
           location.hash = '#/home';
         }
       }, 30);
     }
   });
-  if (location.hash.startsWith('#/admin')) { UI.toast('Admin via bot only','err'); location.hash = '#/home'; }
+  if (location.hash.startsWith('#/admin')) { UI.toast('Admin faqat bot orqali','err'); location.hash = '#/home'; }
 
   // Visibility pause for polling timers (home 20s, chat 3.5s) — legacy uses App.chatTimer & home interval via closure
-  // We track visibility and dispatch events; legacy pollers check document.hidden on next tick via patched interval wrapper
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       // pause polling by clearing chatTimer if exists
@@ -103,8 +102,7 @@ function enhanceApp(App: any) {
   // Enhance TON pay: wrap Wallet.pay to poll chain status 3x after approval
   wrapWalletPayForVerification();
 
-  // Lock amount input in paySheet to exact deal amount (TON perfect)
-  observePaySheetLock();
+  // NOTE: one-tap pay screen lives in legacy viewDeal (no pay sheet anymore)
 }
 
 function isNewRoute(hash: string): boolean {
@@ -210,7 +208,7 @@ function injectHomeSearch(view: HTMLElement) {
   const searchRow = UI.h('div', { class: 'search-row' }, [
     UI.h('input', {
       class: 'search-input',
-      placeholder: 'Search by ID, asset, status…',
+      placeholder: "ID, aktiv, holat bo'yicha qidirish…",
       oninput(e: any) {
         (window as any).App.state.searchQuery = e.target.value.toLowerCase().trim();
         // trigger filter re-render if App exposes renderList
@@ -231,8 +229,8 @@ function injectHomeSearch(view: HTMLElement) {
     }, [
       UI.h('div', { class: 'li-icon', text: '📥' }),
       UI.h('div', { class: 'li-main' }, [
-        UI.h('b', { text: 'Inbox — Join Requests' }),
-        UI.h('span', { text: 'Approve counterparty approvals (photo + username)' })
+        UI.h('b', { text: "Inbox — qo'shilish so'rovlari" }),
+        UI.h('span', { text: "Sherik tasdig'i (rasm + username)" })
       ]),
       UI.h('span', { class: 'li-value', text: '→' })
     ]);
@@ -253,7 +251,7 @@ function injectInboxEntry(view: HTMLElement) {
     UI.h('div', { class: 'li-icon', text: '📥' }),
     UI.h('div', { class: 'li-main' }, [
       UI.h('b', { text: 'Inbox' }),
-      UI.h('span', { text: 'Pending join requests' })
+      UI.h('span', { text: "Kutilayotgan qo'shilish so'rovlari" })
     ]),
     UI.h('span', { class: 'li-value', text: '→' })
   ]);
@@ -283,14 +281,14 @@ function patchViewCreate() {
     const anchor = (termsLabel?.parentElement as HTMLElement) || view.querySelector('.card') as HTMLElement;
     if (!anchor) return;
     const wrap = UI.h('div', { id:'channel-type-wrap', style:'display:flex;flex-direction:column;gap:8px;margin-top:12px' }, [
-      UI.h('label', { text:'Trade what? (Channel/Group escrow — adds @gramchioka as escrow holder)', style:'font-weight:600;font-size:13px' }),
+      UI.h('label', { text:"Nima savdosi? (Kanal/Guruh escrow — @gramchioka escrow holder sifatida qo'shiladi)", style:'font-weight:600;font-size:13px' }),
       UI.h('select', { id:'deal-type-sel', class:'input' }, [
-        UI.h('option', { value:'P2P', text:'P2P — item / service (default)' } as any),
-        UI.h('option', { value:'CHANNEL', text:'CHANNEL — Telegram channel (@username)' } as any),
-        UI.h('option', { value:'GROUP', text:'GROUP — Telegram supergroup/channel' } as any),
+        UI.h('option', { value:'P2P', text:'P2P — narsa / xizmat (standart)' } as any),
+        UI.h('option', { value:'CHANNEL', text:'CHANNEL — Telegram kanal (@username)' } as any),
+        UI.h('option', { value:'GROUP', text:'GROUP — Telegram superguruh/kanal' } as any),
       ]),
-      UI.h('input', { id:'channel-username-input', class:'input', placeholder:'@username or t.me link (required for CHANNEL/GROUP)', style:'display:none' }) as any,
-      UI.h('div', { id:'channel-hint', class:'field-hint', style:'display:none;text-align:center', text:'Seller must add '+ '@gramchioka' +' to channel as admin — mandatory verification.' })
+      UI.h('input', { id:'channel-username-input', class:'input', placeholder:'@username yoki t.me havola (CHANNEL/GROUP uchun shart)', style:'display:none' }) as any,
+      UI.h('div', { id:'channel-hint', class:'field-hint', style:'display:none;text-align:center', text:'Sotuvchi '+ '@gramchioka' +' ni kanalga admin qilishi shart — majburiy tekshiruv.' })
     ]) as HTMLElement;
     const sel = wrap.querySelector('#deal-type-sel') as HTMLSelectElement;
     const inp = wrap.querySelector('#channel-username-input') as HTMLInputElement;
@@ -397,54 +395,53 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
     try { const me: any = await (Api as any).me?.() || await (Api as any).getMyProfile?.(); userTon = me?.ton_address || me?.tonAddress || null; } catch {}
   }
 
-  // --- Seller: DEPOSIT_CONFIRMED -> show payout + ship ---
+  // --- Seller: DEPOSIT_CONFIRMED -> show payout + ship (ship allowed without payout per backend) ---
   if (isSeller && st === 'DEPOSIT_CONFIRMED') {
     const hasAnyPayout = hasPayout || !!userTon;
     const bar = UI.h('div', { class: 'webapp-bar', style: 'margin:12px 0;display:flex;flex-direction:column;gap:10px' }) as HTMLElement;
     if (!hasAnyPayout) {
-      const warn = UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: '⚠️ Set your TON payout address before marking shipped — otherwise buyer approval will stall.' }) ]);
+      const warn = UI.h('div', { class: 'banner warn' }, [ UI.h('div', { class: 'small', text: "TON to'lov manzilingizni kiriting — keyinroq ham saqlashingiz mumkin, lekin xaridor tasdiqlaganda to'lov shu manzilga chiqadi." }) ]);
       bar.appendChild(warn);
     } else if (payoutAddr) {
-      bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `Payout address: ${payoutAddr.slice(0, 8)}…${payoutAddr.slice(-6)}` }) ]));
+      bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `To'lov manzili: ${payoutAddr.slice(0, 8)}…${payoutAddr.slice(-6)}` }) ]));
     }
     // payout input
-    const input = UI.h('input', { class: 'input', placeholder: 'UQ... / EQ... TON payout address', value: payoutAddr || userTon || '' }) as HTMLInputElement;
-    const setBtn = UI.h('button', { class: 'btn btn-soft', text: '💾 Save payout address' }) as HTMLButtonElement;
+    const input = UI.h('input', { class: 'input', placeholder: "UQ... / EQ... TON to'lov manzili", value: payoutAddr || userTon || '' }) as HTMLInputElement;
+    const setBtn = UI.h('button', { class: 'btn btn-soft', text: "💾 To'lov manzilini saqlash" }) as HTMLButtonElement;
     const row = UI.h('div', { style: 'display:flex;gap:8px' }, [input, setBtn]);
     const payoutBox = UI.h('div', { style: 'display:flex;flex-direction:column;gap:6px' }, [
-      UI.h('label', { text: 'Seller payout address (TON)', style: 'font-weight:600;font-size:13px' }),
+      UI.h('label', { text: "Sotuvchi to'lov manzili (TON)", style: 'font-weight:600;font-size:13px' }),
       row,
-      UI.h('div', { class: 'field-hint', text: 'We will send TON minus fee here when buyer confirms. Connect wallet or paste address.' })
+      UI.h('div', { class: 'field-hint', text: "Xaridor tasdiqlaganda TON (komissiyasiz qismi) shu manzilga chiqadi. Hamyonni ulang yoki manzilni qo'lda yozing." })
     ]);
     bar.appendChild(payoutBox);
     setBtn.addEventListener('click', async () => {
       const v = input.value.trim();
-      if (!v) { UI.toast('Enter TON address','err'); return; }
-      setBtn.setAttribute('disabled',''); const orig=setBtn.textContent!; setBtn.textContent='Saving…';
+      if (!v) { UI.toast("TON manzil kiriting",'err'); return; }
+      setBtn.setAttribute('disabled',''); const orig=setBtn.textContent!; setBtn.textContent='Saqlanmoqda…';
       try {
         await (Api as any).payoutAddress(id, v);
         try { await (Api as any).setTonAddress(v); } catch {}
-        TG.haptic.success(); UI.toast('Payout saved','ok');
+        TG.haptic.success(); UI.toast('Saqlandi','ok');
         setTimeout(()=> location.reload(), 600);
-      } catch (e: any) { TG.haptic.error(); UI.toast(e.message || 'Save failed','err'); }
+      } catch (e: any) { TG.haptic.error(); UI.toast(e.message || 'Saqlanmadi','err'); }
       finally { setBtn.removeAttribute('disabled'); setBtn.textContent=orig; }
     });
-    // quick connect wallet fill
+    // ulangan hamyon manzilini tez kiritish
     try {
-      const fillBtn = UI.h('button', { class: 'btn btn-ghost', style: 'width:auto;padding:6px 10px;font-size:12px', text: 'Use connected wallet' }) as HTMLButtonElement;
+      const fillBtn = UI.h('button', { class: 'btn btn-ghost', style: 'width:auto;padding:6px 10px;font-size:12px', text: 'Ulangan hamyondan olish' }) as HTMLButtonElement;
       fillBtn.addEventListener('click', async () => {
-        try { const wAddr = (Wallet as any).addressFriendly?.() || (Wallet as any).address?.(); if (wAddr) { input.value = wAddr; UI.toast('Filled from wallet','ok'); } else UI.toast('Connect wallet first','err'); } catch {}
+        try { const wAddr = (Wallet as any).addressFriendly?.() || (Wallet as any).address?.(); if (wAddr) { input.value = wAddr; UI.toast('Hamyondan olindi','ok'); } else UI.toast('Avval hamyonni ulang','err'); } catch {}
       });
       row.appendChild(fillBtn);
     } catch {}
-    const shipBtn = UI.h('button', { class: 'btn btn-primary', text: '📦 I sent the item — notify buyer' }) as HTMLButtonElement;
-    const hint = UI.h('div', { class: 'field-hint', style: 'text-align:center', text: hasAnyPayout ? 'After sending NFT/item off-chain, tap to move to ITEM_SENT. Buyer will be asked to confirm in web app.' : 'Save payout address first — then you can mark sent.' });
-    if (!hasAnyPayout) shipBtn.setAttribute('disabled','');
+    const shipBtn = UI.h('button', { class: 'btn btn-primary', text: '📦 Yetkazdim' }) as HTMLButtonElement;
+    const hint = UI.h('div', { class: 'field-hint', style: 'text-align:center', text: "Mahsulot/xizmatni topshirgach bosing — bitim ITEM_SENT holatiga o'tadi. Manzilni hozir yoki keyin saqlashingiz mumkin." });
     bar.appendChild(shipBtn); bar.appendChild(hint);
     shipBtn.addEventListener('click', async () => {
-      shipBtn.setAttribute('disabled',''); const o=shipBtn.textContent!; shipBtn.textContent='Sending…'; TG.haptic.medium();
-      try { const r:any = await (Api as any).shipDeal(id); TG.haptic.success(); UI.toast(r.message || 'Marked sent','ok'); setTimeout(()=>location.reload(),700); }
-      catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Ship failed','err'); shipBtn.removeAttribute('disabled'); shipBtn.textContent=o; if(String(e.message).includes('seller_ton_address_required')) UI.toast('Save payout first','err'); }
+      shipBtn.setAttribute('disabled',''); const o=shipBtn.textContent!; shipBtn.textContent='Yuborilmoqda…'; TG.haptic.medium();
+      try { const r:any = await (Api as any).shipDeal(id); TG.haptic.success(); UI.toast(r.message || 'Yetkazildi deb belgilandi','ok'); setTimeout(()=>location.reload(),700); }
+      catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Yuborilmadi','err'); shipBtn.removeAttribute('disabled'); shipBtn.textContent=o; if(String(e.message).includes('seller_ton_address_required')) UI.toast("To'lov manzilini saqlang",'err'); }
     });
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
     return;
@@ -453,17 +450,17 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
   // --- Buyer: ITEM_SENT -> show approve ---
   if (isBuyer && st === 'ITEM_SENT') {
     const bar = UI.h('div', { class: 'webapp-bar', style: 'margin:12px 0;display:flex;flex-direction:column;gap:10px' }) as HTMLElement;
-    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: '📦 Seller marked item as sent. Confirm receipt to release TON minus fee to seller.' }) ]));
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: "📦 Sotuvchi mahsulotni yuborganini bildirdi. Qabul qilgan bo'lsangiz tasdiqlang — TON (komissiya chegirilgan) sotuvchiga chiqadi." }) ]));
     const btnRow = UI.h('div', { style: 'display:flex;gap:10px' }) as HTMLElement;
-    const yesBtn = UI.h('button', { class: 'btn btn-primary', text: '✅ Yes, received — Release' }) as HTMLButtonElement;
-    const noBtn = UI.h('button', { class: 'btn btn-ghost', text: '❌ Not yet (open chat)' }) as HTMLButtonElement;
+    const yesBtn = UI.h('button', { class: 'btn btn-primary', text: '✅ Oldim — pulni chiqarish' }) as HTMLButtonElement;
+    const noBtn = UI.h('button', { class: 'btn btn-ghost', text: '❌ Hali emas (chatni ochish)' }) as HTMLButtonElement;
     btnRow.appendChild(yesBtn); btnRow.appendChild(noBtn);
-    const hint = UI.h('div', { class: 'field-hint', style: 'text-align:center', text: 'Releases escrow minus fee via signer. Check chat if item missing.' });
+    const hint = UI.h('div', { class: 'field-hint', style: 'text-align:center', text: "Tasdiqlasangiz escrow komissiya chegirib chiqariladi. Mahsulot kelmagan bo'lsa chatga yozing." });
     bar.appendChild(btnRow); bar.appendChild(hint);
     yesBtn.addEventListener('click', async ()=>{
-      yesBtn.setAttribute('disabled',''); const o=yesBtn.textContent!; yesBtn.textContent='Releasing…'; TG.haptic.medium();
-      try { const r:any = await (Api as any).approveDeal(id); TG.haptic.success(); UI.toast(r.message||'Released','ok'); setTimeout(()=>location.reload(),700); }
-      catch(e:any){ TG.haptic.error(); const m=String(e.message||'Approve failed'); UI.toast(m,'err'); yesBtn.removeAttribute('disabled'); yesBtn.textContent=o; if(m.includes('seller_ton_address_required')) UI.toast('Seller payout missing — seller notified','err'); }
+      yesBtn.setAttribute('disabled',''); const o=yesBtn.textContent!; yesBtn.textContent='Chiqarilmoqda…'; TG.haptic.medium();
+      try { const r:any = await (Api as any).approveDeal(id); TG.haptic.success(); UI.toast(r.message||'Chiqarildi','ok'); setTimeout(()=>location.reload(),700); }
+      catch(e:any){ TG.haptic.error(); const m=String(e.message||'Tasdiqlanmadi'); UI.toast(m,'err'); yesBtn.removeAttribute('disabled'); yesBtn.textContent=o; if(m.includes('seller_ton_address_required')) UI.toast("Sotuvchi to'lov manzili yo'q — sotuvchi xabardor qilindi",'err'); }
     });
     noBtn.addEventListener('click', ()=>{ TG.haptic.tap(); location.hash = '#/deal/'+id+'/chat'; });
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
@@ -473,7 +470,7 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
   // --- Seller: ITEM_SENT awaiting buyer ---
   if (isSeller && st === 'ITEM_SENT') {
     const bar = UI.h('div', { class: 'banner info webapp-bar', style: 'margin:12px 0' }, [
-      UI.h('div', { class: 'small', text: '⏳ You marked sent — awaiting buyer confirmation in web app. Funds release automatically when buyer taps Yes.' })
+      UI.h('div', { class: 'small', text: "⏳ Yuborildi deb belgiladingiz — xaridor tasdig'i kutilmoqda. Xaridor \"Oldim\" ni bossa pul avtomatik chiqadi." })
     ]);
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
     return;
@@ -482,7 +479,7 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
   // --- Buyer: DEPOSIT_CONFIRMED waiting seller ship ---
   if (isBuyer && st === 'DEPOSIT_CONFIRMED') {
     const bar = UI.h('div', { class: 'banner info webapp-bar', style: 'margin:12px 0' }, [
-      UI.h('div', { class: 'small', text: '⏳ Funded — waiting seller to send item. You will be asked to confirm in web app when seller marks sent.' })
+      UI.h('div', { class: 'small', text: "⏳ Mablag' tushdi — sotuvchi mahsulotni yuborishi kutilmoqda. Sotuvchi \"Yetkazdim\" ni bossa sizdan tasdiq so'raladi." })
     ]);
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
     return;
@@ -494,11 +491,11 @@ async function injectWebappBar(view: HTMLElement, hash: string) {
     const already = (isBuyer&&conf.buyer)||(isSeller&&conf.seller);
     if (!already) {
       const bar = UI.h('div', { class: 'webapp-bar', style: 'margin:12px 0' }) as HTMLElement;
-      const b = UI.h('button', { class: 'btn btn-primary', text: '✅ Confirm (legacy) — move to webapp flow' }) as HTMLButtonElement;
-      b.addEventListener('click', async ()=>{ b.setAttribute('disabled',''); try{ await (Api as any).approveDeal(id); UI.toast('Confirmed','ok'); setTimeout(()=>location.reload(),600);} catch(e:any){ UI.toast(e.message||'failed','err'); b.removeAttribute('disabled'); }});
+      const b = UI.h('button', { class: 'btn btn-primary', text: '✅ Tasdiqlash' }) as HTMLButtonElement;
+      b.addEventListener('click', async ()=>{ b.setAttribute('disabled',''); try{ await (Api as any).approveDeal(id); UI.toast('Tasdiqlandi','ok'); setTimeout(()=>location.reload(),600);} catch(e:any){ UI.toast(e.message||'Xatolik','err'); b.removeAttribute('disabled'); }});
       bar.appendChild(b); anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
     } else {
-      const bar = UI.h('div', { class: 'banner info webapp-bar', style: 'margin:12px 0' }, [ UI.h('div', { class: 'small', text: '✓ You confirmed — waiting counterparty.' }) ]);
+      const bar = UI.h('div', { class: 'banner info webapp-bar', style: 'margin:12px 0' }, [ UI.h('div', { class: 'small', text: '✓ Siz tasdiqladingiz — sherik kutilmoqda.' }) ]);
       anchor.parentNode!.insertBefore(bar, anchor.nextSibling);
     }
     return;
@@ -516,93 +513,93 @@ async function renderChannelEscrow(deal: any, isBuyer: boolean, isSeller: boolea
 
   // 1) Seller must add @gramchioka — verify ownership
   if (!verified && isSeller) {
-    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `📢 Channel ${chan} — add ${escrowHolder} to channel/group as admin (mandatory). Then tap Verify.` }) ]));
-    const verifyBtn = UI.h('button', { class: 'btn btn-primary', text: '🔍 Verify — check I am creator & bot is admin' }) as HTMLButtonElement;
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `📢 ${chan} kanal — ${escrowHolder} ni kanal/guruhga admin qilib qo'shing (majburiy). Keyin Tekshirish ni bosing.` }) ]));
+    const verifyBtn = UI.h('button', { class: 'btn btn-primary', text: '🔍 Tekshirish — yaratuvchi men va bot adminligini tekshirish' }) as HTMLButtonElement;
     verifyBtn.addEventListener('click', async () => {
-      verifyBtn.setAttribute('disabled',''); const o=verifyBtn.textContent!; verifyBtn.textContent='Verifying…';
-      try { const r:any = await (Api as any).channelVerify(deal.id); if (r.verified) { TG.haptic.success(); UI.toast('Verified — owner matches seller','ok'); setTimeout(()=>location.reload(),700);} else { TG.haptic.error(); UI.toast(r.error || 'Owner mismatch — ensure you are creator and '+escrowHolder+' is admin','err'); } } catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Verify failed','err'); } finally{ verifyBtn.removeAttribute('disabled'); verifyBtn.textContent=o; }
+      verifyBtn.setAttribute('disabled',''); const o=verifyBtn.textContent!; verifyBtn.textContent='Tekshirilmoqda…';
+      try { const r:any = await (Api as any).channelVerify(deal.id); if (r.verified) { TG.haptic.success(); UI.toast('Tasdiqlandi — egasi sotuvchiga mos','ok'); setTimeout(()=>location.reload(),700);} else { TG.haptic.error(); UI.toast(r.error || "Mos kelmadi — siz yaratuvchi ekaningiz va "+escrowHolder+" adminligiga ishonch hosil qiling",'err'); } } catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Tekshirilmadi','err'); } finally{ verifyBtn.removeAttribute('disabled'); verifyBtn.textContent=o; }
     });
     bar.appendChild(verifyBtn);
-    bar.appendChild(UI.h('div', { class: 'field-hint', style:'text-align:center', text: 'Ubot checks via getChannelInfo + admins (isCreator).' }));
+    bar.appendChild(UI.h('div', { class: 'field-hint', style:'text-align:center', text: 'Ubot getChannelInfo + adminlar orqali tekshiradi (isCreator).' }));
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
   }
   if (!verified && isBuyer) {
-    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `⏳ Channel ${chan} — waiting seller to add ${escrowHolder} and verify ownership.` }) ]));
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `⏳ ${chan} kanal — sotuvchi ${escrowHolder} ni qo'shib egalikni tasdiqlashi kutilmoqda.` }) ]));
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
   }
   // 2) Verified — show channel card in chat hint
   if (verified) {
-    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `✅ Channel ${chan} verified${deal.channel_title ? ' — '+deal.channel_title : ''}. ${deal.channel_snapshot ? '' : ''}` }) ]));
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `✅ ${chan} kanal tasdiqlandi${deal.channel_title ? ' — '+deal.channel_title : ''}. ${deal.channel_snapshot ? '' : ''}` }) ]));
   }
   // 3) After verification, buyer must deposit (show deposit hint while AWAITING_DEPOSIT)
   if (verified && st === 'AWAITING_DEPOSIT' && isBuyer) {
-    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `💸 Send ${deal.amount} ${deal.asset} to escrow payment address (see payment section above). After TON/USDT receipt, seller will be asked to transfer to ${escrowHolder}.` }) ]));
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `💸 ${deal.amount} ${deal.asset} ni escrow to'lov manziliga yuboring (to'lov bo'limiga qarang). TON/USDT tushgach sotuvchidan ${escrowHolder} ga o'tkazish so'raladi.` }) ]));
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
   }
   if (verified && st === 'AWAITING_DEPOSIT' && isSeller) {
-    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: '⏳ Awaiting buyer deposit — you will be notified to transfer to '+escrowHolder+' after funds arrive.' }) ]));
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: "⏳ Xaridor to'lovi kutilmoqda — mablag' tushgach "+escrowHolder+" ga o'tkazish haqida xabar beriladi." }) ]));
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
   }
   // 4) DEPOSIT_CONFIRMED => ask seller to transfer to escrow holder
   if (st === 'DEPOSIT_CONFIRMED' && isSeller) {
     if (!escrowAt) {
-      bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `💰 Buyer deposited — now transfer ownership of ${chan} to ${escrowHolder} in Telegram (Channel Info → Administrators → Transfer ownership). Then tap I transferred.` }) ]));
-      const reqBtn = UI.h('button', { class: 'btn btn-soft', text: `📢 I will transfer to ${escrowHolder}` }) as HTMLButtonElement;
-      reqBtn.addEventListener('click', async ()=>{ reqBtn.setAttribute('disabled',''); try{ await (Api as any).channelRequestEscrow(deal.id); UI.toast('Noted — transfer now','ok'); }catch(e:any){ UI.toast(e.message||'failed','err'); } finally{ reqBtn.removeAttribute('disabled'); }});
-      const confBtn = UI.h('button', { class: 'btn btn-primary', text: '✅ I transferred — Confirm escrow received' }) as HTMLButtonElement;
-      confBtn.addEventListener('click', async ()=>{ confBtn.setAttribute('disabled',''); const o=confBtn.textContent!; confBtn.textContent='Checking…'; try{ const r:any = await (Api as any).channelConfirmEscrow(deal.id); TG.haptic.success(); UI.toast('Escrow received — now set payout','ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Not yet — ensure you transferred to '+escrowHolder,'err'); confBtn.removeAttribute('disabled'); confBtn.textContent=o; }});
+      bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `💰 Xaridor to'ladi — endi Telegram'da ${chan} egaligini ${escrowHolder} ga o'tkazing (Kanal info → Administratorlar → Egalikni topshirish). Keyin O'tkazdim ni bosing.` }) ]));
+      const reqBtn = UI.h('button', { class: 'btn btn-soft', text: `📢 ${escrowHolder} ga o'tkazaman` }) as HTMLButtonElement;
+      reqBtn.addEventListener('click', async ()=>{ reqBtn.setAttribute('disabled',''); try{ await (Api as any).channelRequestEscrow(deal.id); UI.toast("Qayd qilindi — hozir o'tkazing",'ok'); }catch(e:any){ UI.toast(e.message||'Xatolik','err'); } finally{ reqBtn.removeAttribute('disabled'); }});
+      const confBtn = UI.h('button', { class: 'btn btn-primary', text: "✅ O'tkazdim — escrow qabul qilganini tasdiqlash" }) as HTMLButtonElement;
+      confBtn.addEventListener('click', async ()=>{ confBtn.setAttribute('disabled',''); const o=confBtn.textContent!; confBtn.textContent='Tekshirilmoqda…'; try{ const r:any = await (Api as any).channelConfirmEscrow(deal.id); TG.haptic.success(); UI.toast("Escrow qabul qildi — endi to'lov manzilini kiriting",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Hali emas — '+escrowHolder+" ga o'tkazganingizga ishonch hosil qiling",'err'); confBtn.removeAttribute('disabled'); confBtn.textContent=o; }});
       bar.appendChild(reqBtn); bar.appendChild(confBtn);
       anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
     }
   }
   if (st === 'DEPOSIT_CONFIRMED' && isBuyer) {
-    const msg = escrowAt ? `🔒 Escrow holds ${chan} — awaiting seller payout.` : `⏳ Funds escrowed — seller must transfer ${chan} to ${escrowHolder} now.`;
+    const msg = escrowAt ? `🔒 Escrow ${chan} ni ushlab turibdi — sotuvchi to'lovi kutilmoqda.` : `⏳ Mablag' escrow'da — sotuvchi ${chan} ni ${escrowHolder} ga o'tkazishi kerak.`;
     bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: msg }) ]));
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
   }
   // 5) Escrow received but not yet released — ask seller payout address
   if (escrowAt && st !== 'RELEASED' && st !== 'REFUNDED' && isSeller) {
     const hasPayout = !!(payoutAddr && payoutAddr.trim());
-    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `🔒 Escrow received ${chan} — enter TON/USDT payout address to receive ${deal.amount} ${deal.asset} minus fee.` }) ]));
-    const input = UI.h('input', { class:'input', placeholder:'UQ... / EQ... TON address', value: payoutAddr||''}) as HTMLInputElement;
-    const saveBtn = UI.h('button', { class:'btn btn-soft', text:'💾 Save address' }) as HTMLButtonElement;
-    saveBtn.addEventListener('click', async()=>{ const v=input.value.trim(); if(!v){UI.toast('Enter address','err');return;} saveBtn.setAttribute('disabled',''); try{ await (Api as any).payoutAddress(deal.id, v); UI.toast('Saved','ok'); }catch(e:any){UI.toast(e.message||'failed','err');} finally{saveBtn.removeAttribute('disabled');}});
-    const payoutBtn = UI.h('button', { class:'btn btn-primary', text:'💸 Request payout (fee deducted)' }) as HTMLButtonElement;
-    payoutBtn.addEventListener('click', async()=>{ const v=input.value.trim(); payoutBtn.setAttribute('disabled',''); const o=payoutBtn.textContent!; payoutBtn.textContent='Paying…'; try{ const r:any = await (Api as any).channelPayout(deal.id, v||undefined); TG.haptic.success(); UI.toast('Payout sent','ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast(e.message||'Payout failed','err'); payoutBtn.removeAttribute('disabled'); payoutBtn.textContent=o; }});
+    bar.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: `🔒 Escrow ${chan} ni qabul qildi — ${deal.amount} ${deal.asset} (komissiya chegirilgan) olishi uchun TON/USDT to'lov manzilini kiriting.` }) ]));
+    const input = UI.h('input', { class:'input', placeholder:"UQ... / EQ... TON manzil", value: payoutAddr||''}) as HTMLInputElement;
+    const saveBtn = UI.h('button', { class:'btn btn-soft', text:"💾 Manzilni saqlash" }) as HTMLButtonElement;
+    saveBtn.addEventListener('click', async()=>{ const v=input.value.trim(); if(!v){UI.toast('Manzil kiriting','err');return;} saveBtn.setAttribute('disabled',''); try{ await (Api as any).payoutAddress(deal.id, v); UI.toast('Saqlandi','ok'); }catch(e:any){UI.toast(e.message||'Xatolik','err');} finally{saveBtn.removeAttribute('disabled');}});
+    const payoutBtn = UI.h('button', { class:'btn btn-primary', text:"💸 To'lovni so'rash (komissiya chegiriladi)" }) as HTMLButtonElement;
+    payoutBtn.addEventListener('click', async()=>{ const v=input.value.trim(); payoutBtn.setAttribute('disabled',''); const o=payoutBtn.textContent!; payoutBtn.textContent='Chiqarilmoqda…'; try{ const r:any = await (Api as any).channelPayout(deal.id, v||undefined); TG.haptic.success(); UI.toast("To'lov yuborildi",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); UI.toast(e.message||"To'lov chiqarilmadi",'err'); payoutBtn.removeAttribute('disabled'); payoutBtn.textContent=o; }});
     const row = UI.h('div', { style:'display:flex;gap:8px' }, [input, saveBtn]);
     bar.appendChild(row); bar.appendChild(payoutBtn);
-    if (!hasPayout) bar.appendChild(UI.h('div', { class:'field-hint', style:'text-align:center', text:'Connect wallet or paste address — required for release.' }));
+    if (!hasPayout) bar.appendChild(UI.h('div', { class:'field-hint', style:'text-align:center', text:"Hamyonni ulang yoki manzilni yozing — chiqarish uchun shart." }));
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
   }
   if (escrowAt && st !== 'RELEASED' && isBuyer) {
-    bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:'⏳ Escrow holds channel — seller payout pending. Next you will set new owner.' }) ]));
+    bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:"⏳ Escrow kanalni ushlab turibdi — sotuvchi to'lovi kutilmoqda. Keyin yangi egani kiritasiz." }) ]));
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
   }
   // 6) RELEASED → buyer sets new owner
   if (st === 'RELEASED' && isBuyer) {
     const already = pendingOwner;
     if (!already) {
-      bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`✅ Seller paid — now enter username of new owner for ${chan} (e.g. @hamroqulovv). Ubot will transfer ownership.` }) ]));
-      const inp = UI.h('input', { class:'input', placeholder:'@username of new owner' }) as HTMLInputElement;
-      const setBtn = UI.h('button', { class:'btn btn-soft', text:'Save new owner' }) as HTMLButtonElement;
-      setBtn.addEventListener('click', async()=>{ const v=inp.value.trim(); if(!v){UI.toast('Enter @username','err');return;} setBtn.setAttribute('disabled',''); try{ await (Api as any).channelSetNewOwner(deal.id, v); UI.toast('Saved — now Transfer','ok'); setTimeout(()=>location.reload(),700);} catch(e:any){UI.toast(e.message||'failed','err'); setBtn.removeAttribute('disabled');}});
+      bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`✅ Sotuvchiga to'landi — endi ${chan} uchun yangi ega username ni kiriting (masalan @hamroqulovv). Ubot egalikni o'tkazadi.` }) ]));
+      const inp = UI.h('input', { class:'input', placeholder:"Yangi ega @username" }) as HTMLInputElement;
+      const setBtn = UI.h('button', { class:'btn btn-soft', text:"Yangi egani saqlash" }) as HTMLButtonElement;
+      setBtn.addEventListener('click', async()=>{ const v=inp.value.trim(); if(!v){UI.toast('@username kiriting','err');return;} setBtn.setAttribute('disabled',''); try{ await (Api as any).channelSetNewOwner(deal.id, v); UI.toast("Saqlandi — endi O'tkazish ni bosing",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){UI.toast(e.message||'Xatolik','err'); setBtn.removeAttribute('disabled');}});
       bar.appendChild(inp); bar.appendChild(setBtn);
     } else {
-      bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`New owner set: ${already} — tap Transfer.` }) ]));
-      const goBtn = UI.h('button', { class:'btn btn-primary', text:`🚀 Transfer ${chan} to ${already}` }) as HTMLButtonElement;
-      goBtn.addEventListener('click', async()=>{ goBtn.setAttribute('disabled',''); const o=goBtn.textContent!; goBtn.textContent='Transferring…'; try{ const r:any = await (Api as any).channelTransferToBuyer(deal.id, already); TG.haptic.success(); UI.toast('Transferred to '+already,'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); const m=String(e.message||''); UI.toast(m,'err'); if(m.includes('join')) UI.toast('New owner must join channel first','err'); goBtn.removeAttribute('disabled'); goBtn.textContent=o; }});
+      bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`Yangi ega: ${already} — O'tkazish ni bosing.` }) ]));
+      const goBtn = UI.h('button', { class:'btn btn-primary', text:`🚀 ${chan} ni ${already} ga o'tkazish` }) as HTMLButtonElement;
+      goBtn.addEventListener('click', async()=>{ goBtn.setAttribute('disabled',''); const o=goBtn.textContent!; goBtn.textContent="O'tkazilmoqda…"; try{ const r:any = await (Api as any).channelTransferToBuyer(deal.id, already); TG.haptic.success(); UI.toast(already+" ga o'tkazildi",'ok'); setTimeout(()=>location.reload(),700);} catch(e:any){ TG.haptic.error(); const m=String(e.message||''); UI.toast(m,'err'); if(m.includes('join')) UI.toast("Yangi ega avval kanalga qo'shilishi kerak",'err'); goBtn.removeAttribute('disabled'); goBtn.textContent=o; }});
       bar.appendChild(goBtn);
-      bar.appendChild(UI.h('div', { class:'field-hint', style:'text-align:center', text:'If ubot cannot invite (privacy), ask new owner to join channel first via invite link.' }));
+      bar.appendChild(UI.h('div', { class:'field-hint', style:'text-align:center', text:"Ubot taklif qila olmasa (maxfiylik), yangi egadan avval taklif havola orqali kanalga qo'shilishini so'rang." }));
     }
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
   }
   if (st === 'RELEASED' && isSeller) {
-    const dest = pendingOwner || 'buyer-chosen owner';
-    bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`✅ You were paid — channel ${chan} will be transferred to ${dest} by escrow.` }) ]));
+    const dest = pendingOwner || "xaridor tanlagan ega";
+    bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`✅ Sizga to'landi — ${chan} kanal escrow orqali ${dest} ga o'tkaziladi.` }) ]));
     anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
   }
   // fallback — show channel snapshot
-  bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`Channel ${chan} — status ${st}${verified ? ' ✓ verified' : ''}${escrowAt ? ' · escrow holds' : ''}` }) ]));
+  bar.appendChild(UI.h('div', { class:'banner info' }, [ UI.h('div', { class:'small', text:`${chan} kanal — holat ${st}${verified ? ' ✓ tasdiqlangan' : ''}${escrowAt ? ' · escrow ushlab turibdi' : ''}` }) ]));
   anchor.parentNode!.insertBefore(bar, anchor.nextSibling); return;
 }
 
@@ -618,7 +615,7 @@ async function viewInbox() {
   const view = document.getElementById('view')!;
   view.innerHTML = '';
   const root = UI.h('div', {}, [
-    UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: 'Counterparty requests to join your deals. Approve to show their photo & username — you control who joins.' }) ]),
+    UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: "Sheriklar bitimlaringizga qo'shilish uchun so'rov yuboradi. Rasmi va username ni ko'rib tasdiqlaysiz — kim qo'shilishini siz hal qilasiz." }) ]),
     UI.h('div', { class: 'sk', style: 'height:80px;border-radius:18px' })
   ]);
   view.appendChild(root);
@@ -640,18 +637,18 @@ async function viewInbox() {
     }
   } catch (e: any) {
     root.innerHTML = '';
-    root.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || 'Could not load inbox' }) ]));
+    root.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || 'Inbox yuklanmadi' }) ]));
     return;
   }
 
   root.innerHTML = '';
-  root.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: requests.length ? `${requests.length} pending request(s)` : 'No pending join requests — invite via bot link.' }) ]));
+  root.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: requests.length ? `${requests.length} ta kutilayotgan so'rov` : "Kutilayotgan qo'shilish so'rovlari yo'q — bot havola orqali taklif qiling." }) ]));
 
   if (!requests.length) {
     root.appendChild(UI.h('div', { class: 'empty' }, [
       UI.h('div', { class: 'art', text: '📥' }),
-      UI.h('h3', { text: 'No pending requests' }),
-      UI.h('p', { text: 'Share a bot invite link (t.me) from deal detail. When someone opens it, you will see their photo & username here.' })
+      UI.h('h3', { text: "Kutilayotgan so'rovlar yo'q" }),
+      UI.h('p', { text: "Bitim tafsilotidan bot taklif havolasini (t.me) ulashing. Kimdir ochganda rasmi va username shu yerda ko'rinadi." })
     ]));
     return;
   }
@@ -672,20 +669,20 @@ async function viewInbox() {
           class: 'btn btn-primary',
           onclick: async (e: any) => {
             const btn = e.currentTarget as HTMLButtonElement;
-            btn.setAttribute('disabled',''); btn.textContent='Approving…';
-            try { await Api.approveJoin(deal.id, r.id); TG.haptic.success(); UI.toast('Approved — deal started', 'ok'); viewInbox(); }
-            catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Approve failed','err'); btn.removeAttribute('disabled'); btn.textContent='Approve'; }
+            btn.setAttribute('disabled',''); btn.textContent='Tasdiqlanmoqda…';
+            try { await Api.approveJoin(deal.id, r.id); TG.haptic.success(); UI.toast('Tasdiqlandi — bitim boshlandi', 'ok'); viewInbox(); }
+            catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Tasdiqlanmadi','err'); btn.removeAttribute('disabled'); btn.textContent='Tasdiqlash'; }
           }
-        }, ['Approve']),
+        }, ['Tasdiqlash']),
         UI.h('button', {
           class: 'btn btn-ghost',
           onclick: async (e: any) => {
             const btn = e.currentTarget as HTMLButtonElement;
-            btn.setAttribute('disabled',''); btn.textContent='Rejecting…';
-            try { await Api.rejectJoin(deal.id, r.id); TG.haptic.success(); UI.toast('Rejected','ok'); viewInbox(); }
-            catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Reject failed','err'); btn.removeAttribute('disabled'); btn.textContent='Reject'; }
+            btn.setAttribute('disabled',''); btn.textContent='Rad etilmoqda…';
+            try { await Api.rejectJoin(deal.id, r.id); TG.haptic.success(); UI.toast('Rad etildi','ok'); viewInbox(); }
+            catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Rad etilmadi','err'); btn.removeAttribute('disabled'); btn.textContent='Rad etish'; }
           }
-        }, ['Reject'])
+        }, ['Rad etish'])
       ])
     ]);
     root.appendChild(card);
@@ -705,7 +702,7 @@ function wrapWalletPayForVerification() {
         try {
           const bal = await Api.balance(to).catch(()=>null);
           if (bal && bal.state === 'active') {
-            UI.toast('On-chain verified — balance ' + bal.balanceTon + ' TON', 'ok');
+            UI.toast("Zanjirda tasdiqlandi — balans " + bal.balanceTon + ' TON', 'ok');
             // Optionally refresh deal view if still on detail
             if (location.hash.match(/^#\/deal\/\d+$/)) {
               // trigger soft reload via re-fetch deal
@@ -721,7 +718,7 @@ function wrapWalletPayForVerification() {
         if (tries < 3) setTimeout(poll, 3000 + tries * 1500);
         else if (boc) {
           // show tonviewer tx link if available (tonviewer.com/transaction/<boc> not exact, but address explorer)
-          UI.toast('Payment sent — view on tonviewer.com/' + to.slice(0, 8) + '…', 'ok');
+          UI.toast("To'lov yuborildi — tonviewer.com/" + to.slice(0, 8) + "… da ko'ring", 'ok');
         }
       };
       setTimeout(poll, 2500);
@@ -730,65 +727,30 @@ function wrapWalletPayForVerification() {
   };
 }
 
-function observePaySheetLock() {
-  const sheetRoot = document.getElementById('sheet-root')!;
-  const obs = new MutationObserver(() => {
-    const sheet = sheetRoot.querySelector('.sheet');
-    if (!sheet) return;
-    const title = sheet.querySelector('h3');
-    if (title && title.textContent?.includes('Pay with wallet')) {
-      const input = sheet.querySelector('input.input') as HTMLInputElement;
-      if (input && !input.dataset.locked) {
-        input.dataset.locked = '1';
-        // Lock to exact amount — show warning if edited
-        const origVal = input.value;
-        input.addEventListener('input', () => {
-          const v = parseFloat(String(input.value).replace(',', '.'));
-          const orig = parseFloat(String(origVal).replace(',', '.'));
-          if (isFinite(v) && isFinite(orig) && Math.abs(v - orig) > 0.0001) {
-            input.style.borderColor = 'var(--warn)';
-            input.title = 'Amount must exactly match escrow amount — underpay will not confirm deposit';
-          } else {
-            input.style.borderColor = '';
-            input.title = '';
-          }
-        });
-        // Also add helper text below input
-        const hint = document.createElement('div');
-        hint.className = 'field-hint';
-        hint.style.color = 'var(--warn)';
-        hint.textContent = 'Send exact amount — memo auto-injected. Listener verifies value === escrow amount.';
-        input.parentNode?.appendChild(hint);
-      }
-    }
-  });
-  obs.observe(sheetRoot, { childList: true, subtree: true });
-}
-
 function patchProfile() {
   const viewEl = document.getElementById('view')!;
   const obs = new MutationObserver(() => {
     if (location.hash === '#/profile') {
       const view = document.getElementById('view');
       if (view) {
-        // hide any admin tools entry that legacy injected (look for Admin Tools text)
+        // legacy profilidagi admin qatorini topib bot-only nishon qo'yish ("Admin vositalari" matni bo'yicha)
         Array.from(view.querySelectorAll('.list-item, button, .card')).forEach((el: any) => {
-          if (el.textContent && (el.textContent.includes('Admin Tools') || el.textContent.includes('Admin'))) {
+          if (el.textContent && (el.textContent.includes('Admin vositalari') || el.textContent.includes('Admin'))) {
             const isAdminCard = el.textContent.includes('Admin') && el.textContent.length < 80;
             // Keep admin card but add bot-only badge instead of link
             if (isAdminCard && !el.querySelector('.admin-bot-badge')) {
-              const badge = UI.h('span', { class: 'badge plain', style: 'background:var(--accent-soft);color:var(--accent);margin-left:6px', text: 'bot only' });
+              const badge = UI.h('span', { class: 'badge plain', style: 'background:var(--accent-soft);color:var(--accent);margin-left:6px', text: 'faqat bot' });
               (badge as any).className = 'admin-bot-badge badge plain';
               el.appendChild(badge);
               // disable click
               el.style.opacity = '0.7';
-              el.onclick = () => UI.toast('Admin via bot only — no webapp admin', 'err');
+              el.onclick = () => UI.toast("Admin faqat bot orqali — webapp admin yo'q", 'err');
             }
           }
         });
         // Also hide any #/admin navigation buttons: override onclick
         const adminBtn = Array.from(view.querySelectorAll('button')).find(b => b.textContent?.includes('Admin'));
-        if (adminBtn) adminBtn.addEventListener('click', (e) => { e.preventDefault(); UI.toast('Admin control via bot only', 'err'); }, true);
+        if (adminBtn) adminBtn.addEventListener('click', (e) => { e.preventDefault(); UI.toast('Admin boshqaruv faqat bot orqali', 'err'); }, true);
       }
     }
   });
@@ -805,7 +767,7 @@ async function pollInboxBadge() {
       }
     }
     const tab = document.querySelector('.tab-btn[data-tab="#/home"]');
-    // we keep count on Deals tab or add small dot
+    // Bitimlar tabida inbox soni nishoni
     let badge = document.getElementById('inbox-badge');
     if (count > 0) {
       if (!badge) {
@@ -821,7 +783,7 @@ async function pollInboxBadge() {
 // ---------------- Channels View ----------------
 function viewChannels() {
   setTabbarPatched(true);
-  setTopbarPatched('Channels Studio', { back: () => navBack('#/home') });
+  setTopbarPatched('Kanallar studiyasi', { back: () => navBack('#/home') });
   TG.showBack(() => navBack('#/home'));
   const view = document.getElementById('view')!;
   view.innerHTML = '';
@@ -829,8 +791,8 @@ function viewChannels() {
   const rightsState: Record<string, boolean> = { banUsers: true, inviteUsers: true, pinMessages: true };
   let currentInfo: any = null;
 
-  const idInput = UI.h('input', { class: 'input', placeholder: '@username or -100… or channel ID', type: 'text' }) as HTMLInputElement;
-  const statusEl = UI.h('div', { class: 'small muted', style: 'margin-top:8px', text: 'Paste @username, numeric ID, or t.me link' });
+  const idInput = UI.h('input', { class: 'input', placeholder: '@username yoki -100… yoki kanal ID', type: 'text' }) as HTMLInputElement;
+  const statusEl = UI.h('div', { class: 'small muted', style: 'margin-top:8px', text: '@username, raqamli ID yoki t.me havola kiriting' });
   const resultBox = UI.h('div', { style: 'margin-top:16px' });
 
   const renderRights = () => {
@@ -852,24 +814,24 @@ function viewChannels() {
 
   async function loadInfo() {
     const raw = idInput.value.trim();
-    if (!raw) { UI.toast('Enter channel ID','err'); return; }
+    if (!raw) { UI.toast('Kanal ID kiriting','err'); return; }
     let cid = raw;
     // normalize @ -> strip, t.me link -> username
     if (cid.startsWith('https://t.me/') || cid.startsWith('t.me/')) {
       try { const u = new URL(cid.startsWith('http') ? cid : 'https://' + cid); cid = '@' + u.pathname.split('/')[1]; } catch {}
     }
-    statusEl.textContent = 'Loading…';
+    statusEl.textContent = 'Yuklanmoqda…';
     resultBox.innerHTML = '';
     adminListBox.innerHTML = '';
     actionRow.innerHTML = '';
     try {
       const info = await Api.ubot.info(cid);
       currentInfo = info;
-      statusEl.textContent = 'Channel found';
+      statusEl.textContent = 'Kanal topildi';
       const card = UI.h('div', { class: 'studio-card' }, [
         UI.h('div', { class: 'studio-head' }, [
           UI.h('div', { class: 'li-icon', text: '📢' }),
-          UI.h('div', {}, [ UI.h('b', { text: info.title || cid }), UI.h('span', { text: `ID ${info.id || cid} · ${info.participants_count || '—'} members` }) ])
+          UI.h('div', {}, [ UI.h('b', { text: info.title || cid }), UI.h('span', { text: `ID ${info.id || cid} · ${info.participants_count || '—'} a'zo` }) ])
         ]),
         UI.h('div', { class: 'small muted', text: info.username ? '@' + info.username : cid }),
       ]);
@@ -879,7 +841,7 @@ function viewChannels() {
       try {
         const admins = await Api.ubot.admins(cid);
         const list = Array.isArray(admins) ? admins : admins.admins || [];
-        adminListBox.appendChild(UI.h('div', { class: 'section-title', text: `Admins (${list.length})` }));
+        adminListBox.appendChild(UI.h('div', { class: 'section-title', text: `Adminlar (${list.length})` }));
         list.slice(0, 10).forEach((a: any) => {
           adminListBox.appendChild(UI.h('div', { class: 'studio-card', style: 'padding:10px;display:flex;justify-content:space-between' }, [
             UI.h('span', { text: `${a.user?.first_name || a.user?.username || 'ID ' + a.userId}` }),
@@ -889,99 +851,99 @@ function viewChannels() {
       } catch {}
 
       // Actions
-      const userIdInput = UI.h('input', { class: 'input', placeholder: 'Target Telegram ID (numeric)', type: 'text', inputmode: 'numeric' }) as HTMLInputElement;
-      const rankInput = UI.h('input', { class: 'input', placeholder: 'Rank (optional, ≤32 chars)', maxlength: '32' }) as HTMLInputElement;
-      actionRow.appendChild(UI.h('div', { class: 'field', style: 'width:100%' }, [ UI.h('label', { text: 'Target User ID' }), userIdInput ]));
-      actionRow.appendChild(UI.h('div', { class: 'field', style: 'width:100%' }, [ UI.h('label', { text: 'Rank' }), rankInput ]));
+      const userIdInput = UI.h('input', { class: 'input', placeholder: 'Maqsad Telegram ID (raqamli)', type: 'text', inputmode: 'numeric' }) as HTMLInputElement;
+      const rankInput = UI.h('input', { class: 'input', placeholder: 'Unvon (ixtiyoriy, ≤32 belgi)', maxlength: '32' }) as HTMLInputElement;
+      actionRow.appendChild(UI.h('div', { class: 'field', style: 'width:100%' }, [ UI.h('label', { text: 'Maqsad foydalanuvchi ID' }), userIdInput ]));
+      actionRow.appendChild(UI.h('div', { class: 'field', style: 'width:100%' }, [ UI.h('label', { text: 'Unvon' }), rankInput ]));
       actionRow.appendChild(rightsGrid);
 
       const mkBtn = (label: string, cls: string, fn: (uid: string, rank: string)=>Promise<any>) => UI.h('button', {
         class: 'btn ' + cls,
         onclick: async (e: any) => {
           const uid = userIdInput.value.trim();
-          if (!uid || !/^\d+$/.test(uid)) { UI.toast('Enter numeric Telegram ID','err'); return; }
+          if (!uid || !/^\d+$/.test(uid)) { UI.toast('Raqamli Telegram ID kiriting','err'); return; }
           const rank = rankInput.value.trim();
           const btn = e.currentTarget as HTMLButtonElement;
           const orig = btn.textContent;
-          btn.setAttribute('disabled',''); btn.textContent='Working…';
-          try { await fn(uid, rank); TG.haptic.success(); UI.toast(label + ' ok','ok'); }
-          catch (err: any) { TG.haptic.error(); UI.toast(err.message || label + ' failed','err'); }
+          btn.setAttribute('disabled',''); btn.textContent='Bajarilmoqda…';
+          try { await fn(uid, rank); TG.haptic.success(); UI.toast(label + ' bajarildi','ok'); }
+          catch (err: any) { TG.haptic.error(); UI.toast(err.message || label + ' bajarilmadi','err'); }
           finally { btn.removeAttribute('disabled'); if (orig) btn.textContent = orig; }
         }
       }, [label]);
 
       const btnRow2 = UI.h('div', { class: 'btn-row' }, [
-        mkBtn('Promote', 'btn-soft', (uid, rank) => Api.ubot.promote(cid, { userId: Number(uid), rights: rightsState, rank })),
-        mkBtn('Invite', 'btn-ghost', (uid) => Api.ubot.invite(cid, { userId: Number(uid) }))
+        mkBtn('Admin qilish', 'btn-soft', (uid, rank) => Api.ubot.promote(cid, { userId: Number(uid), rights: rightsState, rank })),
+        mkBtn('Taklif qilish', 'btn-ghost', (uid) => Api.ubot.invite(cid, { userId: Number(uid) }))
       ]);
       const btnRow3 = UI.h('div', { class: 'btn-row' }, [
-        mkBtn('Demote', 'btn-ghost', async (uid) => Api.ubot.promote(cid, { userId: Number(uid), rights: {}, rank: '' })),
+        mkBtn('Adminlikdan olish', 'btn-ghost', async (uid) => Api.ubot.promote(cid, { userId: Number(uid), rights: {}, rank: '' })),
       ]);
       const transferBtn = UI.h('button', {
         class: 'btn btn-primary',
         onclick: async (e: any) => {
           const uid = userIdInput.value.trim();
-          if (!uid) { UI.toast('Enter target ID','err'); return; }
-          const pw = prompt('Transfer ownership requires 2FA password (if enabled) — enter or leave empty:') || undefined;
-          const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent='Transferring…';
-          try { await Api.ubot.transfer(cid, { newOwnerId: Number(uid), password: pw }); TG.haptic.success(); UI.toast('Transferred','ok'); }
-          catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Transfer failed','err'); }
+          if (!uid) { UI.toast('Maqsad ID kiriting','err'); return; }
+          const pw = prompt("Egalikni topshirish 2FA parol talab qiladi (agar yoqilgan bo'lsa) — kiriting yoki bo'sh qoldiring:") || undefined;
+          const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent="O'tkazilmoqda…";
+          try { await Api.ubot.transfer(cid, { newOwnerId: Number(uid), password: pw }); TG.haptic.success(); UI.toast("O'tkazildi",'ok'); }
+          catch (err: any) { TG.haptic.error(); UI.toast(err.message || "O'tkazilmadi",'err'); }
           finally { btn.removeAttribute('disabled'); btn.textContent=orig!; }
         }
-      }, ['Transfer Ownership']);
+      }, ["Egalikni topshirish"]);
       const takeoverBtn = UI.h('button', {
         class: 'btn btn-primary',
         style: 'background:var(--accent-grad);margin-top:8px',
         onclick: async (e: any) => {
           const uid = userIdInput.value.trim();
-          if (!uid) { UI.toast('Enter new owner ID','err'); return; }
+          if (!uid) { UI.toast('Yangi ega ID kiriting','err'); return; }
           const rank = rankInput.value.trim();
-          const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent='Taking over… (promote→transfer)';
-          try { await Api.ubot.takeover(cid, { newOwnerId: Number(uid), rights: rightsState, rank }); TG.haptic.success(); UI.toast('Takeover done','ok'); }
-          catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Takeover failed — check FRESH_CHANGE 24h breaker','err'); }
+          const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent='Egallanmoqda… (admin→topshirish)';
+          try { await Api.ubot.takeover(cid, { newOwnerId: Number(uid), rights: rightsState, rank }); TG.haptic.success(); UI.toast('Egallandi','ok'); }
+          catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Egallanmadi — 24 soatlik FRESH_CHANGE himoyasini tekshiring','err'); }
           finally { btn.removeAttribute('disabled'); btn.textContent=orig!; }
         }
-      }, ['⚡ Takeover (one-tap)']);
+      }, ['⚡ Egallash (bir bosishda)']);
 
       resultBox.appendChild(UI.h('div', { style: 'margin-top:12px' }, [ userIdInput.parentElement!, rankInput.parentElement!, rightsGrid, btnRow2, btnRow3, transferBtn, takeoverBtn ]));
-      resultBox.appendChild(UI.h('div', { class: 'banner info', style: 'margin-top:12px' }, [ UI.h('div', { class: 'small', text: 'Takeover = promote (1.2-2.2s human delay) → 2.5s → transfer via SRP 2FA. Respects 24h FRESH_CHANGE_ADMINS_FORBIDDEN breaker & 1.3s global rate.' }) ]));
+      resultBox.appendChild(UI.h('div', { class: 'banner info', style: 'margin-top:12px' }, [ UI.h('div', { class: 'small', text: 'Egallash = admin qilish (1.2-2.2s insoniy kechikish) → 2.5s → SRP 2FA orqali topshirish. 24 soatlik FRESH_CHANGE_ADMINS_FORBIDDEN himoyasi va 1.3s global limit hisobga olinadi.' }) ]));
     } catch (e: any) {
       statusEl.textContent = '';
-      UI.toast(e.message || 'Channel not found','err');
-      resultBox.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || 'Not found or not admin' }) ]));
+      UI.toast(e.message || 'Kanal topilmadi','err');
+      resultBox.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || 'Topilmadi yoki admin emassiz' }) ]));
     }
   }
 
-  const searchBtn = UI.h('button', { class: 'btn btn-primary', onclick: loadInfo }, ['Load Channel']);
+  const searchBtn = UI.h('button', { class: 'btn btn-primary', onclick: loadInfo }, ['Kanalni yuklash']);
   const groupBox = UI.h('div', { class: 'card', style: 'margin-top:16px' }, [
-    UI.h('b', { text: 'Groups — migrate basic → supergroup' }),
-    UI.h('p', { class: 'small muted', style: 'margin-top:4px', text: 'Basic groups must be migrated before admin transfer. Paste group ID and check.' }),
+    UI.h('b', { text: "Guruhlar — oddiy → superguruhga o'tkazish" }),
+    UI.h('p', { class: 'small muted', style: 'margin-top:4px', text: "Oddiy guruhlarni admin topshirishdan oldin ko'chirish kerak. Guruh ID kiritib tekshiring." }),
     UI.h('div', { class: 'search-row' }, [
-      UI.h('input', { class: 'input', placeholder: 'Group ID or @username', id: 'group-id' } as any),
+      UI.h('input', { class: 'input', placeholder: 'Guruh ID yoki @username', id: 'group-id' } as any),
       UI.h('button', {
         class: 'btn btn-soft',
         style: 'width:auto;padding:10px 14px',
         onclick: async () => {
           const inp = document.getElementById('group-id') as HTMLInputElement;
           const gid = inp?.value.trim();
-          if (!gid) { UI.toast('Enter group ID','err'); return; }
+          if (!gid) { UI.toast('Guruh ID kiriting','err'); return; }
           try {
             const r: any = await Api.ubot.groupIsBasic(gid);
             if (r.isBasic) {
-              UI.toast('Basic group — migrating…','ok');
+              UI.toast("Oddiy guruh — ko'chirilmoqda…",'ok');
               const m: any = await Api.ubot.groupMigrate(gid);
-              UI.toast('Migrated → channel ID ' + (m.channelId || m.id),'ok');
-            } else UI.toast('Already supergroup','ok');
-          } catch (err: any) { UI.toast(err.message || 'Migrate failed','err'); }
+              UI.toast("Ko'chirildi → kanal ID " + (m.channelId || m.id),'ok');
+            } else UI.toast('Allaqachon superguruh','ok');
+          } catch (err: any) { UI.toast(err.message || "Ko'chirilmadi",'err'); }
         }
-      }, ['Migrate'])
+      }, ["Ko'chirish"])
     ])
   ]);
 
   const root = UI.h('div', {}, [
-    UI.h('div', { class: 'hero' }, [ UI.h('h1', { text: 'Channels Studio' }), UI.h('p', { text: 'Take over channels & groups — promote, invite, transfer ownership via encrypted ubot.' }) ]),
+    UI.h('div', { class: 'hero' }, [ UI.h('h1', { text: 'Kanallar studiyasi' }), UI.h('p', { text: "Kanallar va guruhlarni egallash — shifrlangan ubot orqali admin qilish, taklif qilish, egalikni o'tkazish." }) ]),
     UI.h('div', { class: 'card' }, [
-      UI.h('label', { text: 'Channel / Group' }),
+      UI.h('label', { text: 'Kanal / Guruh' }),
       idInput,
       UI.h('div', { style: 'height:8px' }),
       searchBtn,
@@ -998,16 +960,16 @@ function viewChannels() {
 // ---------------- Trade View ----------------
 function viewTrade() {
   setTabbarPatched(true);
-  setTopbarPatched('Trade Studio', { back: () => navBack('#/home') });
+  setTopbarPatched('Savdo studiyasi', { back: () => navBack('#/home') });
   TG.showBack(() => navBack('#/home'));
   const view = document.getElementById('view')!;
   view.innerHTML = '';
   let mode: 'sell' | 'buy' | 'my' = 'sell';
 
   const tabs = UI.h('div', { class: 'trade-tabs', role: 'tablist' }, [
-    UI.h('button', { class: 'active', onclick() { mode='sell'; update(); (tabs.children[0] as any).classList.add('active'); Array.from(tabs.children).slice(1).forEach(c=>c.classList.remove('active')); } }, ['Sell']),
-    UI.h('button', { onclick() { mode='buy'; update(); Array.from(tabs.children).forEach((c,i)=> { if(i===1) c.classList.add('active'); else c.classList.remove('active'); }); } }, ['Buy']),
-    UI.h('button', { onclick() { mode='my'; update(); Array.from(tabs.children).forEach((c,i)=> { if(i===2) c.classList.add('active'); else c.classList.remove('active'); }); } }, ['My Trades'])
+    UI.h('button', { class: 'active', onclick() { mode='sell'; update(); (tabs.children[0] as any).classList.add('active'); Array.from(tabs.children).slice(1).forEach(c=>c.classList.remove('active')); } }, ['Sotish']),
+    UI.h('button', { onclick() { mode='buy'; update(); Array.from(tabs.children).forEach((c,i)=> { if(i===1) c.classList.add('active'); else c.classList.remove('active'); }); } }, ['Sotib olish']),
+    UI.h('button', { onclick() { mode='my'; update(); Array.from(tabs.children).forEach((c,i)=> { if(i===2) c.classList.add('active'); else c.classList.remove('active'); }); } }, ['Bitimlarim'])
   ]);
   const body = UI.h('div', {});
 
@@ -1019,8 +981,8 @@ function viewTrade() {
   }
 
   function renderSell(): HTMLElement {
-    const sessionInput = UI.h('textarea', { class: 'input', placeholder: 'Paste StringSession (1… ) or phone:+998...', rows: '3', style: 'min-height:88px' }) as HTMLTextAreaElement;
-    const phoneInput = UI.h('input', { class: 'input', placeholder: 'Phone +998... (E.164) — alternative to session', type: 'text' }) as HTMLInputElement;
+    const sessionInput = UI.h('textarea', { class: 'input', placeholder: 'StringSession kiriting (1… ) yoki telefon:+998...', rows: '3', style: 'min-height:88px' }) as HTMLTextAreaElement;
+    const phoneInput = UI.h('input', { class: 'input', placeholder: 'Telefon +998... (E.164) — sessiyaga muqobil', type: 'text' }) as HTMLInputElement;
     const statusEl = UI.h('div', { class: 'small muted', style: 'margin-top:8px' });
 
     const createBtn = UI.h('button', {
@@ -1028,8 +990,8 @@ function viewTrade() {
       onclick: async (e: any) => {
         const sess = sessionInput.value.trim();
         const phone = phoneInput.value.trim();
-        if (!sess && !phone) { UI.toast('Paste session or phone','err'); return; }
-        const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent='Creating…';
+        if (!sess && !phone) { UI.toast('Sessiya yoki telefon kiriting','err'); return; }
+        const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent='Yaratilmoqda…';
         try {
           let res: any;
           if (sess && sess.length > 50) {
@@ -1037,46 +999,46 @@ function viewTrade() {
           } else if (phone) {
             // phone path via utrade — server will send code to phone
             res = await Api.utrade.createTrade({ phone });
-          } else { throw new Error('Session too short'); }
+          } else { throw new Error('Sessiya juda qisqa'); }
           TG.haptic.success();
           const id = res.trade?.id || res.id || res.tradeId;
-          statusEl.textContent = 'Trade #' + id + ' created — status: ' + (res.trade?.status || res.status || 'SELLER_REMOVED');
-          UI.toast('Trade created #' + id, 'ok');
-        } catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Create failed','err'); }
+          statusEl.textContent = "Bitim #" + id + ' yaratildi — holat: ' + (res.trade?.status || res.status || 'SELLER_REMOVED');
+          UI.toast("Bitim yaratildi #" + id, 'ok');
+        } catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Yaratilmadi','err'); }
         finally { btn.removeAttribute('disabled'); btn.textContent=orig!; }
       }
-    }, ['Create Sell Trade']);
+    }, ['Sotuv bitimini yaratish']);
 
     const setPhoneRow = UI.h('div', { class: 'search-row', style: 'margin-top:16px' }, [
-      UI.h('input', { class: 'input', placeholder: 'Trade ID', id: 'sell-trade-id', style: 'max-width:120px' } as any),
-      UI.h('input', { class: 'input', placeholder: 'Phone', id: 'sell-phone' } as any),
+      UI.h('input', { class: 'input', placeholder: 'Bitim ID', id: 'sell-trade-id', style: 'max-width:120px' } as any),
+      UI.h('input', { class: 'input', placeholder: 'Telefon', id: 'sell-phone' } as any),
       UI.h('button', {
         class: 'btn btn-soft', style: 'width:auto',
         onclick: async () => {
           const tid = (document.getElementById('sell-trade-id') as HTMLInputElement)?.value.trim();
           const ph = (document.getElementById('sell-phone') as HTMLInputElement)?.value.trim();
-          if (!tid || !ph) { UI.toast('ID + phone required','err'); return; }
-          try { await Api.utrade.setPhone(tid, ph); UI.toast('Phone set','ok'); } catch (e: any) { UI.toast(e.message || 'Failed','err'); }
+          if (!tid || !ph) { UI.toast('ID + telefon shart','err'); return; }
+          try { await Api.utrade.setPhone(tid, ph); UI.toast("Telefon saqlandi",'ok'); } catch (e: any) { UI.toast(e.message || 'Xatolik','err'); }
         }
-      }, ['Set Phone'])
+      }, ['Telefonni saqlash'])
     ]);
 
     const confirmRow = UI.h('div', { class: 'search-row' }, [
-      UI.h('input', { class: 'input', placeholder: 'Trade ID to confirm payment', id: 'sell-confirm-id', style: 'max-width:160px' } as any),
+      UI.h('input', { class: 'input', placeholder: "To'lovni tasdiqlash uchun bitim ID", id: 'sell-confirm-id', style: 'max-width:160px' } as any),
       UI.h('button', {
         class: 'btn btn-primary', style: 'width:auto',
         onclick: async () => {
           const tid = (document.getElementById('sell-confirm-id') as HTMLInputElement)?.value.trim();
-          if (!tid) { UI.toast('Trade ID required','err'); return; }
-          try { await Api.utrade.confirmPayment(tid); UI.toast('Payment confirmed — buyer will receive phone','ok'); } catch (e: any) { UI.toast(e.message || 'Failed','err'); }
+          if (!tid) { UI.toast('Bitim ID shart','err'); return; }
+          try { await Api.utrade.confirmPayment(tid); UI.toast("To'lov tasdiqlandi — xaridor telefonni oladi",'ok'); } catch (e: any) { UI.toast(e.message || 'Xatolik','err'); }
         }
-      }, ['✅ Payment Received'])
+      }, ["✅ To'lov qabul qilindi"])
     ]);
 
     return UI.h('div', {}, [
       UI.h('div', { class: 'card' }, [
-        UI.h('b', { text: 'Sell Account — StringSession or Phone' }),
-        UI.h('p', { class: 'small muted', style: 'margin-top:4px', text: 'Paste StringSession (removes other sessions). Or use phone:+E.164 to receive login code via Telegram.' }),
+        UI.h('b', { text: 'Hisob sotish — StringSession yoki Telefon' }),
+        UI.h('p', { class: 'small muted', style: 'margin-top:4px', text: "StringSession kiriting (boshqa sessiyalar o'chiriladi). Yoki telefon:+E.164 orqali Telegram login kodi olinadi." }),
         UI.h('div', { style: 'height:8px' }),
         sessionInput,
         UI.h('div', { style: 'height:8px' }),
@@ -1085,33 +1047,33 @@ function viewTrade() {
         createBtn,
         statusEl
       ]),
-      UI.h('div', { class: 'card' }, [ UI.h('b', { text: 'After creation' }), UI.h('p', { class: 'small muted', text: 'Set buyer & phone separately, then confirm payment when buyer paid outside bot (TON/USDT).' }), setPhoneRow, confirmRow ])
+      UI.h('div', { class: 'card' }, [ UI.h('b', { text: 'Yaratgandan keyin' }), UI.h('p', { class: 'small muted', text: "Xaridor va telefonni alohida kiriting, xaridor botdan tashqari (TON/USDT) to'lagach to'lovni tasdiqlang." }), setPhoneRow, confirmRow ])
     ]);
   }
 
   function renderBuy(): HTMLElement {
-    const tradeIdInput = UI.h('input', { class: 'input', placeholder: 'Trade ID (from seller)', type: 'text', inputmode: 'numeric' }) as HTMLInputElement;
+    const tradeIdInput = UI.h('input', { class: 'input', placeholder: 'Bitim ID (sotuvchidan)', type: 'text', inputmode: 'numeric' }) as HTMLInputElement;
     const codeInput = UI.h('input', { class: 'input otp-input', placeholder: '— — — — — —', maxlength: '6', inputmode: 'numeric' }) as HTMLInputElement;
-    const passInput = UI.h('input', { class: 'input', placeholder: '2FA password if required (2fa:password)', type: 'password' }) as HTMLInputElement;
+    const passInput = UI.h('input', { class: 'input', placeholder: "2FA parol agar kerak bo'lsa (2fa:parol)", type: 'password' }) as HTMLInputElement;
     const statusEl = UI.h('div', { class: 'small muted', style: 'margin-top:10px' });
 
     const bindBtn = UI.h('button', {
       class: 'btn btn-soft',
       onclick: async (e: any) => {
         const tid = tradeIdInput.value.trim();
-        if (!tid) { UI.toast('Enter Trade ID','err'); return; }
-        const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent='Binding…';
+        if (!tid) { UI.toast('Bitim ID kiriting','err'); return; }
+        const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent="Bog'lanmoqda…";
         try {
           const t = await Api.utrade.trade(tid);
           // try to bind buyer implicitly via backend — if trade has no buyer, backend will bind on buy
           // attempt buy flow: call trade to trigger bind if needed
           await fetch('/api/utrade/trades/' + tid + '/buy', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-telegram-user-id': String(TG.user().id) } }).catch(()=>{});
-          statusEl.textContent = 'Trade #' + tid + ' — phone ' + (t.phone ? (t.phone.slice(0,6)+'****') : 'shared soon') + ' — enter code sent to Telegram.';
-          UI.toast('Bound — check Telegram for login code','ok');
-        } catch (err: any) { UI.toast(err.message || 'Bind failed','err'); }
+          statusEl.textContent = "Bitim #" + tid + ' — telefon ' + (t.phone ? (t.phone.slice(0,6)+'****') : 'tez orada ulashiladi') + ' — Telegramga kelgan kodni kiriting.';
+          UI.toast("Bog'landi — Telegramga kelgan login kodni tekshiring",'ok');
+        } catch (err: any) { UI.toast(err.message || "Bog'lanmadi",'err'); }
         finally { btn.removeAttribute('disabled'); btn.textContent=orig!; }
       }
-    }, ['Bind as Buyer']);
+    }, ["Xaridor sifatida bog'lash"]);
 
     const codeBtn = UI.h('button', {
       class: 'btn btn-primary',
@@ -1119,33 +1081,33 @@ function viewTrade() {
         const tid = tradeIdInput.value.trim();
         const code = codeInput.value.trim();
         const pw = passInput.value.trim() || undefined;
-        if (!tid || !code) { UI.toast('Trade ID + code required','err'); return; }
-        if (!/^\d{5,6}$/.test(code) && !pw) { UI.toast('Enter 5-6 digit code','err'); return; }
-        const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent='Verifying…';
+        if (!tid || !code) { UI.toast('Bitim ID + kod shart','err'); return; }
+        if (!/^\d{5,6}$/.test(code) && !pw) { UI.toast('5-6 xonali kod kiriting','err'); return; }
+        const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent='Tekshirilmoqda…';
         try {
           await Api.utrade.submitCode(tid, code, pw);
           TG.haptic.success();
-          UI.toast('Login successful — session handed over, seller logged out','ok');
-          statusEl.textContent = '✓ Completed — new session in your account.';
+          UI.toast("Kirish muvaffaqiyatli — sessiya topshirildi, sotuvchi chiqarildi",'ok');
+          statusEl.textContent = '✓ Yakunlandi — yangi sessiya hisobingizda.';
         } catch (err: any) {
           TG.haptic.error();
-          const m = err.message || 'Invalid code';
-          if (m.includes('2fa')) statusEl.textContent = '2FA required — enter password prefixed 2fa:';
+          const m = err.message || "Kod noto'g'ri";
+          if (m.includes('2fa')) statusEl.textContent = "2FA kerak — parolni 2fa: prefiksi bilan kiriting";
           UI.toast(m,'err');
         } finally { btn.removeAttribute('disabled'); btn.textContent=orig!; }
       }
-    }, ['Submit Code']);
+    }, ['Kodni yuborish']);
 
     return UI.h('div', {}, [
       UI.h('div', { class: 'card' }, [
-        UI.h('b', { text: 'Buy Account — enter code from Telegram' }),
-        UI.h('p', { class: 'small muted', style: 'margin-top:4px', text: 'Seller shared phone. Telegram sends login code to that number — enter it here to claim the account. Seller session is auto-logged out.' }),
+        UI.h('b', { text: 'Hisob sotib olish — Telegramdan kelgan kodni kiriting' }),
+        UI.h('p', { class: 'small muted', style: 'margin-top:4px', text: "Sotuvchi telefonni ulashdi. Telegram shu raqamga login kod yuboradi — hisobni olish uchun shu yerda kiriting. Sotuvchi sessiyasi avtomatik yopiladi." }),
         UI.h('div', { style: 'height:10px' }),
         tradeIdInput,
         UI.h('div', { style: 'height:8px' }),
         bindBtn,
         UI.h('div', { style: 'height:16px' }),
-        UI.h('label', { text: 'Login code (5-6 digits)' }),
+        UI.h('label', { text: 'Login kod (5-6 xona)' }),
         codeInput,
         UI.h('div', { style: 'height:8px' }),
         passInput,
@@ -1165,8 +1127,8 @@ function viewTrade() {
       if (!trades.length) {
         container.appendChild(UI.h('div', { class: 'empty' }, [
           UI.h('div', { class: 'art', text: '🛒' }),
-          UI.h('h3', { text: 'No account trades yet' }),
-          UI.h('p', { text: 'Create a Sell trade with session/phone, or Buy with a Trade ID from seller.' })
+          UI.h('h3', { text: "Hozircha hisob savdolari yo'q" }),
+          UI.h('p', { text: "Sessiya/telefon bilan Sotish bitimi yarating yoki sotuvchidan olingan Bitim ID bilan Sotib oling." })
         ]));
         return;
       }
@@ -1178,17 +1140,17 @@ function viewTrade() {
             UI.h('b', { text: '#' + t.id + ' · ' + st }),
             UI.h('span', { class: 'badge ' + cls, text: st, style: 'margin-left:auto' })
           ]),
-          UI.h('div', { class: 'small muted', style: 'margin-top:4px', text: `Phone ${t.phone ? t.phone.slice(0,6)+'****' : '—'} · ${UI.timeAgo(t.created_at)}` }),
+          UI.h('div', { class: 'small muted', style: 'margin-top:4px', text: `Telefon ${t.phone ? t.phone.slice(0,6)+'****' : '—'} · ${UI.timeAgo(t.created_at)}` }),
         ]));
       });
     }).catch((e: any) => {
       container.innerHTML = '';
-      container.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || 'Could not load trades' }) ]));
+      container.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || 'Bitimlar yuklanmadi' }) ]));
     });
   }
 
   const root = UI.h('div', {}, [
-    UI.h('div', { class: 'hero' }, [ UI.h('h1', { text: 'Trade Studio' }), UI.h('p', { text: 'Account sale escrow — StringSession handoff with auto kick & logout.' }) ]),
+    UI.h('div', { class: 'hero' }, [ UI.h('h1', { text: 'Savdo studiyasi' }), UI.h('p', { text: "Hisob savdosi escrow — avtomatik chiqarish va yopish bilan StringSession topshirish." }) ]),
     tabs,
     body
   ]);
