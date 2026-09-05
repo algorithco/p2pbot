@@ -1,31 +1,34 @@
 // src/services/notificationService.ts
 import { db } from '../db/queries';
-import { getBot } from '../bot/bot';
-import { config } from '../config';
 import logger from '../logger';
 
-/** Persist a notification row and best-effort deliver it via the running bot. */
+/** Persist a notification row and best-effort deliver it via the notify hub. */
 export async function saveAndNotify(chatId: number, message: string) {
-  await db.query(
-    'INSERT INTO notifications (chat_id, message) VALUES ($1,$2)',
-    [chatId, message]
-  );
-  const bot = getBot();
-  if (bot) {
-    await bot.api.sendMessage(chatId, message);
+  try {
+    await db.query('INSERT INTO notifications (chat_id, message) VALUES ($1,$2)', [chatId, String(message)]);
+  } catch (e) {
+    logger.warn('could not persist notification', e);
+  }
+  try {
+    const notify = await import('../bot/notify');
+    // Generic party notice via hub (UZBEK latin, short).
+    await notify.adminDecisionToParty(Number(chatId), { id: 0, amount: 0, asset: 'TON' }, String(message).slice(0, 200));
+  } catch (e) {
+    logger.warn('saveAndNotify hub send failed', e);
   }
 }
 
-/** Notify admins; safe to call fire-and-forget. Resolves silently without a bot. */
+/** Notify admins via the notify hub; safe to call fire-and-forget. */
 export async function alertAdmins(message: string) {
-  const bot = getBot();
-  if (!bot) return;
-  const botRef = bot;
-  for (const adminId of config.adminTelegramIds) {
-    try {
-      await botRef.api.sendMessage(adminId, `⚠️ ADMIN ALERT:\n${message}`);
-    } catch (err) {
-      logger.warn(`Could not notify admin ${adminId}`, err);
-    }
+  try {
+    const notify = await import('../bot/notify');
+    await notify.unknownDepositToAdmins({
+      amount: '',
+      asset: '',
+      address: 'admin',
+      memo: String(message).slice(0, 300),
+    });
+  } catch (err) {
+    logger.warn('alertAdmins hub send failed', err);
   }
 }
