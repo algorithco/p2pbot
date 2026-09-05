@@ -2,9 +2,6 @@ import { Bot } from 'grammy';
 import { config } from '../config';
 import logger from '../logger';
 import { registerCommands } from './commands/start';
-import { registerNewDeal } from './commands/newdeal';
-import { registerStatus } from './commands/status';
-import { registerConfirm } from './commands/confirm';
 import { registerAdminCommands } from './commands/admin';
 
 let bot: Bot | null = null;
@@ -27,9 +24,6 @@ export async function startBot(): Promise<Bot> {
   });
 
   registerCommands(b);
-  registerNewDeal(b);
-  registerStatus(b);
-  registerConfirm(b);
   registerAdminCommands(b);
 
   // Global error handler — log but keep polling alive
@@ -38,17 +32,10 @@ export async function startBot(): Promise<Bot> {
   });
 
   await b.api.setMyCommands([
-    { command: 'start', description: '🏠 Main menu — welcome & actions' },
-    { command: 'menu', description: '🏠 Open main menu' },
-    { command: 'help', description: '📖 Commands guide & usage' },
-    { command: 'about', description: '✨ About TonEscrow' },
-    { command: 'newdeal', description: '➕ Create a new escrow deal' },
-    { command: 'status', description: '📊 Check deal status by ID' },
-    { command: 'confirm', description: '✅ Confirm your side of a deal' },
-    { command: 'deals', description: '📋 My last deals' },
-    { command: 'admin_release', description: '👑 Admin: release deal funds' },
-    { command: 'admin_refund', description: '👑 Admin: refund deal funds' },
-    { command: 'admin_set_fiat_sent', description: '👑 Admin: mark fiat as sent' },
+    { command: 'start', description: 'Ilovani ochish' },
+    { command: 'admin_release', description: 'Admin: pulni chiqarish' },
+    { command: 'admin_refund', description: 'Admin: pulni qaytarish' },
+    { command: 'disputes', description: 'Admin: nizolar' },
   ]);
 
   if (config.webappUrl) {
@@ -56,7 +43,7 @@ export async function startBot(): Promise<Bot> {
       await b.api.setChatMenuButton({
         menu_button: {
           type: 'web_app',
-          text: '🚀 Open Escrow',
+          text: 'Ilovani ochish',
           web_app: { url: config.webappUrl },
         },
       });
