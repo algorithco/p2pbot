@@ -733,6 +733,11 @@ body[data-theme-mode="light"] .toast { background: #1d2733; color: #fff; }
 .wallet-pill:active { transform: scale(.96); }
 .wallet-pill.connected { border-color: var(--success); color: var(--success); }
 
+/* ---------------- One-tap pay ---------------- */
+.pay-big { box-shadow: 0 10px 26px rgba(38, 108, 217, .5); }
+.pay-spinner { display: flex; justify-content: center; padding-top: 6px; }
+.pay-spinner svg { animation: spin .9s linear infinite; color: var(--accent); }
+
 @media (min-width: 480px) {
   body { font-size: 15.5px; }
   .deal-head .amt { font-size: 34px; }

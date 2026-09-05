@@ -106,6 +106,9 @@ export const Api = {
     if (token) path += '?token=' + encodeURIComponent(token);
     return request('GET', path);
   },
+  recheckDeal(dealId: number | string): Promise<{ status: string }> {
+    return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/recheck', {});
+  },
   confirmDeal(dealId: number | string): Promise<any> {
     // legacy alias — prefer approveDeal
     return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/approve', {}).catch((e: any) => {

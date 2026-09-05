@@ -820,6 +820,11 @@ body[data-theme-mode="light"] .toast { background: #1d2733; color: #fff; }
   display: flex; gap: 10px; margin: 14px 0;
 }
 .confirm-bar .btn { flex: 1; }
+
+/* ---------------- One-tap pay ---------------- */
+.pay-big { box-shadow: var(--shadow-fab); }
+.pay-spinner { display: flex; justify-content: center; padding-top: 6px; }
+.pay-spinner svg { animation: spin .9s linear infinite; color: var(--accent); }
 .deal-head-accent {
   background: linear-gradient(180deg, rgba(51,144,236,0.12), transparent);
   border: 1px solid var(--border);

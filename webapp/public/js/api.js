@@ -67,10 +67,15 @@
   window.Api = {
     ApiError: ApiError,
 
-    /** GET /api/info -> { adminTelegramIds: [] } */
+    /** GET /api/info -> { adminTelegramIds, feeBps, paymentAddress, network } */
     info: function () {
       return request('GET', '/api/info').then(function (d) {
-        return { adminTelegramIds: (d && d.adminTelegramIds) || [] };
+        return {
+          adminTelegramIds: (d && d.adminTelegramIds) || [],
+          feeBps: (d && d.feeBps != null) ? Number(d.feeBps) : 100,
+          paymentAddress: (d && d.paymentAddress) || '',
+          network: (d && d.network) || ''
+        };
       });
     },
 
@@ -189,9 +194,43 @@
       });
     },
 
+    /** POST /api/deals/:id/recheck — "To'ladim, tekshiring": force rescan, -> {status} */
+    recheckDeal: function (id) {
+      return request('POST', '/api/deals/' + encodeURIComponent(id) + '/recheck', {});
+    },
+
+    /** GET /api/users/me */
+    me: function () {
+      return request('GET', '/api/users/me');
+    },
+
     /** GET /api/users/me -> { telegram_id, username, ton_address } */
     getMyProfile: function () {
       return request('GET', '/api/users/me');
+    },
+
+    /** GET /api/deals/:id/join-requests -> pending[] */
+    joinRequests: function (dealId) {
+      return request('GET', '/api/deals/' + encodeURIComponent(dealId) + '/join-requests').then(function (d) {
+        if (Array.isArray(d)) return d;
+        if (d && Array.isArray(d.requests)) return d.requests;
+        return [];
+      });
+    },
+
+    /** POST approve / reject join request */
+    approveJoin: function (dealId, requestId) {
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/join-requests/' + encodeURIComponent(requestId) + '/approve', {});
+    },
+    rejectJoin: function (dealId, requestId) {
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/join-requests/' + encodeURIComponent(requestId) + '/reject', {});
+    },
+
+    /** GET /api/inbox -> pending join requests across caller deals */
+    inbox: function () {
+      return request('GET', '/api/inbox').then(function (d) {
+        return Array.isArray(d) ? d : [];
+      });
     },
 
     /** POST /api/users/me/ton-address {tonAddress} */
@@ -202,6 +241,16 @@
     /** POST /api/deals/:id/payout-address {tonAddress} — per-deal override */
     setPayoutAddress: function (dealId, tonAddress) {
       return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/payout-address', { tonAddress: tonAddress });
+    },
+
+    /** Alias used by webapp bar (src Api.payoutAddress) */
+    payoutAddress: function (dealId, tonAddress) {
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/payout-address', { tonAddress: tonAddress });
+    },
+
+    /** Alias used by webapp bar (src Api.setTonAddress) */
+    setTonAddress: function (tonAddress) {
+      return request('POST', '/api/users/me/ton-address', { tonAddress: tonAddress });
     },
 
     /** Admin: POST /api/notify */

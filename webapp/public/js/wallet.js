@@ -188,6 +188,16 @@
       return tc.disconnect ? tc.disconnect() : Promise.resolve();
     },
 
+    /** One-tap primitive: send prebuilt TON Connect messages (payload already includes encrypted memo). */
+    sendTx: function (messages) {
+      return ensure().then(function (w) {
+        return w.sendTransaction({
+          validUntil: Math.floor(Date.now() / 1000) + 600,
+          messages: messages
+        });
+      });
+    },
+
     onStatus: function (cb) {
       ensure().then(function (w) {
         // Fire immediately with current state

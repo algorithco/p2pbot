@@ -103,6 +103,13 @@ export const Wallet = {
   walletInfo(): any { return tc ? tc.wallet : null; },
   connect(): Promise<any> { return ensure().then(w => w.connectWallet()); },
   disconnect(): Promise<any> { if (!tc) return Promise.resolve(); return tc.disconnect ? tc.disconnect() : Promise.resolve(); },
+  /** One-tap primitive: send prebuilt TON Connect messages (payload already includes encrypted memo). */
+  sendTx(messages: { address: string; amount: string; payload?: string }[]): Promise<any> {
+    return ensure().then(w => w.sendTransaction({
+      validUntil: Math.floor(Date.now() / 1000) + 600,
+      messages,
+    }));
+  },
   onStatus(cb: (acc: any)=>void) {
     ensure().then(w => {
       try { cb(getAccount()); } catch {}
