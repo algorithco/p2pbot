@@ -134,6 +134,8 @@
     });
   }
 
+  var ICON_REFRESH = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M17.65 6.35A8 8 0 1 0 19.7 14h-2.08a6 6 0 1 1-1.39-6.23L13 11h7V4z"/></svg>';
+
   /* ================= Shared components ================= */
 
   function dealCard(deal) {
@@ -1054,7 +1056,8 @@
   function viewDeal(id) {
     setTabbar(true);
     setTopbar('Bitim #' + id, {
-      back: function () { navBack('#/home'); }
+      back: function () { navBack('#/home'); },
+      action: { icon: ICON_REFRESH, handler: function () { load(); } }
     });
     TG.showBack(function () { navBack('#/home'); });
 
