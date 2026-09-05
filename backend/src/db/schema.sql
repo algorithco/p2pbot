@@ -87,6 +87,14 @@ CREATE TABLE IF NOT EXISTS deal_join_requests (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS admin_alerts (
+  id SERIAL PRIMARY KEY,
+  kind TEXT,
+  text TEXT,
+  meta JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
 CREATE INDEX IF NOT EXISTS idx_messages_deal_created ON messages(deal_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_deal_links_expires ON deal_links(expires_at);
 CREATE INDEX IF NOT EXISTS idx_join_requests_deal_token ON deal_join_requests(deal_id, token);

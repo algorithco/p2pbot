@@ -37,13 +37,32 @@ export function registerAdminCommands(bot: Bot) {
     const res = await db.query(
       `SELECT * FROM deals WHERE confirmations->>'disputed' = 'true' AND status NOT IN ('RELEASED','REFUNDED') ORDER BY id DESC LIMIT 20`
     );
-    if (res.rows.length === 0) return ctx.reply(`✅ Ochilgan nizolar yo'q.\nHammasi joyida.`);
-    for (const d of res.rows) {
-      await ctx.reply(
-        `⚖️ Nizo #${d.id} — ${d.amount} ${d.asset}\nXaridor ${d.buyer_telegram_id} ↔ Sotuvchi ${d.seller_telegram_id}.\nQaror uchun tugmani bosing.`,
-        { parse_mode: 'HTML', reply_markup: adminKeyboard(d.id) }
-      );
+    if (res.rows.length === 0) {
+      await ctx.reply(`✅ Ochilgan nizolar yo'q.\nHammasi joyida.`);
+    } else {
+      for (const d of res.rows) {
+        await ctx.reply(
+          `⚖️ Nizo #${d.id} — ${d.amount} ${d.asset}\nXaridor ${d.buyer_telegram_id} ↔ Sotuvchi ${d.seller_telegram_id}.\nQaror uchun tugmani bosing.`,
+          { parse_mode: 'HTML', reply_markup: adminKeyboard(d.id) }
+        );
+      }
     }
+    try {
+      const { listAdminAlerts } = await import('../../db/queries');
+      const alerts = await listAdminAlerts(10);
+      if (alerts.length > 0) {
+        await ctx.reply(`⚠️ So'nggi admin ogohlantirishlar (${alerts.length}):`);
+        for (const a of alerts) {
+          let when = '';
+          try {
+            when = a.created_at ? new Date(a.created_at).toLocaleString('uz-UZ') : '';
+          } catch {}
+          await ctx.reply(`• #${a.id} [${a.kind}] ${a.text}${when ? `\n${when}` : ''}`);
+        }
+      } else {
+        await ctx.reply(`ℹ️ Admin ogohlantirishlar yo'q.`);
+      }
+    } catch {}
   });
 
   bot.callbackQuery(/^admin_do_release:(\d+)$/, async (ctx) => {

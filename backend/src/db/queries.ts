@@ -79,6 +79,14 @@ export async function ensureTables() {
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS admin_alerts (
+      id SERIAL PRIMARY KEY,
+      kind TEXT,
+      text TEXT,
+      meta JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
   `);
 
   // Canonical extra deal columns — boot stays idempotent on pre-existing installs.
@@ -132,6 +140,24 @@ export async function saveNotification(chatId: number, message: string) {
 export async function listNotifications(limit = 100) {
   const res = await pool.query('SELECT * FROM notifications ORDER BY id DESC LIMIT $1', [limit]);
   return res.rows;
+}
+
+export async function saveAdminAlert(kind: string, text: string, meta: Record<string, unknown> = {}) {
+  try {
+    const res = await pool.query('INSERT INTO admin_alerts (kind, text, meta) VALUES ($1,$2,$3::jsonb) RETURNING *', [kind, text, JSON.stringify(meta || {})]);
+    return res.rows[0];
+  } catch {
+    return null;
+  }
+}
+
+export async function listAdminAlerts(limit = 10) {
+  try {
+    const res = await pool.query('SELECT * FROM admin_alerts ORDER BY id DESC LIMIT $1', [limit]);
+    return res.rows;
+  } catch {
+    return [];
+  }
 }
 
 export async function getUserByTelegramId(telegramId: number) {
