@@ -1,12 +1,15 @@
 import { client } from './tonClient';
 import { Address, Cell } from '@ton/core';
 import type { Transaction } from '@ton/core';
-import { updateDealStatus, getDealById } from '../services/dealService';
+import { updateDealStatus } from '../services/dealService';
 import { db } from '../db/queries';
-import { toBaseUnits } from '../utils/money';
-import { depositComment, parseDepositComment, parseTonComment, parseJettonForwardComment } from '../utils/comments';
+import { toBaseUnits, fromBaseUnits } from '../utils/money';
+import { parseDepositComment, parseTonComment, parseJettonForwardComment } from '../utils/comments';
 import { decryptCommentString } from '../utils/tonPayload';
-import { getBot } from '../bot/bot';
+import { encryptField } from '../utils/encryption';
+import { config } from '../config';
+import { sendTon, sendJetton } from './signerClient';
+import * as notify from '../bot/notify';
 import logger from '../logger';
 
 const JETTON_TRANSFER_NOTIFICATION_OP = 0x7362d09c;
@@ -26,39 +29,24 @@ interface DealRow {
   id: number;
   asset: string | null;
   amount: string | null;
+  fee_bps: number | null;
   buyer_telegram_id: number | null;
   seller_telegram_id: number | null;
   payment_address: string | null;
   terms: string | null;
 }
 
-async function findAwaitingDeal(paymentAddress: string): Promise<DealRow | null> {
-  const res = await db.query(
-    `SELECT id, asset, amount, buyer_telegram_id, seller_telegram_id, payment_address, terms
-     FROM deals WHERE payment_address = $1 AND status = $2
-     ORDER BY id DESC LIMIT 1`,
-    [paymentAddress, 'AWAITING_DEPOSIT']
-  );
-  return res.rows[0] || null;
-}
-
 async function findAwaitingDealById(dealId: number, paymentAddress?: string): Promise<DealRow | null> {
   const res = await db.query(
-    `SELECT id, asset, amount, buyer_telegram_id, seller_telegram_id, payment_address, terms
+    `SELECT id, asset, amount, fee_bps, buyer_telegram_id, seller_telegram_id, payment_address, terms
      FROM deals WHERE id = $1 AND status = $2 LIMIT 1`,
     [dealId, 'AWAITING_DEPOSIT']
   );
   const row = res.rows[0] as DealRow | undefined;
   if (!row) return null;
-  // If paymentAddress is provided, ensure it matches (or is empty for off-chain fallback)
   if (paymentAddress && row.payment_address && row.payment_address !== paymentAddress) {
-    // For shared custodial wallet, paymentAddress will be the custodial address for all deals,
-    // so this check should be lenient: only reject if row has a distinct contract address
-    // that doesn't match the monitored address.
-    // We allow custodial matches.
     try {
       if (Address.parse(row.payment_address).toRawString() !== Address.parse(paymentAddress).toRawString()) {
-        // Different contract address — not a match
         return null;
       }
     } catch {
@@ -68,12 +56,19 @@ async function findAwaitingDealById(dealId: number, paymentAddress?: string): Pr
   return row;
 }
 
-function addressesEqual(a: string, b: string): boolean {
-  try {
-    return Address.parse(a).toRawString() === Address.parse(b).toRawString();
-  } catch {
-    return false;
-  }
+function expectedForDeal(deal: DealRow): bigint {
+  const asset = String(deal.asset ?? 'TON').toUpperCase();
+  const priceBase = BigInt(toBaseUnits(String(deal.amount ?? '0'), asset));
+  const rawBps = Number((deal as { fee_bps?: unknown }).fee_bps ?? config.feeBps ?? 100);
+  const feeBps = Number.isFinite(rawBps) && rawBps >= 0 ? Math.floor(rawBps) : 100;
+  if (feeBps <= 0) return priceBase;
+  if (feeBps >= 10000) return priceBase;
+  const fee = (priceBase * BigInt(feeBps)) / 10000n;
+  return priceBase + fee;
+}
+
+function dealLike(deal: DealRow): { id: number; amount: string; asset: string; terms?: string } {
+  return { id: deal.id, amount: String(deal.amount ?? '0'), asset: String(deal.asset ?? 'TON'), terms: deal.terms ?? undefined };
 }
 
 async function postChatSystemMessage(dealId: number, text: string) {
@@ -85,137 +80,145 @@ async function postChatSystemMessage(dealId: number, text: string) {
   }
 }
 
-async function notifySellerOnly(deal: DealRow, text: string) {
-  // Also post to deal chat so webapp shows it even if bot blocked
-  void postChatSystemMessage(deal.id, text.replace(/<[^>]*>/g, ''));
-  const bot = getBot();
-  if (!bot) return;
-  const sellerId = deal.seller_telegram_id;
-  if (sellerId == null) return;
+async function notifySellerDeposit(deal: DealRow) {
+  if (deal.seller_telegram_id == null) return;
   try {
-    const { InlineKeyboard } = await import('grammy');
-    const { config } = await import('../config');
-    const webappUrl = (config as any).webappUrl || (config as any).frontendUrl;
-    const kb = new InlineKeyboard();
-    if (webappUrl) {
-      const dealUrl = `${String(webappUrl).replace(/\/$/, '')}/#/deal/${deal.id}`;
-      kb.webApp('📲 Open Web App — Deal', dealUrl).row();
-    }
-    kb.text('📦 I sent the item (bot)', `item_sent:${deal.id}`);
-    await bot.api.sendMessage(sellerId, text, { parse_mode: 'HTML', reply_markup: kb });
-  } catch (err) {
-    logger.warn(`Could not notify seller ${sellerId} about deal #${deal.id}`, err);
-    try {
-      const bot2 = getBot();
-      if (bot2) await bot2.api.sendMessage(sellerId, text, { parse_mode: 'HTML' });
-    } catch {}
+    await notify.depositToSeller(Number(deal.seller_telegram_id), dealLike(deal));
+  } catch (e) {
+    logger.warn(`depositToSeller notify failed for deal #${deal.id}`, e);
   }
-}
-
-async function notifyBuyer(deal: DealRow, text: string) {
-  const bot = getBot();
-  if (!bot) return;
-  const buyerId = deal.buyer_telegram_id;
-  if (buyerId == null) return;
-  try {
-    await bot.api.sendMessage(buyerId, text, { parse_mode: 'HTML' });
-  } catch (err) {
-    logger.warn(`Could not notify buyer ${buyerId} about deal #${deal.id}`, err);
-  }
-}
-
-// Keep legacy alias for any external usage (no longer used internally)
-async function notifyParties(deal: DealRow, text: string) {
-  const bot = getBot();
-  if (!bot) return;
-  const targets = [deal.buyer_telegram_id, deal.seller_telegram_id].filter(
-    (v): v is number => v != null
-  );
-  for (const chatId of targets) {
-    try {
-      await bot.api.sendMessage(chatId, text);
-    } catch (err) {
-      logger.warn(`Could not notify ${chatId} about deal #${deal.id}`, err);
-    }
-  }
+  void postChatSystemMessage(deal.id, `Pul keldi: ${String(deal.amount)} ${String(deal.asset)} (Deal #${deal.id}).`);
 }
 
 async function processTonDeposit(addr: string, src: Address | null, value: bigint, txHash: string, comment: string | null) {
-  // Memo is encrypted and auto-injected — decrypt before parsing (fallback to plaintext for old tx)
-  const decryptedComment = decryptCommentString(comment);
-  const commentForLog = decryptedComment || comment;
-  // Try comment-based lookup first (most reliable for shared custodial address)
-  let deal: DealRow | null = null;
-  const expectedId = parseDepositComment(decryptedComment);
-  if (expectedId != null) {
-    deal = await findAwaitingDealById(expectedId, addr);
-    if (deal) {
-      logger.info(`Deal #${deal.id}: matched by comment "${comment}" from ${src?.toString() || 'unknown'}`);
-    } else {
-      logger.warn(`Deposit to ${addr} with comment "${comment}" -> no awaiting deal #${expectedId} (or address mismatch), falling back to amount-based lookup`);
+  const decrypted = decryptCommentString(comment) ?? comment ?? '';
+  const raw = comment ?? '';
+  const dealId = parseDepositComment(decrypted) ?? parseDepositComment(raw);
+
+  if (dealId == null) {
+    let human = '';
+    try {
+      human = fromBaseUnits(value, 'TON');
+    } catch {
+      human = value.toString();
     }
+    logger.warn(`Unknown TON deposit to ${addr} value ${value} memo "${decrypted || raw || '(memosiz)'}" — no memo match`);
+    try {
+      await notify.unknownDepositToAdmins({
+        amount: human,
+        asset: 'TON',
+        address: addr,
+        memo: decrypted || raw || '(memosiz)',
+      });
+    } catch (e) {
+      logger.warn('unknownDepositToAdmins failed', e);
+    }
+    return;
   }
 
-  // Fallback ONLY if no valid expectedId: find latest awaiting deal for this paymentAddress
-  // If we had an expectedId but it didn't match, do NOT fallback to wrong deal — ignore tx to avoid mis-attribution for shared custodial wallet
+  const deal = await findAwaitingDealById(dealId, addr);
   if (!deal) {
-    if (expectedId != null) {
-      logger.warn(`Deposit to ${addr} with comment escrow#${expectedId} had no matching AWAITING_DEPOSIT — ignoring (avoid shared-wallet mis-match)`);
-      return;
+    let human = '';
+    try {
+      human = fromBaseUnits(value, 'TON');
+    } catch {
+      human = value.toString();
     }
-    deal = await findAwaitingDeal(addr);
-    if (!deal) return;
-    const expectedMemo = depositComment(deal.id);
-    if (decryptedComment == null || decryptedComment.trim() === '') {
-      logger.info(`Deal #${deal.id}: TON deposit without comment (expected encrypted memo) from ${src?.toString() || 'unknown'} — accepting by amount`);
-    } else if (parseDepositComment(decryptedComment) == null) {
-      logger.warn(`Deal #${deal.id}: TON deposit with unexpected comment "${commentForLog}" (expected "${expectedMemo}") — checking amount`);
-    } else if (expectedId == null || expectedId !== deal.id) {
-      logger.warn(`Deal #${deal.id}: TON deposit comment "${commentForLog}" does not match this deal's expected "${expectedMemo}" — checking amount anyway`);
-    }
+    logger.warn(`TON deposit memo escrow#${dealId} to ${addr} — no AWAITING_DEPOSIT deal, ignoring`);
+    try {
+      await notify.unknownDepositToAdmins({
+        amount: human,
+        asset: 'TON',
+        address: addr,
+        memo: decrypted || raw || `escrow#${dealId}`,
+      });
+    } catch {}
+    return;
   }
 
-  if (!deal) return;
+  const assetUpper = String(deal.asset ?? 'TON').toUpperCase();
+  if (assetUpper !== 'TON') {
+    let human = '';
+    try {
+      human = fromBaseUnits(value, 'TON');
+    } catch {
+      human = value.toString();
+    }
+    logger.warn(`Deal #${deal.id} expects ${assetUpper} but got TON tx — ignoring`);
+    try {
+      await notify.unknownDepositToAdmins({
+        amount: human,
+        asset: 'TON',
+        address: addr,
+        memo: `Noto'g'ri aktiv Deal #${deal.id}: ${decrypted || raw}`,
+      });
+    } catch {}
+    return;
+  }
 
   let expected: bigint;
   try {
-    expected = BigInt(toBaseUnits(String(deal.amount ?? ''), String(deal.asset ?? '')));
+    expected = expectedForDeal(deal);
   } catch (err) {
-    logger.warn(`Deal #${deal.id}: cannot compute base units (${(err as Error).message})`);
-    return;
-  }
-  if (value !== expected) {
-    logger.info(`Deal #${deal.id}: TON deposit amount mismatch: got ${value} expected ${expected} (memo "${commentForLog}")`);
+    logger.warn(`Deal #${deal.id}: cannot compute expected (${(err as Error).message})`);
     return;
   }
 
-  // If buyer's TON address is known, log mismatch but do NOT block deposit when comment+amount match (buyer may use different wallet)
-  if (src && deal.buyer_telegram_id != null) {
-    const userRes = await db.query(
-      'SELECT ton_address FROM users WHERE telegram_id = $1 LIMIT 1',
-      [deal.buyer_telegram_id]
-    );
-    const buyerTon = userRes.rows[0]?.ton_address;
-    if (buyerTon && !addressesEqual(buyerTon, src.toString())) {
-      logger.warn(`Deal #${deal.id}: TON deposit from unexpected source ${src.toString()} (expected ${buyerTon}) — accepting by amount+comment, please verify sender`);
-      // Optionally persist src as buyer Ton for future correlation
-      try { await db.query('UPDATE users SET ton_address = $1 WHERE telegram_id = $2 AND (ton_address IS NULL OR ton_address = \'\')', [src.toString(), deal.buyer_telegram_id]); } catch {}
+  if (value === expected) {
+    await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
+    logger.info(`Deal #${deal.id}: TON deposit exact ${value} confirmed`);
+    await notifySellerDeposit(deal);
+    return;
+  }
+
+  if (value > expected) {
+    const excess = value - expected;
+    await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
+    logger.info(`Deal #${deal.id}: TON overpay got ${value} expected ${expected}, excess ${excess} — confirming + refunding`);
+    if (src) {
+      try {
+        const excessHuman = fromBaseUnits(excess, 'TON');
+        const memoEnc = encryptField(`Ortiqcha qaytarildi Deal #${deal.id}`);
+        await sendTon({ to: src.toString(), value: excessHuman, comment: memoEnc, bounce: false });
+        logger.info(`Deal #${deal.id}: refunded excess ${excessHuman} TON to ${src.toString()}`);
+      } catch (e) {
+        logger.warn(`Deal #${deal.id}: excess refund failed`, e);
+        try {
+          let exHuman = excess.toString();
+          try {
+            exHuman = fromBaseUnits(excess, 'TON');
+          } catch {}
+          await notify.unknownDepositToAdmins({
+            amount: exHuman,
+            asset: 'TON',
+            address: addr,
+            memo: `Qaytarish xatosi Deal #${deal.id}: ${(e as Error).message}`,
+          });
+        } catch {}
+      }
+    } else {
+      logger.warn(`Deal #${deal.id}: overpay but no sender address — refund skipped`);
     }
+    await notifySellerDeposit(deal);
+    return;
   }
 
-  await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
-  // Desired flow: notify ONLY seller "I've received the TON; please send the item to the buyer" with product type (NFT)
-  // Explicitly tell seller to send the NFT/item now, including product type selected at deal creation.
-  const productTonRaw = String(deal.terms || '').trim() || 'the item';
-  const productTon = productTonRaw.length > 100 ? `"${productTonRaw.slice(0, 97)}..."` : `"${productTonRaw}"`;
-  const sellerMsgTon = [
-    `✅ <b>I've received ${String(deal.amount)} ${String(deal.asset)} for deal #${deal.id}</b>`,
-    `Product: ${productTon}`,
-    ``,
-    `Please send the NFT / item ${productTon} to the buyer (ID <code>${deal.buyer_telegram_id}</code>) as agreed.`,
-    `After you have sent it, tap "📦 I sent the item" below or in the web app so the buyer can confirm receipt.`,
-  ].join('\n');
-  await notifySellerOnly(deal, sellerMsgTon);
+  // Underpay — do NOT confirm
+  let gotHuman = value.toString();
+  let expHuman = expected.toString();
+  try {
+    gotHuman = fromBaseUnits(value, 'TON');
+    expHuman = fromBaseUnits(expected, 'TON');
+  } catch {}
+  logger.info(`Deal #${deal.id}: TON underpay got ${value} expected ${expected} — waiting`);
+  try {
+    await notify.unknownDepositToAdmins({
+      amount: gotHuman,
+      asset: 'TON',
+      address: addr,
+      memo: `Kam to'lov Deal #${deal.id}: keldi ${gotHuman} kutilgan ${expHuman} memo ${decrypted || raw}`,
+    });
+  } catch {}
 }
 
 interface JettonNotification {
@@ -239,59 +242,138 @@ function parseJettonNotification(body: Cell): JettonNotification | null {
 }
 
 async function processJettonDeposit(addr: string, note: JettonNotification, forwardComment: string | null, txHash: string) {
-  // Forward memo is encrypted — decrypt before parsing
-  const decryptedForward = decryptCommentString(forwardComment);
-  // Try comment-based lookup first
-  let deal: DealRow | null = null;
-  const expectedId = parseDepositComment(decryptedForward);
-  if (expectedId != null) {
-    deal = await findAwaitingDealById(expectedId, addr);
-    if (deal) {
-      logger.info(`Deal #${deal.id}: matched by jetton forward comment "${forwardComment}"`);
-    } else {
-      logger.warn(`Jetton deposit to ${addr} with forward comment "${forwardComment}" -> no awaiting deal #${expectedId}`);
-    }
-  }
-  if (!deal) {
-    if (expectedId != null) {
-      logger.warn(`Jetton to ${addr} with comment escrow#${expectedId} had no matching AWAITING_DEPOSIT — ignoring`);
-      return;
-    }
-    deal = await findAwaitingDeal(addr);
-    if (!deal) return;
-    const expectedMemo = depositComment(deal.id);
-    if (!decryptedForward) {
-      logger.info(`Deal #${deal.id}: USDT deposit without forward comment (expected encrypted memo) — accepting by amount`);
-    } else if (parseDepositComment(decryptedForward) == null) {
-      logger.warn(`Deal #${deal.id}: USDT deposit with unexpected forward comment "${decryptedForward}" (expected "${expectedMemo}")`);
-    }
+  const decrypted = decryptCommentString(forwardComment) ?? forwardComment ?? '';
+  const raw = forwardComment ?? '';
+  const dealId = parseDepositComment(decrypted) ?? parseDepositComment(raw);
+
+  if (dealId == null) {
+    let human = note.amount.toString();
+    try {
+      human = fromBaseUnits(note.amount, 'USDT');
+    } catch {}
+    logger.warn(`Unknown USDT deposit to ${addr} amount ${note.amount} forward "${decrypted || raw || '(memosiz)'}"`);
+    try {
+      await notify.unknownDepositToAdmins({
+        amount: human,
+        asset: 'USDT',
+        address: addr,
+        memo: decrypted || raw || '(memosiz)',
+      });
+    } catch {}
+    return;
   }
 
-  if (!deal) return;
+  const deal = await findAwaitingDealById(dealId, addr);
+  if (!deal) {
+    let human = note.amount.toString();
+    try {
+      human = fromBaseUnits(note.amount, 'USDT');
+    } catch {}
+    logger.warn(`USDT deposit forward escrow#${dealId} to ${addr} — no AWAITING_DEPOSIT deal`);
+    try {
+      await notify.unknownDepositToAdmins({
+        amount: human,
+        asset: 'USDT',
+        address: addr,
+        memo: decrypted || raw || `escrow#${dealId}`,
+      });
+    } catch {}
+    return;
+  }
+
+  const assetUpper = String(deal.asset ?? 'USDT').toUpperCase();
+  if (assetUpper !== 'USDT') {
+    let human = note.amount.toString();
+    try {
+      human = fromBaseUnits(note.amount, assetUpper);
+    } catch {
+      try {
+        human = fromBaseUnits(note.amount, 'USDT');
+      } catch {}
+    }
+    logger.warn(`Deal #${deal.id} expects ${assetUpper} but got USDT jetton — ignoring`);
+    try {
+      await notify.unknownDepositToAdmins({
+        amount: human,
+        asset: 'USDT',
+        address: addr,
+        memo: `Noto'g'ri aktiv Deal #${deal.id}: ${decrypted || raw}`,
+      });
+    } catch {}
+    return;
+  }
 
   let expected: bigint;
   try {
-    expected = BigInt(toBaseUnits(String(deal.amount ?? ''), String(deal.asset ?? '')));
+    expected = expectedForDeal(deal);
   } catch (err) {
-    logger.warn(`Deal #${deal.id}: cannot compute base units (${(err as Error).message})`);
-    return;
-  }
-  if (note.amount !== expected) {
-    logger.info(`Deal #${deal.id}: USDT deposit amount mismatch: got ${note.amount} expected ${expected} (forward "${forwardComment}")`);
+    logger.warn(`Deal #${deal.id}: cannot compute expected (${(err as Error).message})`);
     return;
   }
 
-  await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
-  const productJettonRaw = String(deal.terms || '').trim() || 'the item';
-  const productJetton = productJettonRaw.length > 100 ? `"${productJettonRaw.slice(0, 97)}..."` : `"${productJettonRaw}"`;
-  const sellerMsgUsdt = [
-    `✅ <b>I've received ${String(deal.amount)} ${String(deal.asset)} for deal #${deal.id}</b>`,
-    `Product: ${productJetton}`,
-    ``,
-    `Please send the NFT / item ${productJetton} to the buyer (ID <code>${deal.buyer_telegram_id}</code>) as agreed.`,
-    `After you have sent it, tap "📦 I sent the item" below or in the web app so the buyer can confirm receipt.`,
-  ].join('\n');
-  await notifySellerOnly(deal, sellerMsgUsdt);
+  if (note.amount === expected) {
+    await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
+    logger.info(`Deal #${deal.id}: USDT deposit exact ${note.amount} confirmed`);
+    await notifySellerDeposit(deal);
+    return;
+  }
+
+  if (note.amount > expected) {
+    const excess = note.amount - expected;
+    await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
+    logger.info(`Deal #${deal.id}: USDT overpay got ${note.amount} expected ${expected}, excess ${excess}`);
+    const senderAddr = note.sender ? note.sender.toString() : null;
+    if (senderAddr) {
+      try {
+        const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
+        if (!jettonMaster) throw new Error('jetton_master_not_configured');
+        const excessHuman = fromBaseUnits(excess, assetUpper);
+        const memoEnc = encryptField(`Ortiqcha qaytarildi Deal #${deal.id}`);
+        await sendJetton({
+          jettonMasterAddress: jettonMaster,
+          to: senderAddr,
+          amount: excessHuman,
+          forwardComment: memoEnc,
+          forwardTonAmount: '0.01',
+        });
+        logger.info(`Deal #${deal.id}: refunded excess ${excessHuman} ${assetUpper} to ${senderAddr}`);
+      } catch (e) {
+        logger.warn(`Deal #${deal.id}: USDT excess refund failed`, e);
+        try {
+          let exHuman = excess.toString();
+          try {
+            exHuman = fromBaseUnits(excess, assetUpper);
+          } catch {}
+          await notify.unknownDepositToAdmins({
+            amount: exHuman,
+            asset: assetUpper,
+            address: addr,
+            memo: `Qaytarish xatosi Deal #${deal.id}: ${(e as Error).message}`,
+          });
+        } catch {}
+      }
+    } else {
+      logger.warn(`Deal #${deal.id}: USDT overpay but no sender — refund skipped`);
+    }
+    await notifySellerDeposit(deal);
+    return;
+  }
+
+  let gotHuman = note.amount.toString();
+  let expHuman = expected.toString();
+  try {
+    gotHuman = fromBaseUnits(note.amount, assetUpper);
+    expHuman = fromBaseUnits(expected, assetUpper);
+  } catch {}
+  logger.info(`Deal #${deal.id}: USDT underpay got ${note.amount} expected ${expected}`);
+  try {
+    await notify.unknownDepositToAdmins({
+      amount: gotHuman,
+      asset: assetUpper,
+      address: addr,
+      memo: `Kam to'lov Deal #${deal.id}: keldi ${gotHuman} kutilgan ${expHuman} memo ${decrypted || raw}`,
+    });
+  } catch {}
 }
 
 async function handleTransaction(addr: string, tx: Transaction) {
@@ -301,22 +383,14 @@ async function handleTransaction(addr: string, tx: Transaction) {
   // Try jetton first
   const note = parseJettonNotification(tx.inMessage.body);
   if (note) {
-    // Extract forward payload comment if present (remaining slice after jetton notification)
     let forwardComment: string | null = null;
     try {
-      // The body has been consumed by parseJettonNotification, need to re-parse to get forwardPayload
-      // Use the helper from comments utils
       const bodySlice = tx.inMessage.body.beginParse();
       bodySlice.loadUint(32); // op
       bodySlice.loadUintBig(64); // queryId
       bodySlice.loadCoins(); // amount
       bodySlice.loadAddress(); // sender
-      // Remaining is forwardPayload
-      // It may contain a comment cell
       if (bodySlice.remainingBits > 0 || bodySlice.remainingRefs > 0) {
-        // Check if there's a forward payload
-        // In TEP-74, after sender there is forwardPayload (slice)
-        // We need to handle it: if there's a ref, load it
         try {
           if (bodySlice.remainingRefs > 0) {
             const fwd = bodySlice.loadRef().beginParse();
@@ -339,7 +413,6 @@ async function handleTransaction(addr: string, tx: Transaction) {
     const value = tx.inMessage.info.value.coins;
     const src = tx.inMessage.info.src;
     if (value > 0n) {
-      // Extract TON comment
       let comment: string | null = null;
       try {
         comment = parseTonComment(tx.inMessage.body);
@@ -378,9 +451,21 @@ async function pollAddress(addr: string) {
   }
 }
 
+/** Immediately poll one monitored address once (for "Toldim, tekshiring" button). */
+export async function recheckAddress(address: string): Promise<void> {
+  const a = String(address || '').trim();
+  if (!a) return;
+  if (!monitoredAddresses.has(a)) monitoredAddresses.add(a);
+  try {
+    await pollAddress(a);
+  } catch (err) {
+    logger.warn(`recheckAddress failed for ${a}`, err);
+  }
+}
+
 export async function startListener() {
   logger.info('Blockchain listener started');
-  setInterval(async () => {
+  const timer = setInterval(async () => {
     for (const addr of monitoredAddresses) {
       try {
         await pollAddress(addr);
@@ -389,4 +474,5 @@ export async function startListener() {
       }
     }
   }, 10000);
+  (timer as unknown as { unref?: () => void }).unref?.();
 }
