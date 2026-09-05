@@ -93,7 +93,7 @@ a { color: var(--link); text-decoration: none; }
 .hidden { display: none !important; }
 .muted { color: var(--hint); }
 .small { font-size: 12.5px; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 
 /* ---------------- Top bar ---------------- */
 .topbar {
@@ -212,7 +212,7 @@ a { color: var(--link); text-decoration: none; }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 14px 0 6px;
 }
@@ -222,8 +222,10 @@ a { color: var(--link); text-decoration: none; }
   border-radius: var(--r-md);
   padding: 12px 10px;
   text-align: center;
+  min-width: 0;
+  overflow: hidden;
 }
-.stat b { display: block; font-size: 17px; letter-spacing: -.01em; }
+.stat b { display: block; font-size: 17px; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat span { font-size: 11px; color: var(--hint); font-weight: 600; }
 
 .banner {
@@ -281,8 +283,10 @@ a { color: var(--link); text-decoration: none; }
 .asset-ton  { background: linear-gradient(135deg, #37aef0, #1069c9); }
 .asset-usdt { background: linear-gradient(135deg, #26a17b, #13795a); }
 .asset-any  { background: linear-gradient(135deg, #7d8aa5, #4c5871); }
-.deal-title { font-weight: 700; font-size: 15px; }
-.deal-sub   { font-size: 12.5px; color: var(--hint); margin-top: 1px; }
+.deal-title { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deal-sub   { font-size: 12.5px; color: var(--hint); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* middle column must shrink so long titles never push the amount off-screen */
+.deal-card .row > div:nth-child(2) { flex: 1; min-width: 0; }
 .deal-amt   { margin-left: auto; text-align: right; }
 .deal-amt b { font-size: 15px; letter-spacing: -.01em; white-space: nowrap; }
 
@@ -317,7 +321,8 @@ a { color: var(--link); text-decoration: none; }
 .btn-ghost   { background: transparent; color: var(--hint); border: 1px solid var(--border); }
 .btn-danger  { background: var(--danger-soft); color: var(--danger); }
 .btn[disabled] { opacity: .5; pointer-events: none; }
-.btn-row { display: flex; gap: 10px; margin-top: 14px; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.btn-row .btn { flex: 1 1 150px; }
 .link-btn { color: var(--link); font-weight: 700; font-size: 14px; padding: 8px; }
 
 /* ---------------- Form fields ---------------- */
@@ -358,7 +363,7 @@ select.input { padding-right: 40px; }
 select.input option { background: var(--surface); color: var(--text); }
 
 /* Choice cards */
-.choice-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.choice-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .choice-card {
   text-align: left;
   background: var(--surface);
@@ -485,12 +490,13 @@ select.input option { background: var(--surface); color: var(--text); }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
-.parties { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.parties { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .party {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 12px;
+  min-width: 0;
 }
 .party.you { border-color: var(--accent); }
 .avatar {
@@ -523,8 +529,11 @@ img.avatar { object-fit: cover; }
 .kv-list .rrow .k { font-size: 13px; }
 
 /* ---------------- Chat ---------------- */
-.chat-wrap { display: flex; flex-direction: column; height: 100%; }
-.chat-scroll { flex: 1; overflow-y: auto; padding: 12px 2px 6px; }
+.chat-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+/* Chat owns the visible view: messages scroll inside, composer stays pinned */
+.view-root:has(> .chat-wrap) { display: flex; flex-direction: column; overflow: hidden; padding-bottom: calc(var(--sab) + 12px); }
+.view-root:has(> .chat-wrap) .chat-wrap { flex: 1; min-height: 0; height: auto; }
+.chat-scroll { flex: 1; overflow-y: auto; padding: 12px 2px 6px; min-height: 0; }
 .msg { display: flex; margin-bottom: 10px; }
 .msg.mine { justify-content: flex-end; }
 .bubble {
@@ -545,6 +554,7 @@ img.avatar { object-fit: cover; }
 .bubble .m-meta { font-size: 10.5px; opacity: .65; text-align: right; margin-top: 3px; }
 .composer {
   display: flex; gap: 9px; align-items: flex-end;
+  flex-shrink: 0;
   padding: 10px 0 calc(var(--sab) + 10px);
   background: var(--bg);
 }
@@ -741,4 +751,28 @@ body[data-theme-mode="light"] .toast { background: #1d2733; color: #fff; }
 @media (min-width: 480px) {
   body { font-size: 15.5px; }
   .deal-head .amt { font-size: 34px; }
+}
+
+/* Action rows used by mirrored JS (inbox, confirm bars, rights, trade tabs) */
+.inbox-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.inbox-actions .btn { flex: 1 1 130px; }
+.rights-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.trade-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; background: var(--surface); padding: 4px; border-radius: var(--r-md); border: 1px solid var(--border); margin: 12px 0; }
+.trade-tabs button { padding: 9px 4px; border-radius: 9px; font-size: 13px; font-weight: 700; color: var(--hint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.confirm-bar { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.confirm-bar .btn { flex: 1 1 150px; }
+
+/* Small phones (<=360px): tighten spacing so nothing overflows */
+@media (max-width: 360px) {
+  .view-root { padding-left: 12px; padding-right: 12px; }
+  .hero h1 { font-size: 19px; }
+  .card { padding: 13px 12px; }
+  .stat { padding: 10px 6px; }
+  .stat b { font-size: 15px; }
+  .btn { padding: 12px; font-size: 14.5px; }
+  .deal-head .amt { font-size: 26px; }
+  .deal-card { padding: 11px 12px; }
+  .parties, .choice-row { gap: 8px; }
+  .choice-card { padding: 12px 10px; }
+  .tab-btn { font-size: 10px; }
 }

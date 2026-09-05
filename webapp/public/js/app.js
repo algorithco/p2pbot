@@ -894,7 +894,7 @@
       var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(tonLink);
       var wrap = UI.h('div', { class: 'card', style: 'text-align:center' });
       if (fallbackNote) wrap.appendChild(UI.h('div', { class: 'banner warn' }, [UI.h('div', { class: 'small', text: fallbackNote })]));
-      var qr = UI.h('img', { src: qrUrl, alt: 'QR', style: 'width:200px;height:200px;border-radius:12px;background:#fff;margin:4px auto' });
+      var qr = UI.h('img', { src: qrUrl, alt: 'QR', style: 'width:min(200px,62vw);height:auto;aspect-ratio:1/1;border-radius:12px;background:#fff;margin:4px auto;display:block' });
       qr.onerror = function () { try { qr.style.display = 'none'; } catch (e) {} };
       wrap.appendChild(qr);
       wrap.appendChild(UI.h('button', {
