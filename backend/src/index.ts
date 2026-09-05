@@ -10,7 +10,8 @@ import { Escrow } from './contracts/wrappers/Escrow';
 import { client } from './blockchain/tonClient';
 import logger from './logger';
 import { startBot, getBot } from './bot/bot';
-import { startListener, addAddressToMonitor } from './blockchain/listener';
+import { startListener, addAddressToMonitor, recheckAddress } from './blockchain/listener';
+import * as notify from './bot/notify';
 import {
   createDealRecord,
   generateDealLink,
@@ -26,6 +27,7 @@ import {
   getDealMessages,
   addEncryptedMessage,
   createJoinRequest,
+  updateDealStatus,
 } from './services/dealService';
 import { depositComment, releaseComment } from './utils/comments';
 import { commentToPayloadB64, encryptedCommentToPayloadB64, jettonTransferPayload } from './utils/tonPayload';
@@ -512,31 +514,11 @@ app.post('/api/deals/:id/join/:token', joinLimiter, requireIdentity, asyncHandle
       requesterPhotoUrl: null,
     });
 
-    // Notify ONLY buyer for approval (desired flow)
+    // Notify ONLY buyer for approval (desired flow) via notify hub
     const buyerId = Number(deal.buyer_telegram_id);
     try {
-      const bot = getBot();
-      if (bot) {
-        const { InlineKeyboard } = await import('grammy');
-        const display = requesterFirstName || requesterUsername || String(telegramId);
-        const userLabel = requesterUsername ? `@${requesterUsername}` : `ID ${telegramId}`;
-        const caption = [
-          `🔔 <b>Join request for Deal #${deal.id}</b>`,
-          `━━━━━━━━━━━━━━━━━━━━━━━`,
-          ``,
-          `👤 <b>${display}</b> ${userLabel}`,
-          `🆔 <code>${telegramId}</code> wants to join as <b>seller</b>.`,
-          ``,
-          `  💎 <code>${String(deal.amount)} ${String(deal.asset)}</code>`,
-          `  📝 <i>${String(deal.terms || '').slice(0, 80)}</i>`,
-          ``,
-          `Are you trading with this person?`,
-        ].join('\n');
-        const kb = new InlineKeyboard()
-          .text('✅ Approve', `approve_join:${joinReq.id}`)
-          .text('❌ Decline', `reject_join:${joinReq.id}`);
-        await bot.api.sendMessage(buyerId, caption, { parse_mode: 'HTML', reply_markup: kb });
-      }
+      const label = requesterUsername ? `@${requesterUsername}` : (requesterFirstName || String(telegramId));
+      await notify.joinRequestToCreator(buyerId, { id: deal.id, amount: String(deal.amount), asset: String(deal.asset), terms: String(deal.terms || '') }, label);
     } catch (notifyErr) {
       logger.warn(`Could not notify buyer ${buyerId} about join request ${joinReq.id}`, notifyErr);
     }
@@ -737,27 +719,35 @@ app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asy
   try {
     const role = await approveJoinRequest(requestId, caller);
     try { await getDealChatKey(dealId); } catch {}
-    // If deal already DEPOSIT_CONFIRMED (buyer deposited before seller joined), immediately notify seller
     try {
       const deal = await getDealById(dealId);
-      if (deal && String(deal.status) === 'DEPOSIT_CONFIRMED' && deal.seller_telegram_id != null) {
-        const bot = getBot();
-        if (bot) {
-          const product = deal.terms ? `"${String(deal.terms).slice(0, 80)}"` : 'the item';
-          const text = [
-            `✅ <b>I've received ${String(deal.amount)} ${String(deal.asset)} for deal #${deal.id}</b>`,
-            `Product: ${product}`,
-            ``,
-            `Please send ${product} to the buyer (ID <code>${deal.buyer_telegram_id}</code>).`,
-            `When done, tap "I sent the item" below.`,
-          ].join('\n');
-          const { InlineKeyboard } = await import('grammy');
-          const kb = new InlineKeyboard().text('📦 I sent the item', `item_sent:${deal.id}`);
-          await bot.api.sendMessage(Number(deal.seller_telegram_id), text, { parse_mode: 'HTML', reply_markup: kb });
+      if (deal) {
+        const { getJoinRequestById } = await import('./services/dealService');
+        let partnerId: number | null = null;
+        try {
+          const jr = await getJoinRequestById(requestId);
+          if (jr && jr.requester_telegram_id != null) partnerId = Number(jr.requester_telegram_id);
+        } catch {}
+        if (partnerId == null && deal.seller_telegram_id != null) partnerId = Number(deal.seller_telegram_id);
+        if (partnerId == null && deal.buyer_telegram_id != null) partnerId = Number(deal.buyer_telegram_id);
+        if (partnerId != null) {
+          const uzRole = role === 'seller' ? 'sotuvchi' : 'xaridor';
+          try {
+            await notify.joinApproved(partnerId, { id: deal.id, amount: String(deal.amount), asset: String(deal.asset), terms: String(deal.terms || '') }, uzRole as 'sotuvchi' | 'xaridor');
+          } catch (e) {
+            logger.warn(`joinApproved notify failed for deal #${dealId}`, e);
+          }
+        }
+        if (String(deal.status) === 'DEPOSIT_CONFIRMED' && deal.seller_telegram_id != null) {
+          try {
+            await notify.depositToSeller(Number(deal.seller_telegram_id), { id: deal.id, amount: String(deal.amount), asset: String(deal.asset), terms: String(deal.terms || '') });
+          } catch (e) {
+            logger.warn(`Post-approve DEPOSIT_CONFIRMED notify failed for deal #${dealId}`, e);
+          }
         }
       }
     } catch (notifyErr) {
-      logger.warn(`Post-approve DEPOSIT_CONFIRMED notify failed for deal #${dealId}`, notifyErr);
+      logger.warn(`Post-approve notify failed for deal #${dealId}`, notifyErr);
     }
     return res.json({ ok: true, role });
   } catch (e) {
@@ -777,7 +767,22 @@ app.post('/api/deals/:id/join-requests/:requestId/reject', requireIdentity, asyn
   if (caller === null) return res.status(401).json({ error: 'identity_required' });
   const { rejectJoinRequest } = await import('./services/dealService');
   try {
+    const { getJoinRequestById } = await import('./services/dealService');
+    let partnerId: number | null = null;
+    let dealForReject: any = null;
+    try {
+      const jr = await getJoinRequestById(requestId);
+      if (jr && jr.requester_telegram_id != null) partnerId = Number(jr.requester_telegram_id);
+      dealForReject = await getDealById(dealId);
+    } catch {}
     await rejectJoinRequest(requestId, caller);
+    try {
+      if (partnerId != null && dealForReject) {
+        await notify.joinRejected(partnerId, { id: dealForReject.id, amount: String(dealForReject.amount), asset: String(dealForReject.asset), terms: String(dealForReject.terms || '') });
+      }
+    } catch (e) {
+      logger.warn(`joinRejected notify failed for deal #${dealId}`, e);
+    }
     return res.json({ ok: true });
   } catch (e) {
     const msg = String((e as Error).message || 'reject_failed');
@@ -785,6 +790,28 @@ app.post('/api/deals/:id/join-requests/:requestId/reject', requireIdentity, asyn
     if (msg.includes('not_authorized')) return res.status(403).json({ error: msg });
     return res.status(400).json({ error: msg });
   }
+}));
+
+// Manual recheck — "Toldim, tekshiring" button: poll payment address once, return current status
+app.post('/api/deals/:id/recheck', joinLimiter, requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const isParty =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
+  const isAdminCaller = (req as any).authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isParty && !isAdminCaller) return res.status(403).json({ error: 'not_a_party_to_deal' });
+  try {
+    if (deal.payment_address) await recheckAddress(String(deal.payment_address));
+  } catch (e) {
+    logger.warn(`recheck failed for deal #${dealId}`, e);
+  }
+  const fresh = await getDealById(dealId);
+  return res.json({ status: fresh ? String(fresh.status) : String(deal.status) });
 }));
 
 // ── CHANNEL/GROUP custodial escrow (via @gramchioka) — additive, P2P untouched ──
@@ -1123,19 +1150,23 @@ app.use('/api/utrade-fallback', requireIdentity, asyncHandler(async (req, res) =
   return proxyToService(config.utradeUrl, config.utradeApiKey, req, res, finalPath);
 }));
 
-// Withdraw endpoint (admin-only; deprecated wrapper — guarded DB transition only)
+// Withdraw endpoint (admin-only; guarded release via adminRelease)
 app.post('/api/withdraw', requireAdmin, asyncHandler(async (req, res) => {
-  const { dealId, toAddress, amount, tokenType } = req.body;
-  const { transferTokens } = await import('./services/escrowService');
-  const result = await transferTokens(Number(dealId), toAddress, amount, tokenType);
+  const { dealId } = req.body;
+  const caller = getIdentityId(req);
+  const adminId = caller ?? (config.adminTelegramIds[0] ?? 0);
+  const { adminRelease } = await import('./services/escrowService');
+  const result = await adminRelease(Number(adminId), Number(dealId));
   return res.json(result);
 }));
 
-// Refund endpoint (admin-only; deprecated wrapper — guarded DB transition only)
+// Refund endpoint (admin-only; guarded refund via adminRefund)
 app.post('/api/refund', requireAdmin, asyncHandler(async (req, res) => {
-  const { dealId, toAddress } = req.body;
-  const { refundBuyerWithoutFee } = await import('./services/escrowService');
-  const result = await refundBuyerWithoutFee(Number(dealId), toAddress);
+  const { dealId } = req.body;
+  const caller = getIdentityId(req);
+  const adminId = caller ?? (config.adminTelegramIds[0] ?? 0);
+  const { adminRefund } = await import('./services/escrowService');
+  const result = await adminRefund(Number(adminId), Number(dealId));
   return res.json(result);
 }));
 
@@ -1418,6 +1449,141 @@ if (config.serveStatic) {
 const port = Number(process.env.PORT || 3000);
 let server: Server | null = null;
 
+function dealLikeForNotify(d: any): { id: number | string; amount: string | number; asset: string; terms?: string } {
+  return { id: d.id, amount: String(d.amount ?? '0'), asset: String(d.asset ?? 'TON'), terms: d.terms ?? undefined };
+}
+
+function isDisputedDeal(d: any): boolean {
+  try {
+    const c = (d as any).confirmations as Record<string, unknown> | null | undefined;
+    return !!(c && (c as any).disputed === true);
+  } catch {
+    return false;
+  }
+}
+
+/** Schedulers: expiry + reminders, every 5 min, unref'd. */
+function startSchedulers() {
+  const run = async () => {
+    try {
+      // (a) close AWAITING_DEPOSIT older than 24h
+      try {
+        const old = await db.query(
+          `SELECT * FROM deals WHERE status = 'AWAITING_DEPOSIT' AND created_at < now() - interval '24 hours' LIMIT 100`
+        );
+        for (const d of old.rows) {
+          if (isDisputedDeal(d)) continue;
+          if (String(d.status) === 'RELEASED' || String(d.status) === 'REFUNDED') continue;
+          try {
+            await updateDealStatus(Number(d.id), 'REFUNDED');
+            const msg = '24 soat toldanmadi, yopildi';
+            const like = dealLikeForNotify(d);
+            if (d.buyer_telegram_id != null) {
+              try {
+                await notify.adminDecisionToParty(Number(d.buyer_telegram_id), like, msg);
+              } catch {}
+            }
+            if (d.seller_telegram_id != null) {
+              try {
+                await notify.adminDecisionToParty(Number(d.seller_telegram_id), like, msg);
+              } catch {}
+            }
+          } catch (e) {
+            logger.warn(`expiry close failed for deal #${d.id}`, e);
+          }
+        }
+      } catch (e) {
+        logger.warn('expiry scheduler failed', e);
+      }
+
+      // (b1) AWAITING_DEPOSIT with both parties, older 1h, !remPay -> reminderToPayer
+      try {
+        const q1 = await db.query(
+          `SELECT * FROM deals WHERE status = 'AWAITING_DEPOSIT'
+           AND buyer_telegram_id IS NOT NULL AND seller_telegram_id IS NOT NULL
+           AND created_at < now() - interval '1 hour'
+           AND (confirmations->>'remPay' IS NULL OR confirmations->>'remPay' != 'true')
+           AND (confirmations->>'disputed' IS NULL OR confirmations->>'disputed' != 'true')
+           LIMIT 100`
+        );
+        for (const d of q1.rows) {
+          if (isDisputedDeal(d)) continue;
+          try {
+            await notify.reminderToPayer(Number(d.buyer_telegram_id), dealLikeForNotify(d));
+            await db.query(
+              `UPDATE deals SET confirmations = COALESCE(confirmations,'{}'::jsonb) || '{"remPay":true}'::jsonb, updated_at = now() WHERE id = $1`,
+              [d.id]
+            );
+          } catch (e) {
+            logger.warn(`remPay failed for deal #${d.id}`, e);
+          }
+        }
+      } catch (e) {
+        logger.warn('remPay scheduler failed', e);
+      }
+
+      // (b2) DEPOSIT_CONFIRMED older 3h, !remShip -> reminderToShipper
+      try {
+        const q2 = await db.query(
+          `SELECT * FROM deals WHERE status = 'DEPOSIT_CONFIRMED'
+           AND created_at < now() - interval '3 hours'
+           AND (confirmations->>'remShip' IS NULL OR confirmations->>'remShip' != 'true')
+           AND (confirmations->>'disputed' IS NULL OR confirmations->>'disputed' != 'true')
+           LIMIT 100`
+        );
+        for (const d of q2.rows) {
+          if (isDisputedDeal(d)) continue;
+          if (d.seller_telegram_id == null) continue;
+          try {
+            await notify.reminderToShipper(Number(d.seller_telegram_id), dealLikeForNotify(d));
+            await db.query(
+              `UPDATE deals SET confirmations = COALESCE(confirmations,'{}'::jsonb) || '{"remShip":true}'::jsonb, updated_at = now() WHERE id = $1`,
+              [d.id]
+            );
+          } catch (e) {
+            logger.warn(`remShip failed for deal #${d.id}`, e);
+          }
+        }
+      } catch (e) {
+        logger.warn('remShip scheduler failed', e);
+      }
+
+      // (b3) ITEM_SENT older 3h, !remConfirm -> reminderToConfirmer
+      try {
+        const q3 = await db.query(
+          `SELECT * FROM deals WHERE status = 'ITEM_SENT'
+           AND created_at < now() - interval '3 hours'
+           AND (confirmations->>'remConfirm' IS NULL OR confirmations->>'remConfirm' != 'true')
+           AND (confirmations->>'disputed' IS NULL OR confirmations->>'disputed' != 'true')
+           LIMIT 100`
+        );
+        for (const d of q3.rows) {
+          if (isDisputedDeal(d)) continue;
+          if (d.buyer_telegram_id == null) continue;
+          try {
+            await notify.reminderToConfirmer(Number(d.buyer_telegram_id), dealLikeForNotify(d));
+            await db.query(
+              `UPDATE deals SET confirmations = COALESCE(confirmations,'{}'::jsonb) || '{"remConfirm":true}'::jsonb, updated_at = now() WHERE id = $1`,
+              [d.id]
+            );
+          } catch (e) {
+            logger.warn(`remConfirm failed for deal #${d.id}`, e);
+          }
+        }
+      } catch (e) {
+        logger.warn('remConfirm scheduler failed', e);
+      }
+    } catch (e) {
+      logger.warn('scheduler run failed', e);
+    }
+  };
+  const timer = setInterval(() => {
+    void run();
+  }, 5 * 60 * 1000);
+  (timer as unknown as { unref?: () => void }).unref?.();
+  logger.info('Schedulers started (expiry + reminders, 5 min)');
+}
+
 async function boot() {
   // Retry DB with backoff — handles postgres "starting up" after unclean shutdown (40s recovery)
   let lastErr: unknown = null;
@@ -1449,6 +1615,11 @@ async function boot() {
     await startListener();
   } catch (err) {
     logger.error('Blockchain listener failed to start', err);
+  }
+  try {
+    startSchedulers();
+  } catch (err) {
+    logger.error('Schedulers failed to start', err);
   }
   server = app.listen(port, () => logger.info(`Server listening on http://localhost:${port}`));
 }
