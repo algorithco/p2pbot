@@ -87,12 +87,12 @@ function feeParts(amountStr: string, assetUpper: string, feeBpsRaw: unknown): { 
  */
 async function guardedTransition(dealId: number, status: string, opts?: { toAddress?: string; amount?: string | number; asset?: string; terms?: string }) {
   const deal = await getDealById(dealId);
-  if (!deal) throw new Error('deal_not_found');
-  if (![DEAL_STATUS.RELEASED, DEAL_STATUS.REFUNDED].includes(status as any)) throw new Error('invalid_target_status');
+  if (!deal) throw new Error(`deal_not_found: bitim topilmadi`);
+  if (![DEAL_STATUS.RELEASED, DEAL_STATUS.REFUNDED].includes(status as any)) throw new Error(`invalid_target_status: noto'g'ri holat`);
   if (!isValidTransition(String(deal.status), status)) {
-    throw new Error(`invalid_transition: cannot go from ${deal.status} to ${status}`);
+    throw new Error(`invalid_transition: ${deal.status} dan ${status} ga o'tib bo'lmaydi`);
   }
-  if (deal.status === status) throw new Error(`already_${status.toLowerCase()}`);
+  if (deal.status === status) throw new Error(`already_${String(status).toLowerCase()}: bitim allaqachon ${status} holatda`);
   const asset = String(opts?.asset || deal.asset || 'TON').toUpperCase();
   const assetUpper = asset;
   const amountStr = String(opts?.amount ?? deal.amount ?? 0);
@@ -125,9 +125,9 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
   const toAddress = await resolvePayoutAddress(deal, opts?.toAddress, targetTelegramId != null ? Number(targetTelegramId) : null);
   const isRefund = status === DEAL_STATUS.REFUNDED;
   if (!toAddress) {
-    if (isRelease) throw new Error('seller_ton_address_required: seller must set TON payout address in web app (Deal → Set payout address or Profile → TON address)');
+    if (isRelease) throw new Error(`seller_ton_address_required: sotuvchi TON manzilni ilovada kiritishi shart (Bitim → To'lov manzili yoki Profil → TON manzil)`);
     if (isRefund) {
-      throw new Error('buyer_ton_address_required: buyer TON address missing, set in web app');
+      throw new Error(`buyer_ton_address_required: xaridor TON manzili yo'q, ilovada kiriting`);
     }
   }
 
@@ -148,7 +148,7 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
         }
       } else {
         const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
-        if (!jettonMaster) throw new Error('jetton_master_not_configured: set JETTON_MASTER_ADDRESS or USDT_JETTON_ADDRESS');
+        if (!jettonMaster) throw new Error(`jetton_master_not_configured: jetton sozlanmagan, admin bilan bog'laning`);
         await sendJetton({ jettonMasterAddress: jettonMaster, to: toAddress!, amount: isRelease ? payoutHuman : amountStr, forwardComment: encryptedMemo, forwardTonAmount: '0.01' });
         logger.info(`Custodial Jetton ${status} for deal #${dealId} to ${toAddress} amount ${isRelease ? payoutHuman : amountStr}`);
         if (isRelease && feeBase > 0n && config.feeAddress && feeHuman !== '0') {
@@ -172,15 +172,15 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
       throw new Error(`onchain_send_failed: ${msg}`);
     }
   } else if (isRelease && !toAddress) {
-    throw new Error('seller_ton_address_required: seller must set payout address');
+    throw new Error(`seller_ton_address_required: sotuvchi to'lov manzilini kiritishi shart`);
   }
 
   await updateDealStatus(dealId, status);
   try {
     const { addDealMessage } = await import('./dealService');
     const sysText = status === DEAL_STATUS.RELEASED
-      ? `🔒 System: Deal #${dealId} RELEASED — ${isRelease ? payoutHuman : amountStr} ${asset} sent to seller${feeHuman !== '0' ? ` (fee ${feeHuman} ${asset})` : ''}.`
-      : `🔒 System: Deal #${dealId} REFUNDED — ${amountStr} ${asset} returned to buyer.`;
+      ? `Tizim: Yakunlandi (Deal #${dealId}) — ${isRelease ? payoutHuman : amountStr} ${asset} sotuvchiga yuborildi${feeHuman !== '0' ? ` (komissiya ${feeHuman} ${asset})` : ''}.`
+      : `Tizim: Qaytarildi (Deal #${dealId}) — ${amountStr} ${asset} xaridorga qaytarildi.`;
     await addDealMessage(dealId, 0, sysText);
   } catch {}
 }
@@ -188,16 +188,28 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
 export async function adminRelease(adminTelegramId: number | string, dealId: number | string) {
   const id = Number(dealId);
   if (!isAdmin(Number(adminTelegramId))) {
-    return { success: false, message: 'Unauthorized.' };
+    return { success: false, message: `Ruxsat yo'q.` };
   }
   try {
     const deal = await getDealById(id);
     await guardedTransition(id, DEAL_STATUS.RELEASED, deal ? { toAddress: undefined, amount: deal.amount, asset: deal.asset, terms: deal.terms } : undefined);
-    await notifyAdminsHub(`Deal #${id} RELEASED by admin ${adminTelegramId}`, String(deal?.amount ?? ''), String(deal?.asset ?? ''));
-    return { success: true, message: `Funds released (encrypted memo)` };
+    const like = deal ? dealLike({ id, amount: String(deal.amount), asset: String(deal.asset), terms: deal.terms }) : { id, amount: '', asset: 'TON' };
+    const partyText = `Admin qarori: pul sotuvchiga chiqarildi (Deal #${id}).`;
+    try {
+      if (deal?.buyer_telegram_id != null) await notify.adminDecisionToParty(Number(deal.buyer_telegram_id), like, partyText);
+    } catch {}
+    try {
+      if (deal?.seller_telegram_id != null) await notify.adminDecisionToParty(Number(deal.seller_telegram_id), like, partyText);
+    } catch {}
+    try {
+      const { saveAdminAlert } = await import('../db/queries');
+      await saveAdminAlert('admin_release', `Deal #${id} admin tomonidan chiqarildi`, { dealId: id, by: Number(adminTelegramId) });
+    } catch {}
+    await notifyAdminsHub(`Deal #${id} admin tomonidan chiqarildi (${adminTelegramId})`, String(deal?.amount ?? ''), String(deal?.asset ?? ''));
+    return { success: true, message: `Pul chiqarildi (shifrlangan memo)` };
   } catch (err) {
     logger.error(`adminRelease failed for deal #${id}`, err);
-    await notifyAdminsHub(`Deal #${id} release FAILED: ${(err as Error).message}`);
+    await notifyAdminsHub(`Deal #${id} chiqarish xatosi: ${(err as Error).message}`);
     return { success: false, message: (err as Error).message };
   }
 }
@@ -205,16 +217,28 @@ export async function adminRelease(adminTelegramId: number | string, dealId: num
 export async function adminRefund(adminTelegramId: number | string, dealId: number | string) {
   const id = Number(dealId);
   if (!isAdmin(Number(adminTelegramId))) {
-    return { success: false, message: 'Unauthorized.' };
+    return { success: false, message: `Ruxsat yo'q.` };
   }
   try {
     const deal = await getDealById(id);
     await guardedTransition(id, DEAL_STATUS.REFUNDED, deal ? { amount: deal.amount, asset: deal.asset, terms: deal.terms } : undefined);
-    await notifyAdminsHub(`Deal #${id} REFUNDED by admin ${adminTelegramId}`, String(deal?.amount ?? ''), String(deal?.asset ?? ''));
-    return { success: true, message: `Funds refunded (encrypted memo)` };
+    const like = deal ? dealLike({ id, amount: String(deal.amount), asset: String(deal.asset), terms: deal.terms }) : { id, amount: '', asset: 'TON' };
+    const partyText = `Admin qarori: pul xaridorga qaytarildi (Deal #${id}).`;
+    try {
+      if (deal?.buyer_telegram_id != null) await notify.adminDecisionToParty(Number(deal.buyer_telegram_id), like, partyText);
+    } catch {}
+    try {
+      if (deal?.seller_telegram_id != null) await notify.adminDecisionToParty(Number(deal.seller_telegram_id), like, partyText);
+    } catch {}
+    try {
+      const { saveAdminAlert } = await import('../db/queries');
+      await saveAdminAlert('admin_refund', `Deal #${id} admin tomonidan qaytarildi`, { dealId: id, by: Number(adminTelegramId) });
+    } catch {}
+    await notifyAdminsHub(`Deal #${id} admin tomonidan qaytarildi (${adminTelegramId})`, String(deal?.amount ?? ''), String(deal?.asset ?? ''));
+    return { success: true, message: `Pul qaytarildi (shifrlangan memo)` };
   } catch (err) {
     logger.error(`adminRefund failed for deal #${id}`, err);
-    await notifyAdminsHub(`Deal #${id} refund FAILED: ${(err as Error).message}`);
+    await notifyAdminsHub(`Deal #${id} qaytarish xatosi: ${(err as Error).message}`);
     return { success: false, message: (err as Error).message };
   }
 }
@@ -225,16 +249,16 @@ export async function adminRefund(adminTelegramId: number | string, dealId: numb
 export async function markItemSent(sellerTelegramId: number, dealId: number | string) {
   const id = Number(dealId);
   const deal = await getDealById(id);
-  if (!deal) return { success: false, message: 'Deal not found' };
+  if (!deal) return { success: false, message: 'Bitim topilmadi' };
   const isSeller = deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === sellerTelegramId;
-  if (!isSeller) return { success: false, message: 'Only the seller can mark item as sent.' };
+  if (!isSeller) return { success: false, message: `Faqat sotuvchi yuborilganini belgilay oladi.` };
   if (deal.status !== DEAL_STATUS.DEPOSIT_CONFIRMED) {
-    return { success: false, message: `Deal #${id} is "${deal.status}" — can only mark sent from DEPOSIT_CONFIRMED.` };
+    return { success: false, message: `Deal #${id} "${deal.status}" holatda — faqat DEPOSIT_CONFIRMED dan yuborilgan deb belgilash mumkin.` };
   }
   await updateDealStatus(id, DEAL_STATUS.ITEM_SENT);
   try {
     const { addDealMessage } = await import('./dealService');
-    await addDealMessage(id, 0, `📦 Seller marked item as sent for Deal #${id} — buyer please confirm receipt in web app.`);
+    await addDealMessage(id, 0, `Tizim: Sotuvchi yetkazdi (Deal #${id}) — xaridor ilovada qabulni tasdiqlang.`);
   } catch {}
   const buyerId = Number(deal.buyer_telegram_id);
   if (buyerId) {
@@ -245,7 +269,7 @@ export async function markItemSent(sellerTelegramId: number, dealId: number | st
     }
   }
   logger.info(`Deal #${id} marked ITEM_SENT by seller ${sellerTelegramId}`);
-  return { success: true, message: 'Item marked as sent — buyer notified via web app & bot.', status: DEAL_STATUS.ITEM_SENT };
+  return { success: true, message: `Yetkazildi deb belgilandi — xaridor xabardor qilindi.`, status: DEAL_STATUS.ITEM_SENT };
 }
 
 /**
@@ -255,21 +279,21 @@ export async function markItemSent(sellerTelegramId: number, dealId: number | st
 export async function buyerApproveReceipt(buyerTelegramId: number, dealId: number | string) {
   const id = Number(dealId);
   const deal = await getDealById(id);
-  if (!deal) return { success: false, message: 'Deal not found' };
+  if (!deal) return { success: false, message: 'Bitim topilmadi' };
   const isBuyer = deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === buyerTelegramId;
-  if (!isBuyer) return { success: false, message: 'Only the buyer can approve receipt and release funds.' };
+  if (!isBuyer) return { success: false, message: `Faqat xaridor qabulni tasdiqlab pulni chiqara oladi.` };
   const allowed = [DEAL_STATUS.ITEM_SENT];
   if (!allowed.includes(deal.status as any)) {
     if (deal.status === DEAL_STATUS.DEPOSIT_CONFIRMED) {
-      return { success: false, message: `Deal #${id} is "DEPOSIT_CONFIRMED" — seller must mark item as sent first (web app → I sent the item) before you can release.`, needItemSent: true } as any;
+      return { success: false, message: `Deal #${id} "DEPOSIT_CONFIRMED" holatda — avval sotuvchi "Yetkazdim" ni bosishi shart, keyin chiqarish mumkin.`, needItemSent: true } as any;
     }
     if (deal.status === DEAL_STATUS.BUYER_CONFIRMED) {
       logger.warn(`buyerApproveReceipt legacy BUYER_CONFIRMED for deal #${id}`);
     } else {
-      return { success: false, message: `Deal #${id} is "${deal.status}" — approval only from ITEM_SENT (seller must send item first).` };
+      return { success: false, message: `Deal #${id} "${deal.status}" holatda — faqat ITEM_SENT dan tasdiqlash mumkin (sotuvchi avval yuborishi shart).` };
     }
   }
-  if (deal.seller_telegram_id == null) return { success: false, message: 'Seller not yet joined — cannot release.' };
+  if (deal.seller_telegram_id == null) return { success: false, message: `Sotuvchi hali qo'shilmagan — chiqarib bo'lmaydi.` };
   const confirmations: Record<string, boolean> = { ...(deal.confirmations || {}), buyer: true };
   try {
     await setConfirmation(id, 'buyer', confirmations);
@@ -293,7 +317,7 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
 
   const payoutAddress = await resolvePayoutAddress(deal, undefined, deal.seller_telegram_id != null ? Number(deal.seller_telegram_id) : null);
   if (!payoutAddress) {
-    const msg = 'seller_ton_address_required: seller must set TON payout address in web app (Deal → Set payout address or Profile → TON address)';
+    const msg = `seller_ton_address_required: sotuvchi TON manzilni ilovada kiritishi shart (Bitim → To'lov manzili yoki Profil → TON manzil)`;
     try {
       const sellerId = Number(deal.seller_telegram_id);
       if (sellerId) {
@@ -302,7 +326,7 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
     } catch {}
     try {
       const { addDealMessage } = await import('./dealService');
-      await addDealMessage(id, 0, `⏳ Buyer confirmed receipt for Deal #${id} but seller payout address missing — seller please set payout address in web app.`);
+      await addDealMessage(id, 0, `Tizim: Xaridor qabul qildi (Deal #${id}), lekin sotuvchi to'lov manzili yo'q — sotuvchi ilovada manzilni kiriting.`);
     } catch {}
     logger.warn(`buyerApproveReceipt #${id}: missing payout address`);
     return { success: false, message: msg, needSellerAddress: true } as any;
@@ -342,14 +366,14 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
   } catch (e) {
     const msg = String((e as Error).message || '');
     logger.error(`buyerApproveReceipt payout failed for deal #${id}`, e);
-    await notifyAdminsHub(`Deal #${id} payout failed: ${msg} — amount ${sellerHuman} to ${payoutAddress}.`, sellerHuman, assetUpper);
-    return { success: false, message: msg.startsWith('payout_failed') ? msg : `payout_failed: ${msg}` };
+    await notifyAdminsHub(`Deal #${id} to'lov xatosi: ${msg} — ${sellerHuman} manzil ${payoutAddress}.`, sellerHuman, assetUpper);
+    return { success: false, message: msg.startsWith('payout_failed') ? msg : `payout_failed: to'lov yuborilmadi: ${msg}` };
   }
 
   await updateDealStatus(id, DEAL_STATUS.RELEASED);
   try {
     const { addDealMessage } = await import('./dealService');
-    await addDealMessage(id, 0, `🔒 System: Deal #${id} RELEASED — ${sellerHuman} ${assetUpper} sent to seller (fee ${feeHuman} ${assetUpper}).`);
+    await addDealMessage(id, 0, `Tizim: Yakunlandi (Deal #${id}) — ${sellerHuman} ${assetUpper} sotuvchiga yuborildi (komissiya ${feeHuman} ${assetUpper}).`);
   } catch {}
   try {
     await notify.releasedToBuyer(Number(deal.buyer_telegram_id), dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }));
@@ -362,7 +386,7 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
     logger.warn(`releasedToSeller notify failed for #${id}`, e);
   }
   logger.info(`Deal #${id} RELEASED by buyer ${buyerTelegramId} approval (seller ${sellerHuman}, fee ${feeHuman})`);
-  return { success: true, message: 'Receipt confirmed — funds released to seller minus fee. Deal closed.', released: true, status: DEAL_STATUS.RELEASED };
+  return { success: true, message: `Qabul qilindi — pul sotuvchiga chiqarildi (komissiya chegirilgan). Bitim yopildi.`, released: true, status: DEAL_STATUS.RELEASED };
 }
 
 // ── CHANNEL/GROUP custodial escrow (via @gramchioka) ──
@@ -412,8 +436,8 @@ export async function verifyChannelOwnershipForDeal(dealId: number | string, sel
     await updateChannelVerification(Number(dealId), { channelId: String(info.id), channelTitle: String(info.title||''), channelSnapshot: snapshot as any, verified });
     try {
       const { addDealMessage } = await import('./dealService');
-      if (verified) await addDealMessage(Number(dealId), 0, `✅ Channel ${rawUsername} verified — owner ${creatorId} matches seller ${expected}.`);
-      else await addDealMessage(Number(dealId), 0, `⚠️ Channel ${rawUsername} owner mismatch: creator ${creatorId ?? 'unknown'} vs seller ${expected}. Please ensure @gramchioka is admin and seller is creator.`);
+      if (verified) await addDealMessage(Number(dealId), 0, `Tizim: Kanal ${rawUsername} tasdiqlandi — ega ${creatorId} sotuvchi ${expected} ga mos.`);
+      else await addDealMessage(Number(dealId), 0, `Tizim: Kanal ${rawUsername} mos kelmadi: yaratuvchi ${creatorId ?? "noma'lum"} va sotuvchi ${expected}. @gramchioka admin ekanini va sotuvchi yaratuvchi ekanini tekshiring.`);
     } catch {}
     return { ok:true, verified, channelId: String(info.id), title: info.title, username: info.username, error: verified ? undefined : 'owner_mismatch' };
   } catch (e:any) {
@@ -439,7 +463,7 @@ export async function checkEscrowHolderOwnership(dealId: number | string): Promi
     if (isEscrowOwner) {
       const { setTransferToEscrow } = await import('./dealService');
       await setTransferToEscrow(Number(dealId));
-      try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `🔒 Escrow received channel ${channelId} — holder ${ESCROW_HOLDER_USERNAME} is now creator.`);} catch {}
+      try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `Tizim: Escrow ${channelId} kanalni qabul qildi — ${ESCROW_HOLDER_USERNAME} endi ega.`);} catch {}
     }
     return { ok:true, isEscrowOwner, currentCreatorId: creatorId ?? undefined };
   } catch (e:any) {
@@ -455,7 +479,7 @@ export async function requestTransferToEscrow(dealId: number | string, sellerTel
   const channelId = deal.channel_username || deal.channel_id;
   try {
     const { addDealMessage } = await import('./dealService');
-    await addDealMessage(Number(dealId), 0, `📢 Seller please transfer ownership of ${channelId} to ${ESCROW_HOLDER_USERNAME} now. After transfer, tap "I transferred".`);
+    await addDealMessage(Number(dealId), 0, `Tizim: Sotuvchi ${channelId} egaligini hozir ${ESCROW_HOLDER_USERNAME} ga o'tkazing. O'tkazgach "O'tkazdim" ni bosing.`);
     try {
       await notify.adminDecisionToParty(Number(sellerTelegramId), dealLike({ id: Number(dealId), amount: String(deal.amount ?? ''), asset: String(deal.asset ?? 'TON'), terms: deal.terms }), `Kanal ${channelId} ni ${ESCROW_HOLDER_USERNAME} ga o'tkazing`);
     } catch {}
@@ -478,7 +502,7 @@ export async function payoutSellerForChannel(dealId: number | string, sellerTele
   if (String(deal.status) === DEAL_STATUS.RELEASED || String(deal.status) === DEAL_STATUS.REFUNDED) return { success:false, error:`already_${String(deal.status).toLowerCase()}` };
   try {
     await guardedTransition(Number(dealId), DEAL_STATUS.RELEASED, { amount: deal.amount, asset: deal.asset, terms: deal.terms });
-    try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `💸 Payout sent to seller for channel ${deal.channel_username} — ${deal.amount} ${deal.asset} (fee deducted).`);} catch {}
+    try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `Tizim: Sotuvchiga to'lov yuborildi (${deal.channel_username}) — ${deal.amount} ${deal.asset} (komissiya chegirilgan).`);} catch {}
     return { success:true, message:'payout_sent' };
   } catch (e:any) {
     return { success:false, error: String(e?.message||e) };
@@ -502,7 +526,7 @@ export async function transferChannelToBuyer(dealId: number | string, newOwnerUs
     const res: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/takeover`, { method:'POST', body: JSON.stringify({ newOwnerId: target }), headers:{ 'x-idempotency-key': idemp }});
     const { setTransferToBuyer } = await import('./dealService');
     await setTransferToBuyer(Number(dealId), target);
-    try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `🎉 Channel ${channelId} transferred to new owner ${target}.`);} catch {}
+    try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `Tizim: Kanal ${channelId} yangi ega ${target} ga o'tkazildi.`);} catch {}
     return { ok:true };
   } catch (e:any) {
     const msg = String(e?.message||e);

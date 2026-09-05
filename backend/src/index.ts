@@ -720,6 +720,10 @@ app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asy
     const role = await approveJoinRequest(requestId, caller);
     try { await getDealChatKey(dealId); } catch {}
     try {
+      const { addDealMessage } = await import('./services/dealService');
+      await addDealMessage(dealId, 0, `Tizim: Deal boshlandi (Deal #${dealId}) — tomonlar kelishildi, to'lovni boshlang.`);
+    } catch {}
+    try {
       const deal = await getDealById(dealId);
       if (deal) {
         const { getJoinRequestById } = await import('./services/dealService');
@@ -744,6 +748,10 @@ app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asy
           } catch (e) {
             logger.warn(`Post-approve DEPOSIT_CONFIRMED notify failed for deal #${dealId}`, e);
           }
+          try {
+            const { addDealMessage } = await import('./services/dealService');
+            await addDealMessage(dealId, 0, `Tizim: To'lov qabul qilindi (Deal #${dealId}) — ${deal.amount} ${deal.asset}.`);
+          } catch {}
         }
       }
     } catch (notifyErr) {
@@ -903,7 +911,7 @@ app.post('/api/deals/:id/channel/set-new-owner', channelLimiter, requireIdentity
   if (!/^@[A-Za-z0-9_]{4,32}$/.test(uname)) return res.status(400).json({ error: 'invalid_username' });
   const { setPendingNewOwner } = await import('./services/dealService');
   await setPendingNewOwner(dealId, uname);
-  try { const { addDealMessage } = await import('./services/dealService'); await addDealMessage(dealId, caller, `🔑 Buyer set new owner for ${deal.channel_username} → ${uname}.`);} catch {}
+  try { const { addDealMessage } = await import('./services/dealService'); await addDealMessage(dealId, caller, `Xaridor ${deal.channel_username} uchun yangi ega tanladi → ${uname}.`);} catch {}
   return res.json({ ok:true, pending_new_owner: uname });
 }));
 app.post('/api/deals/:id/channel/transfer-to-buyer', channelLimiter, requireIdentity, asyncHandler(async (req, res) => {
@@ -1476,7 +1484,7 @@ function startSchedulers() {
           if (String(d.status) === 'RELEASED' || String(d.status) === 'REFUNDED') continue;
           try {
             await updateDealStatus(Number(d.id), 'REFUNDED');
-            const msg = '24 soat toldanmadi, yopildi';
+            const msg = `24 soat to'lov bo'lmagani uchun yopildi`;
             const like = dealLikeForNotify(d);
             if (d.buyer_telegram_id != null) {
               try {
@@ -1488,6 +1496,14 @@ function startSchedulers() {
                 await notify.adminDecisionToParty(Number(d.seller_telegram_id), like, msg);
               } catch {}
             }
+            try {
+              const { addDealMessage } = await import('./services/dealService');
+              await addDealMessage(Number(d.id), 0, `Tizim: 24 soat to'lov bo'lmagani uchun yopildi (Deal #${d.id}).`);
+            } catch {}
+            try {
+              const { saveAdminAlert } = await import('./db/queries');
+              await saveAdminAlert('auto_close', `Deal #${d.id} 24 soat to'lovsiz yopildi (REFUNDED)`, { dealId: Number(d.id) });
+            } catch {}
           } catch (e) {
             logger.warn(`expiry close failed for deal #${d.id}`, e);
           }

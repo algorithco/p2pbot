@@ -80,6 +80,19 @@ async function postChatSystemMessage(dealId: number, text: string) {
   }
 }
 
+async function unknownToAdminsAndSave(info: { amount: string | number; asset: string; address: string; memo: string }): Promise<void> {
+  try {
+    await notify.unknownDepositToAdmins(info);
+  } catch (e) {
+    logger.warn('unknownDepositToAdmins failed', e);
+  }
+  try {
+    const { saveAdminAlert } = await import('../db/queries');
+    const text = `Noma'lum to'lov: ${info.amount} ${info.asset} — ${info.memo}`.slice(0, 500);
+    await saveAdminAlert('unknown_deposit', text, { amount: String(info.amount), asset: info.asset, address: info.address, memo: info.memo });
+  } catch {}
+}
+
 async function notifySellerDeposit(deal: DealRow) {
   if (deal.seller_telegram_id == null) return;
   try {
@@ -87,7 +100,7 @@ async function notifySellerDeposit(deal: DealRow) {
   } catch (e) {
     logger.warn(`depositToSeller notify failed for deal #${deal.id}`, e);
   }
-  void postChatSystemMessage(deal.id, `Pul keldi: ${String(deal.amount)} ${String(deal.asset)} (Deal #${deal.id}).`);
+  void postChatSystemMessage(deal.id, `Tizim: To'lov qabul qilindi (Deal #${deal.id}) — ${String(deal.amount)} ${String(deal.asset)}.`);
 }
 
 async function processTonDeposit(addr: string, src: Address | null, value: bigint, txHash: string, comment: string | null) {
@@ -104,7 +117,7 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     }
     logger.warn(`Unknown TON deposit to ${addr} value ${value} memo "${decrypted || raw || '(memosiz)'}" — no memo match`);
     try {
-      await notify.unknownDepositToAdmins({
+      await unknownToAdminsAndSave({
         amount: human,
         asset: 'TON',
         address: addr,
@@ -126,7 +139,7 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     }
     logger.warn(`TON deposit memo escrow#${dealId} to ${addr} — no AWAITING_DEPOSIT deal, ignoring`);
     try {
-      await notify.unknownDepositToAdmins({
+      await unknownToAdminsAndSave({
         amount: human,
         asset: 'TON',
         address: addr,
@@ -146,7 +159,7 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     }
     logger.warn(`Deal #${deal.id} expects ${assetUpper} but got TON tx — ignoring`);
     try {
-      await notify.unknownDepositToAdmins({
+      await unknownToAdminsAndSave({
         amount: human,
         asset: 'TON',
         address: addr,
@@ -188,7 +201,7 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
           try {
             exHuman = fromBaseUnits(excess, 'TON');
           } catch {}
-          await notify.unknownDepositToAdmins({
+          await unknownToAdminsAndSave({
             amount: exHuman,
             asset: 'TON',
             address: addr,
@@ -212,7 +225,7 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
   } catch {}
   logger.info(`Deal #${deal.id}: TON underpay got ${value} expected ${expected} — waiting`);
   try {
-    await notify.unknownDepositToAdmins({
+    await unknownToAdminsAndSave({
       amount: gotHuman,
       asset: 'TON',
       address: addr,
@@ -253,7 +266,7 @@ async function processJettonDeposit(addr: string, note: JettonNotification, forw
     } catch {}
     logger.warn(`Unknown USDT deposit to ${addr} amount ${note.amount} forward "${decrypted || raw || '(memosiz)'}"`);
     try {
-      await notify.unknownDepositToAdmins({
+      await unknownToAdminsAndSave({
         amount: human,
         asset: 'USDT',
         address: addr,
@@ -271,7 +284,7 @@ async function processJettonDeposit(addr: string, note: JettonNotification, forw
     } catch {}
     logger.warn(`USDT deposit forward escrow#${dealId} to ${addr} — no AWAITING_DEPOSIT deal`);
     try {
-      await notify.unknownDepositToAdmins({
+      await unknownToAdminsAndSave({
         amount: human,
         asset: 'USDT',
         address: addr,
@@ -293,7 +306,7 @@ async function processJettonDeposit(addr: string, note: JettonNotification, forw
     }
     logger.warn(`Deal #${deal.id} expects ${assetUpper} but got USDT jetton — ignoring`);
     try {
-      await notify.unknownDepositToAdmins({
+      await unknownToAdminsAndSave({
         amount: human,
         asset: 'USDT',
         address: addr,
@@ -344,7 +357,7 @@ async function processJettonDeposit(addr: string, note: JettonNotification, forw
           try {
             exHuman = fromBaseUnits(excess, assetUpper);
           } catch {}
-          await notify.unknownDepositToAdmins({
+          await unknownToAdminsAndSave({
             amount: exHuman,
             asset: assetUpper,
             address: addr,
@@ -367,7 +380,7 @@ async function processJettonDeposit(addr: string, note: JettonNotification, forw
   } catch {}
   logger.info(`Deal #${deal.id}: USDT underpay got ${note.amount} expected ${expected}`);
   try {
-    await notify.unknownDepositToAdmins({
+    await unknownToAdminsAndSave({
       amount: gotHuman,
       asset: assetUpper,
       address: addr,
