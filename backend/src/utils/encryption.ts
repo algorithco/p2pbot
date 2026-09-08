@@ -7,7 +7,7 @@ import { config } from '../config';
  * - Supports 128 hex (64 bytes) by hashing to 32 bytes for compatibility.
  * - If ENCRYPTION_KEY not set, helpers become no-ops (plaintext) with warning.
  */
-function getMasterKey(): Buffer | null {
+export function getMasterKey(): Buffer | null {
   const raw = (config.encryptionKey || '').trim();
   if (!raw) return null;
   try {

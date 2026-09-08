@@ -31,7 +31,7 @@ import {
 } from './services/dealService';
 import { depositComment, releaseComment } from './utils/comments';
 import { commentToPayloadB64, encryptedCommentToPayloadB64, jettonTransferPayload } from './utils/tonPayload';
-import { isEncryptionEnabled } from './utils/encryption';
+import { isEncryptionEnabled, getMasterKey } from './utils/encryption';
 import { toBaseUnits } from './utils/money';
 import {
   identityAuth,
@@ -998,11 +998,11 @@ app.use('/api/ubot', requireIdentity, asyncHandler(async (req, res) => {
 // Keep proxy fallback for /health but handle trade flows directly for UI
 import crypto from 'crypto';
 function utradeEncryptSession(plain: string): string {
-  const keyHex = config.encryptionKey || '';
-  let key: Buffer;
-  if (/^[0-9a-fA-F]{64}$/.test(keyHex)) key = Buffer.from(keyHex, 'hex');
-  else if (/^[0-9a-fA-F]{128}$/.test(keyHex)) key = crypto.createHash('sha256').update(Buffer.from(keyHex, 'hex')).digest();
-  else key = crypto.createHash('sha256').update(keyHex || 'fallback-key-for-utrade-ui').digest();
+  const key = getMasterKey();
+  if (!key) {
+    // Fail closed: never fall back to a hardcoded public key (was 'fallback-key-for-utrade-ui')
+    throw new Error('encryption_not_configured: ENCRYPTION_KEY missing or invalid — refusing to encrypt session');
+  }
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
@@ -1021,12 +1021,20 @@ app.post('/api/utrade/trades', requireIdentity, asyncHandler(async (req, res) =>
   const { session, phone } = req.body as any;
   if (!session && !phone) return res.status(400).json({ error: 'session_or_phone_required' });
   let enc = '';
-  if (session) {
-    if (typeof session !== 'string' || session.trim().length < 10) return res.status(400).json({ error: 'invalid_session' });
-    enc = utradeEncryptSession(String(session).trim());
-  } else {
-    // phone-only placeholder session — store phone as session placeholder
-    enc = utradeEncryptSession('phone:' + String(phone).trim());
+  try {
+    if (session) {
+      if (typeof session !== 'string' || session.trim().length < 10) return res.status(400).json({ error: 'invalid_session' });
+      enc = utradeEncryptSession(String(session).trim());
+    } else {
+      // phone-only placeholder session — store phone as session placeholder
+      enc = utradeEncryptSession('phone:' + String(phone).trim());
+    }
+  } catch (e) {
+    const msg = String((e as Error).message || '');
+    if (msg.includes('encryption_not_configured')) {
+      return res.status(503).json({ error: 'encryption_not_configured', detail: 'ENCRYPTION_KEY not set — utrade disabled' });
+    }
+    throw e;
   }
   // Ensure table exists (idempotent)
   try { await db.query("SELECT 1 FROM utrade_trades LIMIT 1"); } catch {
