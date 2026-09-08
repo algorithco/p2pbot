@@ -980,17 +980,34 @@ async function proxyToService(serviceUrl: string, apiKey: string, req: Request, 
   }
 }
 
-// ubot proxy — keep 127.0.0.1:3002 host-bound, frontend never talks directly
+// ubot proxy — locked down (fix 2.3): only safe read-only GETs are proxied.
+// State-changing POST /channel/:id/{promote,transfer,takeover} must go via
+// dedicated /api/deals/:id/channel/* routes which enforce deal ownership (seller/buyer + status).
+// Raw takeover via generic proxy would allow any authenticated user to seize any channel.
+const UBOT_SAFE_GET = [
+  /^\/health\/?$/,
+  /^\/channel\/[^/]+\/?$/,
+  /^\/channel\/[^/]+\/admins\/?$/,
+  /^\/group\/[^/]+\/isBasic\/?$/,
+];
 app.use('/api/ubot', requireIdentity, asyncHandler(async (req, res) => {
-  const targetPath = req.originalUrl.replace(/^\/api\/ubot/, '') || '/';
-  // Map /api/ubot/* -> /... on ubot (strip prefix)
-  // ubot expects /channel/:id etc., so keep path as-is after prefix
-  // e.g. /api/ubot/channel/123 -> /channel/123
-  const p = targetPath.startsWith('/') ? targetPath : '/' + targetPath;
-  // Preserve query
+  const rawPath = req.originalUrl.replace(/^\/api\/ubot/, '') || '/';
+  const pathOnly = rawPath.split('?')[0];
+  const p = pathOnly.startsWith('/') ? pathOnly : '/' + pathOnly;
   const qIdx = req.originalUrl.indexOf('?');
   const q = qIdx !== -1 ? req.originalUrl.slice(qIdx) : '';
-  const finalPath = p.split('?')[0] + q;
+  const finalPath = p + q;
+
+  // Only allow safe read-only GETs via generic proxy
+  if (req.method !== 'GET') {
+    return res.status(403).json({
+      error: 'ubot_proxy_forbidden',
+      detail: 'State-changing ubot calls must use dedicated /api/deals/:id/channel/* endpoints which verify deal ownership. Direct /api/ubot POST is disabled.',
+    });
+  }
+  if (!UBOT_SAFE_GET.some((re) => re.test(p))) {
+    return res.status(403).json({ error: 'ubot_proxy_path_not_allowed', detail: `GET ${p} not in ubot allowlist` });
+  }
   return proxyToService(config.ubotUrl, config.ubotApiKey, req, res, finalPath);
 }));
 
