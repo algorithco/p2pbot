@@ -98,7 +98,7 @@ async function main() {
         password: async (hint?: string) => {
           console.log(`\n🔐 2FA Cloud Password so'raldi${hint ? ` (hint: "${hint}")` : ' (hint yo\'q)'}`);
           if (hint) console.log(`   Hint: ${hint} — shu so'zga mos parolni kiriting!`);
-          console.log(`   .env TWO_FA_PASSWORD=${config.twoFaPassword ? config.twoFaPassword.slice(0, 3) + '***' : '(bo\'sh)'}`);
+          console.log(`   .env TWO_FA_PASSWORD=${config.twoFaPassword ? '(set)' : '(bo\'sh)'}`);
           let pwd = config.twoFaPassword;
           if (pwd) {
             console.log(`   → Avtomatik .env dagi TWO_FA_PASSWORD ishlatilmoqda...`);
