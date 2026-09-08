@@ -140,6 +140,17 @@ export async function ensureTables() {
       updated_at TIMESTAMPTZ DEFAULT now()
     );
   `);
+
+  // Fix 3.1: defense-in-depth DB check for positive amount
+  try {
+    await pool.query(`ALTER TABLE deals ADD CONSTRAINT chk_deals_amount_pos CHECK (amount > 0)`);
+  } catch (e) {
+    const msg = String((e as Error).message || '');
+    if (!msg.includes('already exists') && !msg.includes('chk_deals_amount_pos')) {
+      // If existing rows violate (e.g. NaN), log but don't crash boot
+      console.warn('Could not add chk_deals_amount_pos (existing bad rows?)', msg.slice(0,300));
+    }
+  }
 }
 
 export async function saveNotification(chatId: number, message: string) {

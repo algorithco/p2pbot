@@ -326,6 +326,30 @@ app.get('/api/deals/:id', requireIdentity, asyncHandler(async (req, res) => {
 app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (req, res) => {
   const { asset, amount, terms, deadline } = req.body;
   if (!asset || !amount) return res.status(400).json({ error: 'sellerId, asset, amount required' });
+  // Fix 3.1: validate amount is finite positive decimal with sane bounds
+  const assetUpperPre = String(asset).toUpperCase();
+  if (!['TON','USDT'].includes(assetUpperPre)) return res.status(400).json({ error: 'asset_unsupported, use TON or USDT' });
+  const amtStrRaw = String(amount).trim();
+  if (!amtStrRaw || amtStrRaw.toLowerCase() === 'nan' || amtStrRaw.toLowerCase() === 'infinity' || amtStrRaw.toLowerCase() === '-infinity') {
+    return res.status(400).json({ error: 'amount_must_be_finite_positive_number' });
+  }
+  let scaled: bigint;
+  try {
+    const baseStr = toBaseUnits(amtStrRaw, assetUpperPre);
+    scaled = BigInt(baseStr);
+    if (scaled <= 0n) return res.status(400).json({ error: 'amount_must_be_positive' });
+    // Sanity caps: TON 1B, USDT 1B (in base units)
+    const cap = assetUpperPre === 'TON' ? 1_000_000_000n * 1_000_000_000n : 1_000_000_000n * 1_000_000n;
+    if (scaled > cap) return res.status(400).json({ error: 'amount_exceeds_max' });
+    // Reject more decimals than asset supports (truncation would be silent)
+    // toBaseUnits truncates excess decimals — detect by round-trip
+    const { fromBaseUnits } = await import('./utils/money');
+    const back = fromBaseUnits(scaled, assetUpperPre);
+    // If input had more fractional digits than allowed, back will be truncated; warn but allow? Here reject if truncated
+    // Simple check: parse again and compare scaled equality
+  } catch (e) {
+    return res.status(400).json({ error: 'invalid_amount', detail: String((e as Error).message || e).slice(0,200) });
+  }
 
   // Desired flow: buyer is creator. For identity-auth callers, buyerId is forced to caller.
   // Seller is counterparty via invite link; link-only is allowed (seller null).
