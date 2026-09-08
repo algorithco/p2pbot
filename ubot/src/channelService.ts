@@ -1,6 +1,6 @@
 import { Api } from 'teleproto';
 import { ensureClient, withFloodWait, isChannelBlocked } from './client';
-import logger from './logger';
+import logger, { sanitizeLogValue } from './logger';
 import { config } from './config';
 import { humanDelay, sleep, jitteredDelay } from './humanDelay';
 import { cachedGetEntity, cachedGetPassword, entityCache } from './entityCache';
@@ -315,7 +315,7 @@ export async function promoteToAdmin(
     }
     if (msg.includes('CHAT_NOT_MODIFIED')) {
       // Already admin with same rights — treat as success
-      logger.info(`Promote not modified — ${userId} already admin in ${channel}`);
+      logger.info(`Promote not modified — ${sanitizeLogValue(userId)} already admin in ${sanitizeLogValue(channel)}`);
       return;
     }
     if (msg.includes('RIGHTS_INVALID') || msg.includes('RANK_INVALID')) {
@@ -323,7 +323,7 @@ export async function promoteToAdmin(
     }
     mapChannelError(e, channel);
   }
-  logger.info(`Promoted ${userId} to admin in ${channel}`);
+  logger.info(`Promoted ${sanitizeLogValue(userId)} to admin in ${sanitizeLogValue(channel)}`);
 }
 
 // Direct-entity version for transfer ownership
@@ -476,7 +476,7 @@ export async function transferChannelOwnership(
         ) as Promise<unknown>
       );
     }
-    logger.info(`Transferred ownership of ${channel} to ${newOwnerUserId}`);
+    logger.info(`Transferred ownership of ${sanitizeLogValue(channel)} to ${sanitizeLogValue(newOwnerUserId)}`);
   } catch (e) {
     const msg = String((e as Error).message || e);
     if (msg.includes('PASSWORD_HASH_INVALID') || msg.includes('PASSWORD_EMPTY') || msg.includes('SRP_ID_INVALID')) {

@@ -2,7 +2,7 @@ import { Address, Cell, beginCell, toNano, SendMode } from '@ton/core';
 import { TonClient, WalletContractV5R1 } from '@ton/ton';
 import { mnemonicToPrivateKey, KeyPair } from '@ton/crypto';
 import { config } from './config';
-import logger from './logger';
+import logger, { sanitizeLogValue } from './logger';
 
 const TONCENTER_MAINNET = 'https://toncenter.com/api/v2/jsonRPC';
 const TONCENTER_TESTNET = 'https://testnet.toncenter.com/api/v2/jsonRPC';
@@ -281,7 +281,7 @@ export class W5Signer {
         }),
       ],
     });
-    logger.info(`Jetton send ${req.amount} from ${jettonWalletAddr.toString()} to ${dest.toString()} with memo "${req.forwardComment || ''}"`);
+    logger.info(`Jetton send ${sanitizeLogValue(req.amount)} from ${sanitizeLogValue(jettonWalletAddr.toString())} to ${sanitizeLogValue(dest.toString())} with memo "${sanitizeLogValue(req.forwardComment || '')}"`);
     return { seqno };
   }
 

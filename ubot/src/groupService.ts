@@ -1,6 +1,6 @@
 import { Api } from 'teleproto';
 import { ensureClient, withFloodWait } from './client';
-import logger from './logger';
+import logger, { sanitizeLogValue } from './logger';
 import {
   promoteToAdmin,
   demoteAdmin,
@@ -51,7 +51,7 @@ export async function migrateToSupergroup(groupId: string | number): Promise<Api
       )) as unknown as { updates: { chats: Api.Channel[] } };
       const migrated = res?.updates?.chats?.[0];
       if (!migrated) throw new Error('migrate_failed: Telegram did not return migrated channel (already migrated or not admin)');
-      logger.info(`Migrated group ${groupId} to supergroup ${(migrated as unknown as { id: unknown }).id}`);
+      logger.info(`Migrated group ${sanitizeLogValue(groupId)} to supergroup ${sanitizeLogValue((migrated as unknown as { id: unknown }).id)}`);
       // Invalidate old Chat cache and cache new supergroup under same key for future ensureSupergroup fast path
       entityCache.delete(`entity:${key}`);
       // Also cache migrated channel by its new id if available
@@ -96,12 +96,12 @@ async function ensureSupergroup(groupId: string | number): Promise<Api.Channel> 
     entity = await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, key);
   } catch (e) {
     // Let migrate handle not-found vs already migrated edge
-    logger.debug(`ensureSupergroup cache miss for ${key}, falling back to migrate`, e);
+    logger.debug(`ensureSupergroup cache miss for ${sanitizeLogValue(key)}, falling back to migrate`, e);
     return await migrateToSupergroup(groupId);
   }
   const className = (entity as { className?: string })?.className;
   if (className === 'Chat') {
-    logger.info(`Group ${groupId} is basic Chat — migrating to supergroup`);
+    logger.info(`Group ${sanitizeLogValue(groupId)} is basic Chat — migrating to supergroup`);
     // Direct migrate using already-fetched Chat entity to avoid double getEntity
     const chatEntity = entity as Api.Chat & { id: unknown };
     // Use migrating lock with direct invoke to avoid duplicate getEntity inside migrateToSupergroup
@@ -121,7 +121,7 @@ async function ensureSupergroup(groupId: string | number): Promise<Api.Channel> 
         )) as unknown as { updates: { chats: Api.Channel[] } };
         const migrated = res?.updates?.chats?.[0];
         if (!migrated) throw new Error('migrate_failed: Telegram did not return migrated channel');
-        logger.info(`Migrated group ${groupId} to supergroup ${(migrated as unknown as { id: unknown }).id}`);
+        logger.info(`Migrated group ${sanitizeLogValue(groupId)} to supergroup ${sanitizeLogValue((migrated as unknown as { id: unknown }).id)}`);
         entityCache.delete(`entity:${key}`);
         entityCache.set(`entity:${key}`, migrated);
         try {
@@ -230,7 +230,7 @@ export async function addGroupMember(groupId: string | number, userId: string | 
   } catch (e) {
     const msg = String((e as Error).message || e);
     if (msg.includes('USER_ALREADY_PARTICIPANT')) {
-      logger.info(`User ${userId} already participant in ${groupId}`);
+      logger.info(`User ${sanitizeLogValue(userId)} already participant in ${sanitizeLogValue(groupId)}`);
       return;
     }
     if (msg.includes('USER_NOT_MUTUAL_CONTACT')) throw new Error(`user_not_mutual: ${userId} — not mutual contact or privacy restricted`);
@@ -239,5 +239,5 @@ export async function addGroupMember(groupId: string | number, userId: string | 
     if (msg.includes('INVITE_REQUEST_SENT')) throw new Error('invite_request_sent: join request already pending (group requires approval)');
     throw e;
   }
-  logger.info(`Invited ${userId} to group ${groupId}`);
+  logger.info(`Invited ${sanitizeLogValue(userId)} to group ${sanitizeLogValue(groupId)}`);
 }

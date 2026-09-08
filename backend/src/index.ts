@@ -8,7 +8,7 @@ import { db, connectDB, listDeals } from './db/queries';
 import { Address, openContract } from '@ton/core';
 import { Escrow } from './contracts/wrappers/Escrow';
 import { client } from './blockchain/tonClient';
-import logger from './logger';
+import logger, { sanitizeLogValue } from './logger';
 import { startBot, getBot } from './bot/bot';
 import { startListener, addAddressToMonitor, recheckAddress } from './blockchain/listener';
 import * as notify from './bot/notify';
@@ -220,7 +220,7 @@ app.get('/tonconnect-manifest.json', (req, res) => {
   origin = `${proto}://${host}`;
   // Log for debugging wallet issues
   if (req.get('origin') || req.get('referer')) {
-    logger.info(`tonconnect-manifest requested via ${origin} (host=${host}, x-forwarded-proto=${forwardedProto}, referer=${req.get('referer')})`);
+    logger.info(`tonconnect-manifest requested via ${sanitizeLogValue(origin)} (host=${sanitizeLogValue(host)}, x-forwarded-proto=${sanitizeLogValue(forwardedProto)}, referer=${sanitizeLogValue(req.get('referer'))})`);
   }
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -267,7 +267,7 @@ app.post('/api/users/me/ton-address', requireIdentity, asyncHandler(async (req, 
      ON CONFLICT (telegram_id) DO UPDATE SET ton_address = EXCLUDED.ton_address`,
     [telegramId, req.user?.username || null, raw]
   );
-  logger.info(`User ${telegramId} set ton_address ${raw.slice(0,12)}...`);
+  logger.info(`User ${sanitizeLogValue(telegramId)} set ton_address ${sanitizeLogValue(raw.slice(0, 12))}...`);
   return res.json({ ok: true, ton_address: raw });
 }));
 
@@ -1014,7 +1014,7 @@ async function proxyToService(serviceUrl: string, apiKey: string, req: Request, 
     if (typeof data === 'object' && data !== null) return res.json(data);
     return res.send(data);
   } catch (e) {
-    logger.warn(`proxy ${url} failed`, e);
+    logger.warn(`proxy ${sanitizeLogValue(url)} failed`, e);
     return res.status(502).json({ error: 'upstream_unavailable', detail: String((e as Error).message || e) });
   }
 }
@@ -1303,7 +1303,7 @@ app.get('/api/balance/:address', asyncHandler(async (req, res) => {
       network: config.tonNetwork,
     });
   } catch (err) {
-    logger.warn('/api/balance error for ' + raw, err);
+    logger.warn('/api/balance error for ' + sanitizeLogValue(raw), err);
     return res.status(400).json({ error: 'invalid_address', detail: String((err as Error).message || err) });
   }
 }));

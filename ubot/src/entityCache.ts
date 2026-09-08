@@ -1,5 +1,5 @@
 import { withFloodWait } from './client';
-import logger from './logger';
+import logger, { sanitizeLogValue } from './logger';
 
 /**
  * Simple LRU cache with TTL (5m default, max 1000 entries).
@@ -105,7 +105,7 @@ export async function cachedGetEntity(client: { getEntity: (id: string) => Promi
   const key = `entity:${String(idString)}`;
   const cached = entityCache.get(key);
   if (cached !== undefined) {
-    logger.debug?.(`entityCache hit: ${key}`);
+    logger.debug?.(`entityCache hit: ${sanitizeLogValue(key)}`);
     return cached;
   }
   const entity = await withFloodWait(() => client.getEntity(String(idString)) as Promise<unknown>);

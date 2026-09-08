@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { config } from './config';
-import logger, { redactSecrets } from './logger';
+import logger, { redactSecrets, sanitizeLogValue } from './logger';
 import { ensureClient, isGlobalFlooded, isChannelBlocked, getGlobalFloodUntil, sleep, channelBreakers } from './client';
 import { promoteToAdmin, transferChannelOwnership, getChannelInfo, listChannelAdmins } from './channelService';
 import { promoteGroupAdmin, transferGroupOwnership, isBasicGroup, migrateToSupergroup, addGroupMember } from './groupService';
@@ -280,10 +280,10 @@ export function createApi() {
     res.on('finish', () => {
       const ms = Date.now() - start;
       const ua = (req.headers['user-agent'] as string) || '-';
-      logger.info(`${req.method} ${req.originalUrl} ${res.statusCode} ${ms}ms`, {
+      logger.info(`${sanitizeLogValue(req.method)} ${sanitizeLogValue(req.originalUrl)} ${res.statusCode} ${ms}ms`, {
         reqId,
         ip: req.ip || req.socket?.remoteAddress,
-        ua: String(ua).slice(0, 120),
+        ua: sanitizeLogValue(String(ua).slice(0, 120)),
       });
     });
     next();
