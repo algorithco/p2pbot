@@ -59,7 +59,7 @@ function mapTelegramError(err: unknown): { status: number; error: string; retryA
     m = msg.match(/(?:SESSION_TOO_FRESH|PASSWORD_TOO_FRESH)_(\d+)/i);
     if (m) return parseInt(m[1], 10);
     // Generic seconds patterns
-    m = msg.match(/(\d+)\s*seconds/i);
+    m = msg.match(/(\d{1,10})\s*seconds/i);
     if (m) return parseInt(m[1], 10);
     m = msg.match(/wait of (\d+) seconds/i);
     if (m) return parseInt(m[1], 10);

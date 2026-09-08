@@ -141,7 +141,7 @@ function parseFloodSeconds(e: unknown): number | null {
     // try to extract seconds if present, else hard 24h for safety
     const m = msg.match(/PEER_FLOOD_\d+|PEER_FLOOD/i);
     if (m) {
-      const secMatch = msg.match(/(\d+)\s*seconds/i) || msg.match(/FLOOD_WAIT_(\d+)/i);
+      const secMatch = msg.match(/(\d{1,10})\s*seconds/i) || msg.match(/FLOOD_WAIT_(\d+)/i);
       if (secMatch) return parseInt(secMatch[1], 10);
     }
     return 86400;
@@ -151,7 +151,7 @@ function parseFloodSeconds(e: unknown): number | null {
   if (msg.includes('SLOWMODE_WAIT') || msg.includes('SlowModeWait')) {
     const m = msg.match(/SLOWMODE_WAIT_(\d+)|wait of (\d+) seconds/i);
     if (m) return parseInt(m[1] || m[2] || '30', 10);
-    const sec = msg.match(/(\d+)\s*seconds/i);
+    const sec = msg.match(/(\d{1,10})\s*seconds/i);
     if (sec) return parseInt(sec[1], 10);
     return 60;
   }
@@ -160,7 +160,7 @@ function parseFloodSeconds(e: unknown): number | null {
   if (msg.includes('TAKEOUT_INIT_DELAY') || msg.includes('TakeoutInitDelay')) {
     const m = msg.match(/TAKEOUT_INIT_DELAY_(\d+)/i);
     if (m) return parseInt(m[1], 10);
-    const sec = msg.match(/(\d+)\s*seconds/i);
+    const sec = msg.match(/(\d{1,10})\s*seconds/i);
     if (sec) return parseInt(sec[1], 10);
     return 30;
   }
