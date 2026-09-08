@@ -2,10 +2,13 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const config = {
-  botToken: process.env.BOT_TOKEN!,
+  botToken: process.env.BOT_TOKEN || '',
   botUsername: process.env.BOT_USERNAME || 'uzsavdochibot',
-  adminTelegramIds: (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(Number),
-  databaseUrl: process.env.DATABASE_URL!,
+  adminTelegramIds: (process.env.ADMIN_TELEGRAM_IDS || '')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0 && Number.isSafeInteger(n)),
+  databaseUrl: process.env.DATABASE_URL || '',
   tonApiEndpoint: process.env.TON_API_ENDPOINT || 'https://tonapi.io',
   tonNetwork: process.env.TON_NETWORK || 'mainnet',
   // Signer microservice (W5 wallet) — holds SIGNER_MNEMONIC isolated
@@ -44,3 +47,14 @@ export const config = {
   // Fix 3.3: dev auth requires explicit opt-in, never in production by accident
   allowDevAuth: process.env.ALLOW_DEV_AUTH === 'true',
 };
+
+// Startup validation (fix: config.ts ! assertions had no runtime effect, enabling 3.3)
+if (!config.databaseUrl) {
+  console.warn('[config] DATABASE_URL not set — backend will fail to connect to Postgres');
+}
+if (config.encryptionKey && !/^[0-9a-fA-F]{64}$/.test(config.encryptionKey) && !/^[0-9a-fA-F]{128}$/.test(config.encryptionKey)) {
+  console.warn('[config] ENCRYPTION_KEY is set but not 64 or 128 hex chars — encryption will be disabled (fail-closed for utrade)');
+}
+if (config.feeBps < 0 || config.feeBps > 10000) {
+  console.warn(`[config] FEE_BPS ${config.feeBps} out of range 0-10000, clamping may occur`);
+}

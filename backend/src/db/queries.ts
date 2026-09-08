@@ -167,7 +167,8 @@ export async function saveAdminAlert(kind: string, text: string, meta: Record<st
   try {
     const res = await pool.query('INSERT INTO admin_alerts (kind, text, meta) VALUES ($1,$2,$3::jsonb) RETURNING *', [kind, text, JSON.stringify(meta || {})]);
     return res.rows[0];
-  } catch {
+  } catch (e) {
+    console.warn('[db] saveAdminAlert failed', String((e as Error).message || e).slice(0,300), { kind, text: text.slice(0,100) });
     return null;
   }
 }

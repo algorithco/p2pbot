@@ -28,6 +28,14 @@ import {
   addEncryptedMessage,
   createJoinRequest,
   updateDealStatus,
+  addDealMessage,
+  approveJoinRequest,
+  rejectJoinRequest,
+  getJoinRequestById,
+  updateChannelVerification,
+  setTransferToEscrow,
+  setTransferToBuyer,
+  setPendingNewOwner,
 } from './services/dealService';
 import { depositComment, releaseComment } from './utils/comments';
 import { commentToPayloadB64, encryptedCommentToPayloadB64, jettonTransferPayload } from './utils/tonPayload';
