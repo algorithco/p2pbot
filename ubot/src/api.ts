@@ -242,11 +242,11 @@ export function createApi() {
   try {
     const fn = helmet?.default || helmet;
     if (typeof fn === 'function') {
-      helmetMw = fn({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, hsts: config.isProduction ? { maxAge: 31536000 } : false });
+      helmetMw = fn({ crossOriginEmbedderPolicy: false, hsts: config.isProduction ? { maxAge: 31536000 } : false });
     } else if (helmet) {
       // helmet may be the middleware factory itself
       const maybe = helmet as unknown as (opts?: unknown) => (req: Request, res: Response, next: NextFunction) => void;
-      if (typeof maybe === 'function') helmetMw = maybe({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false });
+      if (typeof maybe === 'function') helmetMw = maybe({ crossOriginEmbedderPolicy: false });
     }
   } catch {
     helmetMw = (_req, _res, next) => next();
