@@ -2,6 +2,12 @@
 (function () {
   var eventHandlers = {};
 
+  // User-controlled URL data must never be written to dangerous object keys
+  // (prototype pollution / property injection).
+  function isSafeKey(name) {
+    return name !== '__proto__' && name !== 'constructor' && name !== 'prototype';
+  }
+
   var locationHash = '';
   try {
     locationHash = location.hash.toString();
@@ -11,7 +17,7 @@
   var storedParams = sessionStorageGet('initParams');
   if (storedParams) {
     for (var key in storedParams) {
-      if (typeof initParams[key] === 'undefined') {
+      if (isSafeKey(key) && typeof initParams[key] === 'undefined') {
         initParams[key] = storedParams[key];
       }
     }
@@ -80,7 +86,7 @@
     }
     var query_params = urlParseQueryString(locationHash);
     for (var k in query_params) {
-      params[k] = query_params[k];
+      if (isSafeKey(k)) params[k] = query_params[k];
     }
     return params;
   }
@@ -96,7 +102,7 @@
       param = queryStringParams[i].split('=');
       paramName = urlSafeDecode(param[0]);
       paramValue = param[1] == null ? null : urlSafeDecode(param[1]);
-      params[paramName] = paramValue;
+      if (isSafeKey(paramName)) params[paramName] = paramValue;
     }
     return params;
   }
