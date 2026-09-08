@@ -18,11 +18,53 @@ const monitoredAddresses = new Set<string>();
 /** Per-address cursor so only NEW transactions (higher lt) are processed. */
 const cursors = new Map<string, { lt: string; hash: string }>();
 
+async function loadPersistedCursors() {
+  try {
+    const res = await db.query('SELECT address, lt, hash FROM listener_cursors');
+    for (const r of res.rows) {
+      cursors.set(String(r.address), { lt: String(r.lt), hash: String(r.hash) });
+    }
+    if (res.rows.length) logger.info(`Listener: loaded ${res.rows.length} persisted cursors`);
+  } catch (e) {
+    logger.warn('Listener: could not load persisted cursors', e);
+  }
+}
+
+async function persistCursor(address: string, lt: string, hash: string) {
+  try {
+    await db.query(
+      `INSERT INTO listener_cursors (address, lt, hash, updated_at) VALUES ($1,$2,$3,now())
+       ON CONFLICT (address) DO UPDATE SET lt = EXCLUDED.lt, hash = EXCLUDED.hash, updated_at = now()`,
+      [address, lt, hash]
+    );
+  } catch (e) {
+    logger.warn(`Listener: could not persist cursor for ${address}`, e);
+  }
+}
+
+async function seedMonitoredAddressesFromDB() {
+  try {
+    const res = await db.query(`SELECT DISTINCT payment_address FROM deals WHERE status = 'AWAITING_DEPOSIT' AND payment_address IS NOT NULL AND payment_address <> ''`);
+    let added = 0;
+    for (const r of res.rows) {
+      const addr = String(r.payment_address).trim();
+      if (addr && !monitoredAddresses.has(addr)) {
+        monitoredAddresses.add(addr);
+        added++;
+      }
+    }
+    if (added) logger.info(`Listener: seeded ${added} monitored addresses from awaiting deals`);
+  } catch (e) {
+    logger.warn('Listener: could not seed monitored addresses', e);
+  }
+}
+
 export function addAddressToMonitor(address: string) {
   const normalized = address.trim();
   if (!normalized || monitoredAddresses.has(normalized)) return;
   monitoredAddresses.add(normalized);
-  // Seed lazily on first poll; existing history must not trigger old deals.
+  // New address: first poll will seed cursor without processing (avoid replaying old history)
+  logger.info(`Listener: added ${normalized} to monitor`);
 }
 
 interface DealRow {
@@ -461,6 +503,8 @@ async function pollAddress(addr: string) {
 
   if (maxSeen && (!cursor || BigInt(maxSeen.lt) > BigInt(cursor.lt))) {
     cursors.set(addr, maxSeen);
+    // Persist to DB so restart doesn't reseed and skip deposits (fix 2.4)
+    await persistCursor(addr, maxSeen.lt, maxSeen.hash);
   }
 }
 
@@ -478,6 +522,9 @@ export async function recheckAddress(address: string): Promise<void> {
 
 export async function startListener() {
   logger.info('Blockchain listener started');
+  // Fix 2.4: restore persisted cursors and seed monitored addresses from DB
+  await loadPersistedCursors();
+  await seedMonitoredAddressesFromDB();
   const timer = setInterval(async () => {
     for (const addr of monitoredAddresses) {
       try {

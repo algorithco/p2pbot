@@ -130,6 +130,16 @@ export async function ensureTables() {
   // Telegram IDs exceed 32-bit range — widen legacy INTEGER id columns to BIGINT.
   await pool.query('ALTER TABLE deals ALTER COLUMN buyer_id TYPE BIGINT');
   await pool.query('ALTER TABLE deals ALTER COLUMN seller_id TYPE BIGINT');
+
+  // Listener persistence (fix 2.4): per-address cursor so restarts don't skip deposits
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS listener_cursors (
+      address TEXT PRIMARY KEY,
+      lt TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
 }
 
 export async function saveNotification(chatId: number, message: string) {
