@@ -84,105 +84,149 @@ function feeParts(amountStr: string, assetUpper: string, feeBpsRaw: unknown): { 
  * Shared guarded transition for RELEASED/REFUNDED.
  * MONEY MODEL: deal.amount = price (seller net). Buyer deposited price+fee.
  * On RELEASED: seller gets amount, feeAddress gets fee.
+ * FIX 2.1: wrapped in SELECT ... FOR UPDATE transaction to prevent double-payout races.
  */
 async function guardedTransition(dealId: number, status: string, opts?: { toAddress?: string; amount?: string | number; asset?: string; terms?: string }) {
-  const deal = await getDealById(dealId);
-  if (!deal) throw new Error(`deal_not_found: bitim topilmadi`);
-  if (![DEAL_STATUS.RELEASED, DEAL_STATUS.REFUNDED].includes(status as any)) throw new Error(`invalid_target_status: noto'g'ri holat`);
-  if (!isValidTransition(String(deal.status), status)) {
-    throw new Error(`invalid_transition: ${deal.status} dan ${status} ga o'tib bo'lmaydi`);
-  }
-  if (deal.status === status) throw new Error(`already_${String(status).toLowerCase()}: bitim allaqachon ${status} holatda`);
-  const asset = String(opts?.asset || deal.asset || 'TON').toUpperCase();
-  const assetUpper = asset;
-  const amountStr = String(opts?.amount ?? deal.amount ?? 0);
-  const terms = String(opts?.terms || deal.terms || '');
-
-  // Fee: seller net = amount (price), fee = amount * feeBps / 10000.
-  let payoutHuman = amountStr;
-  let feeHuman = fromBaseUnits(0n, assetUpper);
-  let feeBase = 0n;
-  if (status === DEAL_STATUS.RELEASED) {
-    try {
-      const parts = feeParts(amountStr, assetUpper, (deal as any).fee_bps ?? config.feeBps ?? 100);
-      payoutHuman = parts.sellerHuman;
-      feeHuman = parts.feeHuman;
-      feeBase = parts.feeBase;
-      if (payoutHuman === '0' || payoutHuman === '-0') payoutHuman = amountStr;
-    } catch (e) {
-      logger.warn(`Fee calc failed for deal #${dealId}`, e);
-      payoutHuman = amountStr;
-    }
-  }
-
-  const isRelease = status === DEAL_STATUS.RELEASED;
-  const targetTelegramId = isRelease ? deal.seller_telegram_id : deal.buyer_telegram_id;
-  const memoPlainBase = releaseComment({ id: dealId, amount: amountStr, asset, terms });
-  let memoPlain = isRelease ? memoPlainBase : `Refund: ${memoPlainBase}`;
-  if (memoPlain.length > 120) memoPlain = memoPlain.slice(0, 119) + '…';
-  const encryptedMemo = encryptField(memoPlain);
-
-  const toAddress = await resolvePayoutAddress(deal, opts?.toAddress, targetTelegramId != null ? Number(targetTelegramId) : null);
-  const isRefund = status === DEAL_STATUS.REFUNDED;
-  if (!toAddress) {
-    if (isRelease) throw new Error(`seller_ton_address_required: sotuvchi TON manzilni ilovada kiritishi shart (Bitim → To'lov manzili yoki Profil → TON manzil)`);
-    if (isRefund) {
-      throw new Error(`buyer_ton_address_required: xaridor TON manzili yo'q, ilovada kiriting`);
-    }
-  }
-
-  const shouldSend = isRelease || isRefund;
-  if (shouldSend && toAddress) {
-    try {
-      if (assetUpper === 'TON') {
-        await sendTon({ to: toAddress!, value: isRelease ? payoutHuman : amountStr, comment: encryptedMemo, bounce: false });
-        logger.info(`Custodial ${status} for deal #${dealId} to ${toAddress} amount ${isRelease ? payoutHuman : amountStr} (price ${amountStr} fee ${feeHuman})`);
-        if (isRelease && feeBase > 0n && config.feeAddress && feeHuman !== '0') {
-          try {
-            const feeMemo = encryptField(`Fee for Escrow #${dealId} — ${feeHuman} ${assetUpper}`);
-            await sendTon({ to: config.feeAddress, value: feeHuman, comment: feeMemo, bounce: false });
-            logger.info(`Fee ${feeHuman} ${assetUpper} sent to ${config.feeAddress} for deal #${dealId}`);
-          } catch (feeErr) {
-            logger.warn(`Fee payout failed for deal #${dealId}`, feeErr);
-          }
-        }
-      } else {
-        const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
-        if (!jettonMaster) throw new Error(`jetton_master_not_configured: jetton sozlanmagan, admin bilan bog'laning`);
-        await sendJetton({ jettonMasterAddress: jettonMaster, to: toAddress!, amount: isRelease ? payoutHuman : amountStr, forwardComment: encryptedMemo, forwardTonAmount: '0.01' });
-        logger.info(`Custodial Jetton ${status} for deal #${dealId} to ${toAddress} amount ${isRelease ? payoutHuman : amountStr}`);
-        if (isRelease && feeBase > 0n && config.feeAddress && feeHuman !== '0') {
-          try {
-            const feeMemo = encryptField(`Fee for Escrow #${dealId} — ${feeHuman} ${assetUpper}`);
-            await sendJetton({ jettonMasterAddress: jettonMaster, to: config.feeAddress, amount: feeHuman, forwardComment: feeMemo, forwardTonAmount: '0.01' });
-          } catch (feeErr) {
-            logger.warn(`Jetton fee payout failed for deal #${dealId}`, feeErr);
-          }
-        }
-      }
-    } catch (e) {
-      const msg = String((e as Error).message || '');
-      if (msg.includes('seller_ton_address_required') || msg.includes('buyer_ton_address_required')) throw e;
-      if (isRelease) {
-        logger.warn(`Payout failed for deal #${dealId} — not marking ${status}, manual required: ${msg}`, e);
-        await notifyAdminsHub(`Deal #${dealId} payout failed: ${msg} — amount ${isRelease ? payoutHuman : amountStr} to ${toAddress}.`, String(isRelease ? payoutHuman : amountStr), assetUpper);
-        throw new Error(`payout_failed: ${msg}`);
-      }
-      logger.error(`On-chain send failed for deal #${dealId} (${status})`, e);
-      throw new Error(`onchain_send_failed: ${msg}`);
-    }
-  } else if (isRelease && !toAddress) {
-    throw new Error(`seller_ton_address_required: sotuvchi to'lov manzilini kiritishi shart`);
-  }
-
-  await updateDealStatus(dealId, status);
+  const client = await db.connect();
   try {
-    const { addDealMessage } = await import('./dealService');
-    const sysText = status === DEAL_STATUS.RELEASED
-      ? `Tizim: Yakunlandi (Deal #${dealId}) — ${isRelease ? payoutHuman : amountStr} ${asset} sotuvchiga yuborildi${feeHuman !== '0' ? ` (komissiya ${feeHuman} ${asset})` : ''}.`
-      : `Tizim: Qaytarildi (Deal #${dealId}) — ${amountStr} ${asset} xaridorga qaytarildi.`;
-    await addDealMessage(dealId, 0, sysText);
-  } catch {}
+    await client.query('BEGIN');
+    const lockedRes = await client.query('SELECT * FROM deals WHERE id = $1 FOR UPDATE', [dealId]);
+    const deal = lockedRes.rows[0];
+    if (!deal) {
+      await client.query('ROLLBACK');
+      throw new Error(`deal_not_found: bitim topilmadi`);
+    }
+    if (![DEAL_STATUS.RELEASED, DEAL_STATUS.REFUNDED].includes(status as any)) {
+      await client.query('ROLLBACK');
+      throw new Error(`invalid_target_status: noto'g'ri holat`);
+    }
+    if (!isValidTransition(String(deal.status), status)) {
+      await client.query('ROLLBACK');
+      throw new Error(`invalid_transition: ${deal.status} dan ${status} ga o'tib bo'lmaydi`);
+    }
+    if (deal.status === status) {
+      await client.query('ROLLBACK');
+      throw new Error(`already_${String(status).toLowerCase()}: bitim allaqachon ${status} holatda`);
+    }
+    const asset = String(opts?.asset || deal.asset || 'TON').toUpperCase();
+    const assetUpper = asset;
+    const amountStr = String(opts?.amount ?? deal.amount ?? 0);
+    const terms = String(opts?.terms || deal.terms || '');
+
+    // Fee: seller net = amount (price), fee = amount * feeBps / 10000.
+    let payoutHuman = amountStr;
+    let feeHuman = fromBaseUnits(0n, assetUpper);
+    let feeBase = 0n;
+    if (status === DEAL_STATUS.RELEASED) {
+      try {
+        const parts = feeParts(amountStr, assetUpper, (deal as any).fee_bps ?? config.feeBps ?? 100);
+        payoutHuman = parts.sellerHuman;
+        feeHuman = parts.feeHuman;
+        feeBase = parts.feeBase;
+        if (payoutHuman === '0' || payoutHuman === '-0') payoutHuman = amountStr;
+      } catch (e) {
+        logger.warn(`Fee calc failed for deal #${dealId}`, e);
+        payoutHuman = amountStr;
+      }
+    }
+
+    const isRelease = status === DEAL_STATUS.RELEASED;
+    const targetTelegramId = isRelease ? deal.seller_telegram_id : deal.buyer_telegram_id;
+    const memoPlainBase = releaseComment({ id: dealId, amount: amountStr, asset, terms });
+    let memoPlain = isRelease ? memoPlainBase : `Refund: ${memoPlainBase}`;
+    if (memoPlain.length > 120) memoPlain = memoPlain.slice(0, 119) + '…';
+    const encryptedMemo = encryptField(memoPlain);
+
+    const toAddress = await resolvePayoutAddress(deal, opts?.toAddress, targetTelegramId != null ? Number(targetTelegramId) : null);
+    const isRefund = status === DEAL_STATUS.REFUNDED;
+    if (!toAddress) {
+      await client.query('ROLLBACK');
+      if (isRelease) throw new Error(`seller_ton_address_required: sotuvchi TON manzilni ilovada kiritishi shart (Bitim → To'lov manzili yoki Profil → TON manzil)`);
+      if (isRefund) {
+        throw new Error(`buyer_ton_address_required: xaridor TON manzili yo'q, ilovada kiriting`);
+      }
+      throw new Error(`payout_address_required`);
+    }
+
+    const shouldSend = isRelease || isRefund;
+    if (shouldSend && toAddress) {
+      try {
+        if (assetUpper === 'TON') {
+          await sendTon({ to: toAddress!, value: isRelease ? payoutHuman : amountStr, comment: encryptedMemo, bounce: false });
+          logger.info(`Custodial ${status} for deal #${dealId} to ${toAddress} amount ${isRelease ? payoutHuman : amountStr} (price ${amountStr} fee ${feeHuman})`);
+          if (isRelease && feeBase > 0n && config.feeAddress && feeHuman !== '0') {
+            try {
+              const feeMemo = encryptField(`Fee for Escrow #${dealId} — ${feeHuman} ${assetUpper}`);
+              await sendTon({ to: config.feeAddress, value: feeHuman, comment: feeMemo, bounce: false });
+              logger.info(`Fee ${feeHuman} ${assetUpper} sent to ${config.feeAddress} for deal #${dealId}`);
+            } catch (feeErr) {
+              logger.warn(`Fee payout failed for deal #${dealId}`, feeErr);
+            }
+          }
+        } else {
+          const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
+          if (!jettonMaster) throw new Error(`jetton_master_not_configured: jetton sozlanmagan, admin bilan bog'laning`);
+          await sendJetton({ jettonMasterAddress: jettonMaster, to: toAddress!, amount: isRelease ? payoutHuman : amountStr, forwardComment: encryptedMemo, forwardTonAmount: '0.01' });
+          logger.info(`Custodial Jetton ${status} for deal #${dealId} to ${toAddress} amount ${isRelease ? payoutHuman : amountStr}`);
+          if (isRelease && feeBase > 0n && config.feeAddress && feeHuman !== '0') {
+            try {
+              const feeMemo = encryptField(`Fee for Escrow #${dealId} — ${feeHuman} ${assetUpper}`);
+              await sendJetton({ jettonMasterAddress: jettonMaster, to: config.feeAddress, amount: feeHuman, forwardComment: feeMemo, forwardTonAmount: '0.01' });
+            } catch (feeErr) {
+              logger.warn(`Jetton fee payout failed for deal #${dealId}`, feeErr);
+            }
+          }
+        }
+      } catch (e) {
+        const msg = String((e as Error).message || '');
+        if (msg.includes('seller_ton_address_required') || msg.includes('buyer_ton_address_required')) {
+          await client.query('ROLLBACK');
+          throw e;
+        }
+        await client.query('ROLLBACK');
+        if (isRelease) {
+          logger.warn(`Payout failed for deal #${dealId} — not marking ${status}, manual required: ${msg}`, e);
+          await notifyAdminsHub(`Deal #${dealId} payout failed: ${msg} — amount ${isRelease ? payoutHuman : amountStr} to ${toAddress}.`, String(isRelease ? payoutHuman : amountStr), assetUpper);
+          throw new Error(`payout_failed: ${msg}`);
+        }
+        logger.error(`On-chain send failed for deal #${dealId} (${status})`, e);
+        throw new Error(`onchain_send_failed: ${msg}`);
+      }
+    } else if (isRelease && !toAddress) {
+      await client.query('ROLLBACK');
+      throw new Error(`seller_ton_address_required: sotuvchi to'lov manzilini kiritishi shart`);
+    }
+
+    // Guarded status update inside transaction — row still locked, prevents race
+    const finalSets: string[] = ['status = $1'];
+    const finalParams: unknown[] = [status];
+    finalSets.push('updated_at = now()');
+    finalSets.push('resolved_at = now()');
+    finalParams.push(dealId);
+    const upd = await client.query(`UPDATE deals SET ${finalSets.join(', ')} WHERE id = $${finalParams.length} AND status = $${finalParams.length + 1} RETURNING id`, [...finalParams.slice(0, -1), dealId, deal.status]);
+    // status guard: if rowCount 0 means concurrent transition already happened
+    if (upd.rowCount === 0) {
+      await client.query('ROLLBACK');
+      throw new Error(`concurrent_transition: deal status changed concurrently from ${deal.status}`);
+    }
+    // also set tx_hash if needed (kept separate for compatibility)
+    await client.query('COMMIT');
+    // System message after commit (best-effort)
+    try {
+      const { addDealMessage } = await import('./dealService');
+      const sysText = status === DEAL_STATUS.RELEASED
+        ? `Tizim: Yakunlandi (Deal #${dealId}) — ${isRelease ? payoutHuman : amountStr} ${asset} sotuvchiga yuborildi${feeHuman !== '0' ? ` (komissiya ${feeHuman} ${asset})` : ''}.`
+        : `Tizim: Qaytarildi (Deal #${dealId}) — ${amountStr} ${asset} xaridorga qaytarildi.`;
+      await addDealMessage(dealId, 0, sysText);
+    } catch (e) {
+      logger.warn(`post-commit system message failed for deal #${dealId}`, e);
+    }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export async function adminRelease(adminTelegramId: number | string, dealId: number | string) {
@@ -245,148 +289,205 @@ export async function adminRefund(adminTelegramId: number | string, dealId: numb
 
 /**
  * Seller signals item sent — moves DEPOSIT_CONFIRMED -> ITEM_SENT and notifies buyer.
+ * FIX 2.1: transactional FOR UPDATE to prevent race with concurrent refund/release.
  */
 export async function markItemSent(sellerTelegramId: number, dealId: number | string) {
   const id = Number(dealId);
-  const deal = await getDealById(id);
-  if (!deal) return { success: false, message: 'Bitim topilmadi' };
-  const isSeller = deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === sellerTelegramId;
-  if (!isSeller) return { success: false, message: `Faqat sotuvchi yuborilganini belgilay oladi.` };
-  if (deal.status !== DEAL_STATUS.DEPOSIT_CONFIRMED) {
-    return { success: false, message: `Deal #${id} "${deal.status}" holatda — faqat DEPOSIT_CONFIRMED dan yuborilgan deb belgilash mumkin.` };
-  }
-  await updateDealStatus(id, DEAL_STATUS.ITEM_SENT);
+  const client = await db.connect();
   try {
-    const { addDealMessage } = await import('./dealService');
-    await addDealMessage(id, 0, `Tizim: Sotuvchi yetkazdi (Deal #${id}) — xaridor ilovada qabulni tasdiqlang.`);
-  } catch {}
-  const buyerId = Number(deal.buyer_telegram_id);
-  if (buyerId) {
-    try {
-      await notify.shippedToBuyer(buyerId, dealLike({ id, amount: String(deal.amount), asset: String(deal.asset), terms: deal.terms }));
-    } catch (e) {
-      logger.warn(`markItemSent notify failed for #${id}`, e);
+    await client.query('BEGIN');
+    const locked = await client.query('SELECT * FROM deals WHERE id = $1 FOR UPDATE', [id]);
+    const deal = locked.rows[0];
+    if (!deal) {
+      await client.query('ROLLBACK');
+      return { success: false, message: 'Bitim topilmadi' };
     }
+    const isSeller = deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === sellerTelegramId;
+    if (!isSeller) {
+      await client.query('ROLLBACK');
+      return { success: false, message: `Faqat sotuvchi yuborilganini belgilay oladi.` };
+    }
+    if (deal.status !== DEAL_STATUS.DEPOSIT_CONFIRMED) {
+      await client.query('ROLLBACK');
+      return { success: false, message: `Deal #${id} "${deal.status}" holatda — faqat DEPOSIT_CONFIRMED dan yuborilgan deb belgilash mumkin.` };
+    }
+    const upd = await client.query(`UPDATE deals SET status = $1, updated_at = now() WHERE id = $2 AND status = $3 RETURNING id`, [DEAL_STATUS.ITEM_SENT, id, DEAL_STATUS.DEPOSIT_CONFIRMED]);
+    if (upd.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return { success: false, message: `concurrent_transition` };
+    }
+    await client.query('COMMIT');
+    // best-effort side effects after commit
+    try {
+      const { addDealMessage } = await import('./dealService');
+      await addDealMessage(id, 0, `Tizim: Sotuvchi yetkazdi (Deal #${id}) — xaridor ilovada qabulni tasdiqlang.`);
+    } catch (e) { logger.warn(`markItemSent system message failed #${id}`, e); }
+    const buyerId = Number(deal.buyer_telegram_id);
+    if (buyerId) {
+      try {
+        await notify.shippedToBuyer(buyerId, dealLike({ id, amount: String(deal.amount), asset: String(deal.asset), terms: deal.terms }));
+      } catch (e) {
+        logger.warn(`markItemSent notify failed for #${id}`, e);
+      }
+    }
+    logger.info(`Deal #${id} marked ITEM_SENT by seller ${sellerTelegramId}`);
+    return { success: true, message: `Yetkazildi deb belgilandi — xaridor xabardor qilindi.`, status: DEAL_STATUS.ITEM_SENT };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    logger.error(`markItemSent failed for #${id}`, e);
+    return { success: false, message: String((e as Error).message || 'internal_error') };
+  } finally {
+    client.release();
   }
-  logger.info(`Deal #${id} marked ITEM_SENT by seller ${sellerTelegramId}`);
-  return { success: true, message: `Yetkazildi deb belgilandi — xaridor xabardor qilindi.`, status: DEAL_STATUS.ITEM_SENT };
 }
 
 /**
  * Buyer approves receipt — moves ITEM_SENT -> RELEASED.
  * MONEY MODEL: sellerNet = amount (price), fee = amount * feeBps / 10000 (on top, paid by buyer).
+ * FIX 2.1: transactional FOR UPDATE + guarded UPDATE to prevent double-payout.
  */
 export async function buyerApproveReceipt(buyerTelegramId: number, dealId: number | string) {
   const id = Number(dealId);
-  const deal = await getDealById(id);
-  if (!deal) return { success: false, message: 'Bitim topilmadi' };
-  const isBuyer = deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === buyerTelegramId;
-  if (!isBuyer) return { success: false, message: `Faqat xaridor qabulni tasdiqlab pulni chiqara oladi.` };
-  const allowed = [DEAL_STATUS.ITEM_SENT];
-  if (!allowed.includes(deal.status as any)) {
-    if (deal.status === DEAL_STATUS.DEPOSIT_CONFIRMED) {
-      return { success: false, message: `Deal #${id} "DEPOSIT_CONFIRMED" holatda — avval sotuvchi "Yetkazdim" ni bosishi shart, keyin chiqarish mumkin.`, needItemSent: true } as any;
-    }
-    if (deal.status === DEAL_STATUS.BUYER_CONFIRMED) {
-      logger.warn(`buyerApproveReceipt legacy BUYER_CONFIRMED for deal #${id}`);
-    } else {
-      return { success: false, message: `Deal #${id} "${deal.status}" holatda — faqat ITEM_SENT dan tasdiqlash mumkin (sotuvchi avval yuborishi shart).` };
-    }
-  }
-  if (deal.seller_telegram_id == null) return { success: false, message: `Sotuvchi hali qo'shilmagan — chiqarib bo'lmaydi.` };
-  const confirmations: Record<string, boolean> = { ...(deal.confirmations || {}), buyer: true };
+  const client = await db.connect();
   try {
-    await setConfirmation(id, 'buyer', confirmations);
-  } catch (e) {
-    logger.warn(`setConfirmation failed for #${id}`, e);
-  }
-
-  const assetUpper = String(deal.asset || 'TON').toUpperCase();
-  const amountStr = String(deal.amount ?? '0');
-  let sellerHuman = amountStr;
-  let feeHuman = '0';
-  let feeBase = 0n;
-  try {
-    const parts = feeParts(amountStr, assetUpper, (deal as any).fee_bps ?? config.feeBps ?? 100);
-    sellerHuman = parts.sellerHuman;
-    feeHuman = parts.feeHuman;
-    feeBase = parts.feeBase;
-  } catch (e) {
-    logger.warn(`Fee calc failed for deal #${id}`, e);
-  }
-
-  const payoutAddress = await resolvePayoutAddress(deal, undefined, deal.seller_telegram_id != null ? Number(deal.seller_telegram_id) : null);
-  if (!payoutAddress) {
-    const msg = `seller_ton_address_required: sotuvchi TON manzilni ilovada kiritishi shart (Bitim → To'lov manzili yoki Profil → TON manzil)`;
-    try {
-      const sellerId = Number(deal.seller_telegram_id);
-      if (sellerId) {
-        await notify.adminDecisionToParty(sellerId, dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }), `To'lov manzilingizni kiriting (Deal #${id})`);
+    await client.query('BEGIN');
+    const locked = await client.query('SELECT * FROM deals WHERE id = $1 FOR UPDATE', [id]);
+    const deal = locked.rows[0];
+    if (!deal) {
+      await client.query('ROLLBACK');
+      return { success: false, message: 'Bitim topilmadi' };
+    }
+    const isBuyer = deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === buyerTelegramId;
+    if (!isBuyer) {
+      await client.query('ROLLBACK');
+      return { success: false, message: `Faqat xaridor qabulni tasdiqlab pulni chiqara oladi.` };
+    }
+    const allowed = [DEAL_STATUS.ITEM_SENT];
+    if (!allowed.includes(deal.status as any)) {
+      if (deal.status === DEAL_STATUS.DEPOSIT_CONFIRMED) {
+        await client.query('ROLLBACK');
+        return { success: false, message: `Deal #${id} "DEPOSIT_CONFIRMED" holatda — avval sotuvchi "Yetkazdim" ni bosishi shart, keyin chiqarish mumkin.`, needItemSent: true } as any;
       }
-    } catch {}
+      if (deal.status === DEAL_STATUS.BUYER_CONFIRMED) {
+        logger.warn(`buyerApproveReceipt legacy BUYER_CONFIRMED for deal #${id}`);
+      } else {
+        await client.query('ROLLBACK');
+        return { success: false, message: `Deal #${id} "${deal.status}" holatda — faqat ITEM_SENT dan tasdiqlash mumkin (sotuvchi avval yuborishi shart).` };
+      }
+    }
+    if (deal.seller_telegram_id == null) {
+      await client.query('ROLLBACK');
+      return { success: false, message: `Sotuvchi hali qo'shilmagan — chiqarib bo'lmaydi.` };
+    }
+    // Record buyer confirmation inside transaction
+    try {
+      const confirmations: Record<string, boolean> = { ...(deal.confirmations || {}), buyer: true };
+      await client.query('UPDATE deals SET confirmations = $1::jsonb, updated_at = now() WHERE id = $2', [JSON.stringify(confirmations), id]);
+    } catch (e) {
+      logger.warn(`setConfirmation failed for #${id}`, e);
+    }
+
+    const assetUpper = String(deal.asset || 'TON').toUpperCase();
+    const amountStr = String(deal.amount ?? '0');
+    let sellerHuman = amountStr;
+    let feeHuman = '0';
+    let feeBase = 0n;
+    try {
+      const parts = feeParts(amountStr, assetUpper, (deal as any).fee_bps ?? config.feeBps ?? 100);
+      sellerHuman = parts.sellerHuman;
+      feeHuman = parts.feeHuman;
+      feeBase = parts.feeBase;
+    } catch (e) {
+      logger.warn(`Fee calc failed for deal #${id}`, e);
+    }
+
+    const payoutAddress = await resolvePayoutAddress(deal, undefined, deal.seller_telegram_id != null ? Number(deal.seller_telegram_id) : null);
+    if (!payoutAddress) {
+      await client.query('ROLLBACK');
+      const msg = `seller_ton_address_required: sotuvchi TON manzilni ilovada kiritishi shart (Bitim → To'lov manzili yoki Profil → TON manzil)`;
+      try {
+        const sellerId = Number(deal.seller_telegram_id);
+        if (sellerId) {
+          await notify.adminDecisionToParty(sellerId, dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }), `To'lov manzilingizni kiriting (Deal #${id})`);
+        }
+      } catch {}
+      try {
+        const { addDealMessage } = await import('./dealService');
+        await addDealMessage(id, 0, `Tizim: Xaridor qabul qildi (Deal #${id}), lekin sotuvchi to'lov manzili yo'q — sotuvchi ilovada manzilni kiriting.`);
+      } catch {}
+      logger.warn(`buyerApproveReceipt #${id}: missing payout address`);
+      return { success: false, message: msg, needSellerAddress: true } as any;
+    }
+
+    const memoPlainBase = releaseComment({ id, amount: amountStr, asset: assetUpper, terms: String(deal.terms || '') });
+    let memoPlain = memoPlainBase;
+    if (memoPlain.length > 120) memoPlain = memoPlain.slice(0, 119) + '…';
+    const encryptedMemo = encryptField(memoPlain);
+
+    try {
+      if (assetUpper === 'TON') {
+        await sendTon({ to: payoutAddress, value: sellerHuman, comment: encryptedMemo, bounce: false });
+        logger.info(`Custodial RELEASED deal #${id} seller ${sellerHuman} TON to ${payoutAddress} fee ${feeHuman}`);
+        if (feeBase > 0n && config.feeAddress && feeHuman !== '0') {
+          try {
+            const feeMemo = encryptField(`Fee for Escrow #${id} — ${feeHuman} ${assetUpper}`);
+            await sendTon({ to: config.feeAddress, value: feeHuman, comment: feeMemo, bounce: false });
+          } catch (feeErr) {
+            logger.warn(`Fee payout failed for deal #${id}`, feeErr);
+          }
+        }
+      } else {
+        const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
+        if (!jettonMaster) throw new Error('jetton_master_not_configured: set JETTON_MASTER_ADDRESS or USDT_JETTON_ADDRESS');
+        await sendJetton({ jettonMasterAddress: jettonMaster, to: payoutAddress, amount: sellerHuman, forwardComment: encryptedMemo, forwardTonAmount: '0.01' });
+        logger.info(`Custodial RELEASED deal #${id} seller ${sellerHuman} ${assetUpper} to ${payoutAddress} fee ${feeHuman}`);
+        if (feeBase > 0n && config.feeAddress && feeHuman !== '0') {
+          try {
+            const feeMemo = encryptField(`Fee for Escrow #${id} — ${feeHuman} ${assetUpper}`);
+            await sendJetton({ jettonMasterAddress: jettonMaster, to: config.feeAddress, amount: feeHuman, forwardComment: feeMemo, forwardTonAmount: '0.01' });
+          } catch (feeErr) {
+            logger.warn(`Jetton fee payout failed for deal #${id}`, feeErr);
+          }
+        }
+      }
+    } catch (e) {
+      await client.query('ROLLBACK');
+      const msg = String((e as Error).message || '');
+      logger.error(`buyerApproveReceipt payout failed for deal #${id}`, e);
+      await notifyAdminsHub(`Deal #${id} to'lov xatosi: ${msg} — ${sellerHuman} manzil ${payoutAddress}.`, sellerHuman, assetUpper);
+      return { success: false, message: msg.startsWith('payout_failed') ? msg : `payout_failed: to'lov yuborilmadi: ${msg}` };
+    }
+
+    const upd = await client.query(`UPDATE deals SET status = $1, updated_at = now(), resolved_at = now() WHERE id = $2 AND status = $3 RETURNING id`, [DEAL_STATUS.RELEASED, id, deal.status]);
+    if (upd.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return { success: false, message: `concurrent_transition: deal status changed` };
+    }
+    await client.query('COMMIT');
+    // Post-commit side effects (best-effort)
     try {
       const { addDealMessage } = await import('./dealService');
-      await addDealMessage(id, 0, `Tizim: Xaridor qabul qildi (Deal #${id}), lekin sotuvchi to'lov manzili yo'q — sotuvchi ilovada manzilni kiriting.`);
-    } catch {}
-    logger.warn(`buyerApproveReceipt #${id}: missing payout address`);
-    return { success: false, message: msg, needSellerAddress: true } as any;
-  }
-
-  const memoPlainBase = releaseComment({ id, amount: amountStr, asset: assetUpper, terms: String(deal.terms || '') });
-  let memoPlain = memoPlainBase;
-  if (memoPlain.length > 120) memoPlain = memoPlain.slice(0, 119) + '…';
-  const encryptedMemo = encryptField(memoPlain);
-
-  try {
-    if (assetUpper === 'TON') {
-      await sendTon({ to: payoutAddress, value: sellerHuman, comment: encryptedMemo, bounce: false });
-      logger.info(`Custodial RELEASED deal #${id} seller ${sellerHuman} TON to ${payoutAddress} fee ${feeHuman}`);
-      if (feeBase > 0n && config.feeAddress && feeHuman !== '0') {
-        try {
-          const feeMemo = encryptField(`Fee for Escrow #${id} — ${feeHuman} ${assetUpper}`);
-          await sendTon({ to: config.feeAddress, value: feeHuman, comment: feeMemo, bounce: false });
-        } catch (feeErr) {
-          logger.warn(`Fee payout failed for deal #${id}`, feeErr);
-        }
-      }
-    } else {
-      const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
-      if (!jettonMaster) throw new Error('jetton_master_not_configured: set JETTON_MASTER_ADDRESS or USDT_JETTON_ADDRESS');
-      await sendJetton({ jettonMasterAddress: jettonMaster, to: payoutAddress, amount: sellerHuman, forwardComment: encryptedMemo, forwardTonAmount: '0.01' });
-      logger.info(`Custodial RELEASED deal #${id} seller ${sellerHuman} ${assetUpper} to ${payoutAddress} fee ${feeHuman}`);
-      if (feeBase > 0n && config.feeAddress && feeHuman !== '0') {
-        try {
-          const feeMemo = encryptField(`Fee for Escrow #${id} — ${feeHuman} ${assetUpper}`);
-          await sendJetton({ jettonMasterAddress: jettonMaster, to: config.feeAddress, amount: feeHuman, forwardComment: feeMemo, forwardTonAmount: '0.01' });
-        } catch (feeErr) {
-          logger.warn(`Jetton fee payout failed for deal #${id}`, feeErr);
-        }
-      }
+      await addDealMessage(id, 0, `Tizim: Yakunlandi (Deal #${id}) — ${sellerHuman} ${assetUpper} sotuvchiga yuborildi (komissiya ${feeHuman} ${assetUpper}).`);
+    } catch (e) { logger.warn(`buyerApproveReceipt system message failed #${id}`, e); }
+    try {
+      await notify.releasedToBuyer(Number(deal.buyer_telegram_id), dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }));
+    } catch (e) {
+      logger.warn(`releasedToBuyer notify failed for #${id}`, e);
     }
+    try {
+      await notify.releasedToSeller(Number(deal.seller_telegram_id), dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }), sellerHuman);
+    } catch (e) {
+      logger.warn(`releasedToSeller notify failed for #${id}`, e);
+    }
+    logger.info(`Deal #${id} RELEASED by buyer ${buyerTelegramId} approval (seller ${sellerHuman}, fee ${feeHuman})`);
+    return { success: true, message: `Qabul qilindi — pul sotuvchiga chiqarildi (komissiya chegirilgan). Bitim yopildi.`, released: true, status: DEAL_STATUS.RELEASED };
   } catch (e) {
-    const msg = String((e as Error).message || '');
-    logger.error(`buyerApproveReceipt payout failed for deal #${id}`, e);
-    await notifyAdminsHub(`Deal #${id} to'lov xatosi: ${msg} — ${sellerHuman} manzil ${payoutAddress}.`, sellerHuman, assetUpper);
-    return { success: false, message: msg.startsWith('payout_failed') ? msg : `payout_failed: to'lov yuborilmadi: ${msg}` };
+    try { await client.query('ROLLBACK'); } catch {}
+    logger.error(`buyerApproveReceipt failed for #${id}`, e);
+    return { success: false, message: String((e as Error).message || 'internal_error') };
+  } finally {
+    client.release();
   }
-
-  await updateDealStatus(id, DEAL_STATUS.RELEASED);
-  try {
-    const { addDealMessage } = await import('./dealService');
-    await addDealMessage(id, 0, `Tizim: Yakunlandi (Deal #${id}) — ${sellerHuman} ${assetUpper} sotuvchiga yuborildi (komissiya ${feeHuman} ${assetUpper}).`);
-  } catch {}
-  try {
-    await notify.releasedToBuyer(Number(deal.buyer_telegram_id), dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }));
-  } catch (e) {
-    logger.warn(`releasedToBuyer notify failed for #${id}`, e);
-  }
-  try {
-    await notify.releasedToSeller(Number(deal.seller_telegram_id), dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }), sellerHuman);
-  } catch (e) {
-    logger.warn(`releasedToSeller notify failed for #${id}`, e);
-  }
-  logger.info(`Deal #${id} RELEASED by buyer ${buyerTelegramId} approval (seller ${sellerHuman}, fee ${feeHuman})`);
-  return { success: true, message: `Qabul qilindi — pul sotuvchiga chiqarildi (komissiya chegirilgan). Bitim yopildi.`, released: true, status: DEAL_STATUS.RELEASED };
 }
 
 // ── CHANNEL/GROUP custodial escrow (via @gramchioka) ──
