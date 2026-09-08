@@ -78,16 +78,15 @@ function buildAllowedOrigins(): string[] {
   return Array.from(origins);
 }
 const allowedOrigins = buildAllowedOrigins();
-const corsOrigin: boolean | ((origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => void) =
-  allowedOrigins.length === 0
-    ? true
-    : (origin, cb) => {
-        if (!origin) return cb(null, true); // same-origin / curl / healthcheck
-        if (allowedOrigins.includes(origin)) return cb(null, true);
-        // Fallback: allow if WEBAPP_URL not set (dev)
-        if (!config.webappUrl && !config.frontendUrl) return cb(null, true);
-        return cb(null, false);
-      };
+const corsOrigin = (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+  if (!origin) return cb(null, true); // same-origin / curl / healthcheck (no Origin header)
+  if (allowedOrigins.includes(origin)) return cb(null, true);
+  // Fix: fail-closed — do not allow-all when WEBAPP_URL missing (was dev fallback that made prod insecure)
+  if (!config.webappUrl && !config.frontendUrl) {
+    logger.warn(`CORS: blocking origin ${origin} — WEBAPP_URL/FRONTEND_URL not configured (allowed: ${allowedOrigins.join(', ')})`);
+  }
+  return cb(null, false);
+};
 // Use function form when we have a list, boolean otherwise (type any to avoid overload mismatch)
 app.use(cors({ origin: corsOrigin as never, credentials: false }));
 app.use(express.json({ limit: '256kb' }));
@@ -124,6 +123,35 @@ function callerTelegramId(req: Request): number | null {
     if (isValidPositiveInt(bodyVal)) return bodyVal;
   }
   return null;
+}
+
+/**
+ * Consolidated deal access check (fix: avoid duplicate auth blocks drifting).
+ * Returns deal if hasAccess, else null. Used by GET /deals/:id, /key, /chat, /payload.
+ */
+async function checkDealAccess(req: Request, dealId: number): Promise<{ deal: any; hasAccess: boolean; isParty: boolean; isAdmin: boolean } | null> {
+  const deal = await getDealById(dealId);
+  if (!deal) return null;
+  const caller = getIdentityId(req);
+  if (caller === null) return { deal, hasAccess: false, isParty: false, isAdmin: false };
+  const isParty =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
+  const isAdmin = (req as any).authMode === 'api-key' || isAdminTelegramId(caller);
+  if (isParty || isAdmin) return { deal, hasAccess: true, isParty, isAdmin };
+  // Token preview: valid invite token or pending join request
+  const token = String((req.query.token as string) || '').trim();
+  if (token) {
+    try {
+      const link = await getDealLink(token);
+      if (link && Number(link.deal_id) === dealId && new Date(link.expires_at).getTime() > Date.now()) {
+        return { deal, hasAccess: true, isParty: false, isAdmin: false };
+      }
+      const jr = await db.query('SELECT 1 FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND status = $3 LIMIT 1', [dealId, token, 'pending']);
+      if (jr.rows.length > 0) return { deal, hasAccess: true, isParty: false, isAdmin: false };
+    } catch {}
+  }
+  return { deal, hasAccess: false, isParty, isAdmin };
 }
 
 // Notification endpoint (admin-only)
@@ -245,8 +273,7 @@ app.post('/api/deals/:id/payout-address', requireIdentity, asyncHandler(async (r
   const raw = String((req.body as any).tonAddress || (req.body as any).ton_address || (req.body as any).address || '').trim();
   if (!raw) return res.status(400).json({ error: 'tonAddress_required' });
   try { Address.parse(raw); } catch { return res.status(400).json({ error: 'invalid_ton_address' }); }
-  // Persist to users table and also store in deals.terms? Use payout_address column if exists, else fallback to users
-  try { await db.query('ALTER TABLE deals ADD COLUMN IF NOT EXISTS payout_address TEXT'); } catch {}
+  // payout_address column is ensured at boot via ensureTables (fix: no DDL on hot path)
   await db.query('UPDATE deals SET payout_address = $1, updated_at = now() WHERE id = $2', [raw, dealId]);
   await db.query(
     `INSERT INTO users (telegram_id, username, ton_address) VALUES ($1,$2,$3)
@@ -290,36 +317,12 @@ app.get('/api/deals', requireIdentity, asyncHandler(async (req, res) => {
 app.get('/api/deals/:id', requireIdentity, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid_id' });
-  const deal = await getDealById(id);
-  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
   const caller = getIdentityId(req);
   if (caller === null) return res.status(401).json({ error: 'identity_required' });
-  const isParty =
-    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
-    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
-  const isAdminCaller = req.authMode === 'api-key' || isAdminTelegramId(caller);
-  if (isParty || isAdminCaller) {
-    return res.json(deal);
-  }
-  // Allow preview if caller holds a valid invite token for this deal (join flow before assignment)
-  const token = String((req.query.token as string) || '').trim();
-  if (token) {
-    try {
-      const link = await getDealLink(token);
-      if (link && Number(link.deal_id) === id && new Date(link.expires_at).getTime() > Date.now()) {
-        return res.json(deal);
-      }
-      // Also check pending join_requests (bot approval flow)
-      const jr = await db.query(
-        'SELECT 1 FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND status = $3 LIMIT 1',
-        [id, token, 'pending']
-      );
-      if (jr.rows.length > 0) {
-        return res.json(deal);
-      }
-    } catch {}
-  }
-  return res.status(403).json({ error: 'not_a_party_to_deal' });
+  const check = await checkDealAccess(req, id);
+  if (!check) return res.status(404).json({ error: 'deal_not_found' });
+  if (!check.hasAccess) return res.status(403).json({ error: 'not_a_party_to_deal' });
+  return res.json(check.deal);
 }));
 
 // Create a new deal (buyer optional for api-key callers, returns generated link)
@@ -1306,32 +1309,12 @@ app.get('/api/ton/payload', asyncHandler(async (req, res) => {
 app.get('/api/deals/:id/payload', requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
-  const deal = await getDealById(dealId);
-  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
   const caller = getIdentityId(req);
   if (caller === null) return res.status(401).json({ error: 'identity_required' });
-  const isParty =
-    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
-    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
-  const isAdminCaller = req.authMode === 'api-key' || isAdminTelegramId(caller);
-  if (!isParty && !isAdminCaller) {
-    const token = String((req.query.token as string) || '').trim();
-    let hasValidToken = false;
-    if (token) {
-      try {
-        const link = await getDealLink(token);
-        if (link && Number(link.deal_id) === dealId && new Date(link.expires_at).getTime() > Date.now()) hasValidToken = true;
-        if (!hasValidToken) {
-          const jr = await db.query(
-            'SELECT 1 FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND status = $3 LIMIT 1',
-            [dealId, token, 'pending']
-          );
-          if (jr.rows.length > 0) hasValidToken = true;
-        }
-      } catch {}
-    }
-    if (!hasValidToken) return res.status(403).json({ error: 'not_a_party_to_deal' });
-  }
+  const check = await checkDealAccess(req, dealId);
+  if (!check) return res.status(404).json({ error: 'deal_not_found' });
+  if (!check.hasAccess) return res.status(403).json({ error: 'not_a_party_to_deal' });
+  const deal = check.deal;
   const memo = depositComment(dealId);
   const outMemo = releaseComment({ id: dealId, amount: deal.amount, asset: deal.asset, terms: deal.terms });
   const depositPayload = encryptedCommentToPayloadB64(memo);
@@ -1384,7 +1367,7 @@ const API_DOCS = {
     { method: 'GET', path: '/api/deals/mine', auth: 'Identity', desc: 'Alias for GET /api/deals — deals where caller is buyer or seller (requires x-init-data or x-api-key)' },
     { method: 'POST', path: '/api/deals', auth: 'Identity', desc: 'Create deal {sellerId, asset TON|USDT, amount, terms?, deadline?} — caller forced to one side, returns {deal, link, webappLink, encryption}' },
     { method: 'POST', path: '/api/deals/:id/join/:token', auth: 'Identity', desc: 'Consume one-time link atomically, assign missing buyer/seller role' },
-    { method: 'POST', path: '/api/deals/:id/confirm', auth: 'Identity (party)', desc: 'Party confirm delivery/fiat — both parties confirmed auto-releases to RELEASED with encrypted memo' },
+    { method: 'POST', path: '/api/deals/:id/confirm', auth: 'Identity (party)', desc: 'DEPRECATED alias to /approve — buyer-only approveReceipt. Use POST /api/deals/:id/approve (was mutual, now buyer only)' },
     { method: 'GET', path: '/api/deals/:id/join-requests', auth: 'Identity (party or admin)', desc: 'List pending join requests for deal (photo + username) — only creator party can approve' },
     { method: 'POST', path: '/api/deals/:id/join-requests/:requestId/approve', auth: 'Identity (party)', desc: 'Approve join request atomically → assign role + delete link + ensure chat key' },
     { method: 'POST', path: '/api/deals/:id/join-requests/:requestId/reject', auth: 'Identity (party)', desc: 'Reject join request' },
@@ -1392,14 +1375,14 @@ const API_DOCS = {
     { method: 'GET', path: '/api/deals/:id/key', auth: 'Identity (party or admin)', desc: 'Get per-deal E2E chat key {key, algo: aes-256-gcm} — only buyer/seller/admin' },
     { method: 'GET', path: '/api/deals/:id/chat', auth: 'Identity (party or admin)', desc: 'Deal chat messages — ciphertext only (E2E). Decrypt client-side with per-deal key. ?limit=1..200' },
     { method: 'POST', path: '/api/deals/:id/chat', auth: 'Identity (party or admin)', desc: 'Post E2E ciphertext {ciphertext: base64(iv+tag+enc)} — server never sees plaintext. Legacy {content} also accepted and E2E-encrypted server-side' },
-    { method: 'GET', path: '/api/ubot/channel/:id', auth: 'Identity (proxy to ubot 127.0.0.1:3002)', desc: 'Channel info via ubot proxy (host-bound, x-api-key server-side)' },
-    { method: 'GET', path: '/api/ubot/channel/:id/admins', auth: 'Identity', desc: 'List channel admins via ubot' },
-    { method: 'POST', path: '/api/ubot/channel/:id/promote', auth: 'Identity', desc: 'Promote to admin {userId,rights,rank} via ubot (rights 11 booleans)' },
-    { method: 'POST', path: '/api/ubot/channel/:id/takeover', auth: 'Identity', desc: 'One-tap takeover: promote→2.5s→transfer via SRP 2FA, respects 24h breaker + 1.3s rate' },
+    { method: 'GET', path: '/api/ubot/channel/:id', auth: 'Identity (proxy to ubot 127.0.0.1:3002)', desc: 'Channel info via locked-down proxy — only GET /channel/:id, /admins, /health, /group/isBasic (POST via /api/deals/:id/channel/* only)' },
+    { method: 'GET', path: '/api/ubot/channel/:id/admins', auth: 'Identity', desc: 'List channel admins via locked proxy (GET only)' },
+    { method: 'POST', path: '/api/ubot/channel/:id/promote', auth: 'Identity', desc: 'DEPRECATED via raw proxy — use POST /api/deals/:id/channel/* (deal ownership required). Raw POST now 403.' },
+    { method: 'POST', path: '/api/ubot/channel/:id/takeover', auth: 'Identity', desc: 'DEPRECATED raw proxy — use POST /api/deals/:id/channel/transfer-to-buyer (deal ownership + status=RELEASED). Raw POST 403.' },
     { method: 'POST', path: '/api/utrade/trades', auth: 'Identity', desc: 'Create account sale trade {session StringSession or phone:+E.164} — encrypted AES-256-GCM' },
     { method: 'GET', path: '/api/utrade/trades/mine', auth: 'Identity', desc: 'List my account trades (seller or buyer)' },
     { method: 'GET', path: '/api/utrade/trades/:id', auth: 'Identity', desc: 'Get account trade by id (phone masked for non-party)' },
-    { method: 'POST', path: '/api/utrade/trades/:id/code', auth: 'Identity (buyer)', desc: 'Submit 5-6 digit Telegram login code (+ optional 2FA password) → COMPLETED + seller logout' },
+    { method: 'POST', path: '/api/utrade/trades/:id/code', auth: 'Identity (buyer)', desc: 'Submit 5-6 digit code / 2FA → AWAITING_CODE / AWAITING_BUYER_LOGIN (manual review via utradebot teleproto, never auto-COMPLETED via backend)' },
     { method: 'POST', path: '/api/notify', auth: 'Admin', desc: 'Send bot message {chatId, message} — rate 5/min' },
     { method: 'GET', path: '/api/notifications', auth: 'Admin', desc: 'Last 200 notifications' },
     { method: 'POST', path: '/api/withdraw', auth: 'Admin', desc: 'Release (guarded DB → RELEASED; on-chain stub if REQUIRE_ONCHAIN=true without signer)' },
@@ -1423,9 +1406,11 @@ const API_DOCS = {
   },
   notes: [
     'Mini App served at /#/deal/:id/join/:token deep links; requires WEBAPP_URL=https://<public> for Telegram menu button — invite uses WEBAPP_URL when set, else request Host (no Host-header injection)',
-    'Seller-buyer chat is E2E encrypted: per-deal AES-256-GCM key from GET /api/deals/:id/key, messages are ciphertext-only (iv+tag+enc base64) — server never stores plaintext',
-    'Join is atomic (BEGIN FOR UPDATE): one-time link cannot be double-consumed, role assignment guarded with WHERE IS NULL',
-    'Postgres: deals, users, messages, deal_links, notifications + utrade_trades/utrade_events (shared volume pgdata)',
+    'Seller-buyer chat encryption at rest: per-deal AES-256-GCM key (server generates, encrypts with ENCRYPTION_KEY), messages are ciphertext-only. Server holds master key so can decrypt — protects DB dump, but not malicious operator (not true E2E against server compromise). See docs/THREAT_MODEL.md',
+    'Join is atomic (BEGIN FOR UPDATE): one-time link cannot be double-consumed, role assignment guarded with WHERE IS NULL. Payouts also use SELECT FOR UPDATE + guarded UPDATE WHERE status to prevent double-payout.',
+    'Rate limiters and listener cursors/monitoredAddresses are in-memory per-process (plus persisted cursors for crash recovery) — if scaled horizontally, use Redis/shared DB for global limits.',
+    'On-chain Escrow contract (GET /api/status/:address, contractDeployer) is vestigial — current flow is custodial via signer wallet, not per-deal smart contract. Kept for future/compat; fee model assumes custodial.',
+    'Postgres: deals, users, messages, deal_links, notifications, listener_cursors + utrade_trades/utrade_events (shared volume pgdata)',
     'See backend/README.md for full env table and auth legend',
   ],
 };

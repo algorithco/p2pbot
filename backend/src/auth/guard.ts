@@ -15,8 +15,11 @@ export function timingSafeStringEqual(a: unknown, b: unknown): boolean {
 }
 
 export function isValidPositiveInt(value: unknown): boolean {
+  // Note: Telegram IDs are BIGINT in DB but currently fit in 53 bits (JS safe integer).
+  // If IDs exceed Number.MAX_SAFE_INTEGER, this check would fail; DB stores as string/BIGINT but Number() would lose precision.
+  // For now IDs like 8992814642 are safe; revisit with BigInt check if Telegram migrates to larger IDs.
   const n = Number(value);
-  return Number.isInteger(n) && n > 0;
+  return Number.isInteger(n) && n > 0 && Number.isSafeInteger(n);
 }
 
 function extractProvidedApiKey(req: Request): string | null {
@@ -125,6 +128,8 @@ export interface RateLimitOptions {
 /**
  * In-memory sliding-window rate limiter keyed by ip + route-bucket name.
  * Returns 429 {error:'rate_limited'} with Retry-After once max hits/window exceeded.
+ * Note: per-process only — if scaled horizontally, each instance has own counters (effective limit = max * replicas).
+ * Same for listener cursors/monitoredAddresses (see listener.ts) — assumes single backend instance; use Redis if multi-instance needed.
  */
 export function rateLimit(options: RateLimitOptions): RequestHandler {
   const windowMs = Math.max(1, Math.floor(options.windowMs));
