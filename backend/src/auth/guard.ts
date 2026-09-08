@@ -1,6 +1,6 @@
 // src/auth/guard.ts
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import expressRateLimit from 'express-rate-limit';
 import { config } from '../config';
 import logger from '../logger';
@@ -8,10 +8,11 @@ import { validateInitData } from './initData';
 
 let devWarned = false;
 
-/** Timing-safe string comparison: sha256 both sides first so lengths always match. */
+/** Timing-safe string comparison: HMAC-derive both sides first so lengths always match (keyed, not a bare hash). */
+const TIMING_PEPPER = 'p2pbot::timing-safe-compare::v1';
 export function timingSafeStringEqual(a: unknown, b: unknown): boolean {
-  const ha = createHash('sha256').update(String(a)).digest();
-  const hb = createHash('sha256').update(String(b)).digest();
+  const ha = createHmac('sha256', TIMING_PEPPER).update(String(a)).digest();
+  const hb = createHmac('sha256', TIMING_PEPPER).update(String(b)).digest();
   return timingSafeEqual(ha, hb);
 }
 

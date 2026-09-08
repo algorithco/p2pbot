@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
+import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { config } from './config';
@@ -25,9 +25,10 @@ try {
   cors = null;
 }
 
+const TIMING_PEPPER = 'ubot::timing-safe-compare::v1';
 function timingSafeStringEqual(a: string, b: string): boolean {
-  const ha = createHash('sha256').update(String(a)).digest();
-  const hb = createHash('sha256').update(String(b)).digest();
+  const ha = createHmac('sha256', TIMING_PEPPER).update(String(a)).digest();
+  const hb = createHmac('sha256', TIMING_PEPPER).update(String(b)).digest();
   return timingSafeEqual(ha, hb);
 }
 
@@ -146,8 +147,8 @@ function rateLimit(opts: { windowMs: number; max: number; name: string }) {
     if (config.apiKey) {
       const rawKey = (req.headers['x-api-key'] as string) || (req.headers['x-ubot-key'] as string) || (req.query.api_key as string) || '';
       if (rawKey) {
-        // hash to avoid storing raw secrets in map keys
-        apiKeyPart = createHash('sha256').update(String(rawKey)).digest('hex').slice(0, 12);
+        // HMAC (keyed) to avoid storing raw secrets in map keys — not a bare hash
+        apiKeyPart = createHmac('sha256', TIMING_PEPPER).update(String(rawKey)).digest('hex').slice(0, 12);
       } else {
         apiKeyPart = 'no-key';
       }
