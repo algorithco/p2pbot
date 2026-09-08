@@ -25,13 +25,9 @@ export function isValidPositiveInt(value: unknown): boolean {
 }
 
 function extractProvidedApiKey(req: Request): string | null {
+  // Header-only — API keys must never be sent in query strings (logged in access logs/history)
   const header = req.headers['x-api-key'];
   if (typeof header === 'string' && header.length > 0) return header;
-  const query = req.query.api_key;
-  if (typeof query === 'string' && query.length > 0) return query;
-  if (Array.isArray(query) && query.length > 0 && typeof query[0] === 'string') {
-    return query[0];
-  }
   return null;
 }
 

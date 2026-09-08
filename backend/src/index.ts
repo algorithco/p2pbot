@@ -1363,7 +1363,7 @@ const API_DOCS = {
   baseUrl: '/api',
   auth: {
     telegram: 'x-init-data (HMAC-SHA256 via BOT_TOKEN) + x-telegram-user-id — verified in src/auth/initData.ts, 24h window',
-    apiKey: 'x-api-key: <API_KEY> header or ?api_key= (timing-safe, see src/auth/guard.ts)',
+    apiKey: 'x-api-key: <API_KEY> header only (timing-safe, see src/auth/guard.ts)',
     devFallback: 'x-telegram-user-id only when ALLOW_DEV_AUTH=true and BOT_TOKEN+API_KEY unset (never in prod; NODE_ENV=production refuses to start without auth)',
     admin: 'Telegram id in ADMIN_TELEGRAM_IDS or any api-key caller',
   },

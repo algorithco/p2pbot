@@ -145,7 +145,7 @@ function rateLimit(opts: { windowMs: number; max: number; name: string }) {
     const ip = req.ip || (req.socket?.remoteAddress as string) || 'unknown';
     let apiKeyPart = 'anon';
     if (config.apiKey) {
-      const rawKey = (req.headers['x-api-key'] as string) || (req.headers['x-ubot-key'] as string) || (req.query.api_key as string) || '';
+      const rawKey = (req.headers['x-api-key'] as string) || (req.headers['x-ubot-key'] as string) || '';
       if (rawKey) {
         // HMAC (keyed) to avoid storing raw secrets in map keys — not a bare hash
         apiKeyPart = createHmac('sha256', TIMING_PEPPER).update(String(rawKey)).digest('hex').slice(0, 12);

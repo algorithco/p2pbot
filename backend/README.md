@@ -48,7 +48,7 @@ Auth legend (see `src/auth/guard.ts`):
   it is verified server-side against `BOT_TOKEN` using Telegram's
   HMAC-SHA256 scheme (`src/auth/initData.ts`, 24 h freshness window) and the
   authenticated user id is attached as `req.user`.
-- **API key** — `x-api-key: <API_KEY>` header (or `?api_key=`), intended for
+- **API key** — `x-api-key: <API_KEY>` header only (never in query strings), intended for
   server-to-server callers. Compared timing-safely.
 - **Dev fallback** — only when *both* `BOT_TOKEN` and `API_KEY` are unset:
   trusts `x-telegram-user-id` (logs a one-time warning). Never happens with a

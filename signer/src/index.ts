@@ -26,7 +26,7 @@ function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const headerKey = (req.headers['x-api-key'] as string) || (req.headers['x-signer-key'] as string) || '';
   const bearer = (req.headers['authorization'] as string) || '';
   const bearerKey = bearer.startsWith('Bearer ') ? bearer.slice(7) : '';
-  const provided = headerKey || bearerKey || (req.query.api_key as string) || '';
+  const provided = headerKey || bearerKey;
   if (provided !== config.apiKey) {
     return res.status(401).json({ error: 'unauthorized', hint: 'x-api-key required' });
   }
