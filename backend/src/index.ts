@@ -31,7 +31,7 @@ import {
 } from './services/dealService';
 import { depositComment, releaseComment } from './utils/comments';
 import { commentToPayloadB64, encryptedCommentToPayloadB64, jettonTransferPayload } from './utils/tonPayload';
-import { isEncryptionEnabled, getMasterKey } from './utils/encryption';
+import { isEncryptionEnabled, getMasterKey, encryptField, decryptField } from './utils/encryption';
 import { toBaseUnits } from './utils/money';
 import {
   identityAuth,
@@ -1086,11 +1086,15 @@ app.post('/api/utrade/trades', requireIdentity, asyncHandler(async (req, res) =>
       completed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ, meta JSONB DEFAULT '{}'::jsonb
     ); CREATE TABLE IF NOT EXISTS utrade_events (id SERIAL PRIMARY KEY, trade_id INTEGER REFERENCES utrade_trades(id) ON DELETE CASCADE, actor_telegram_id BIGINT, event TEXT NOT NULL, meta JSONB DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ DEFAULT now());`);
   }
-  const ph = phone ? String(phone).trim() : null;
+  // If table pre-existed without phone_enc, add it
+  try { await db.query('ALTER TABLE utrade_trades ADD COLUMN IF NOT EXISTS phone_enc TEXT'); } catch {}
+  const phPlain = phone ? String(phone).trim() : null;
+  const phEnc = phPlain ? encryptField(phPlain) : null;
+  // Fix 3.4: encrypt phone at rest via phone_enc; phone column kept null (plaintext removed)
   const r = await db.query(
-    `INSERT INTO utrade_trades (seller_telegram_id, buyer_telegram_id, phone, session_encrypted, status, expires_at, meta)
+    `INSERT INTO utrade_trades (seller_telegram_id, buyer_telegram_id, phone, phone_enc, session_encrypted, status, expires_at, meta)
      VALUES ($1,$2,$3,$4,$5, now() + interval '24 hours', '{}'::jsonb) RETURNING id, status, created_at`,
-    [caller, null, ph, enc, 'SELLER_REMOVED']
+    [caller, null, null, phEnc, enc, 'SELLER_REMOVED']
   );
   try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event) VALUES ($1,$2,$3)', [r.rows[0].id, caller, 'created_via_webapp']); } catch {}
   return res.json({ ok: true, trade: r.rows[0], id: r.rows[0].id });
@@ -1100,8 +1104,19 @@ app.get('/api/utrade/trades/mine', requireIdentity, asyncHandler(async (req, res
   const caller = getIdentityId(req);
   if (caller === null) return res.status(401).json({ error: 'identity_required' });
   try {
-    const r = await db.query('SELECT id, seller_telegram_id, buyer_telegram_id, phone, status, created_at, updated_at, completed_at FROM utrade_trades WHERE seller_telegram_id = $1 OR buyer_telegram_id = $1 ORDER BY id DESC LIMIT 50', [caller]);
-    return res.json(r.rows);
+    const r = await db.query('SELECT id, seller_telegram_id, buyer_telegram_id, phone, phone_enc, status, created_at, updated_at, completed_at FROM utrade_trades WHERE seller_telegram_id = $1 OR buyer_telegram_id = $1 ORDER BY id DESC LIMIT 50', [caller]);
+    // Decrypt phone_enc for display (legacy rows may have plain phone)
+    const rows = r.rows.map((row: any) => {
+      let phonePlain: string | null = null;
+      if (row.phone_enc) {
+        try { phonePlain = decryptField(String(row.phone_enc)); } catch { phonePlain = null; }
+      } else if (row.phone) {
+        phonePlain = String(row.phone);
+      }
+      // For mine, show full phone to owner; mask elsewhere but mine is owner
+      return { ...row, phone: phonePlain };
+    });
+    return res.json(rows);
   } catch (e) {
     return res.json([]);
   }
@@ -1110,17 +1125,25 @@ app.get('/api/utrade/trades/mine', requireIdentity, asyncHandler(async (req, res
 app.get('/api/utrade/trades/:id', requireIdentity, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid_id' });
-  const r = await db.query('SELECT id, seller_telegram_id, buyer_telegram_id, phone, status, created_at, updated_at, completed_at, expires_at FROM utrade_trades WHERE id = $1', [id]);
+  const r = await db.query('SELECT id, seller_telegram_id, buyer_telegram_id, phone, phone_enc, status, created_at, updated_at, completed_at, expires_at FROM utrade_trades WHERE id = $1', [id]);
   if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
   const trade = r.rows[0];
+  // Decrypt phone_enc if present (fix 3.4)
+  let phonePlain: string | null = null;
+  if (trade.phone_enc) {
+    try { phonePlain = decryptField(String(trade.phone_enc)); } catch { phonePlain = null; }
+  } else if (trade.phone) {
+    phonePlain = String(trade.phone);
+  }
+  const tradeWithPhone = { ...trade, phone: phonePlain };
   // mask phone for non-owners
   const caller = getIdentityId(req);
   const isParty = caller !== null && (Number(trade.seller_telegram_id) === caller || Number(trade.buyer_telegram_id) === caller);
   const isAdminCaller = (req as any).authMode === 'api-key' || (caller !== null && isAdminTelegramId(caller));
   if (!isParty && !isAdminCaller) {
-    return res.json({ ...trade, phone: utradeMaskPhone(String(trade.phone || '')) });
+    return res.json({ ...tradeWithPhone, phone: utradeMaskPhone(String(phonePlain || '')) });
   }
-  return res.json(trade);
+  return res.json(tradeWithPhone);
 }));
 
 app.post('/api/utrade/trades/:id/phone', requireIdentity, asyncHandler(async (req, res) => {
@@ -1131,7 +1154,9 @@ app.post('/api/utrade/trades/:id/phone', requireIdentity, asyncHandler(async (re
   const r = await db.query('SELECT seller_telegram_id FROM utrade_trades WHERE id = $1', [id]);
   if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
   if (Number(r.rows[0].seller_telegram_id) !== caller && (req as any).authMode !== 'api-key' && !isAdminTelegramId(caller!)) return res.status(403).json({ error: 'not_seller' });
-  await db.query('UPDATE utrade_trades SET phone = $1, updated_at = now() WHERE id = $2', [phone, id]);
+  try { await db.query('ALTER TABLE utrade_trades ADD COLUMN IF NOT EXISTS phone_enc TEXT'); } catch {}
+  const enc = encryptField(phone);
+  await db.query('UPDATE utrade_trades SET phone = NULL, phone_enc = $1, updated_at = now() WHERE id = $2', [enc, id]);
   return res.json({ ok: true });
 }));
 
@@ -1176,23 +1201,21 @@ app.post('/api/utrade/trades/:id/code', requireIdentity, asyncHandler(async (req
   }
   const isBuyer = caller !== null && Number(trade.buyer_telegram_id) === caller;
   if (!isBuyer && (req as any).authMode !== 'api-key') return res.status(403).json({ error: 'not_buyer' });
-  // For UI, we cannot actually verify Telegram code without teleproto — mark awaiting and log event
-  // If password provided, treat as 2FA success
+  const st = String(trade.status);
+  if (['COMPLETED','FAILED','CANCELLED'].includes(st)) return res.status(400).json({ error: 'trade_already_final', status: st });
+  // Fix 3.4: never auto-complete via backend webapp — we cannot verify Telegram code without teleproto (utradebot).
+  // Mark for manual review and log event; real verification must happen via utradebot teleproto.
   if (password) {
-    await db.query("UPDATE utrade_trades SET status = 'COMPLETED', completed_at = now(), updated_at = now() WHERE id = $1", [id]);
-    try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [id, caller, 'buyer_login_via_webapp', JSON.stringify({ code: '***', hasPassword: true })]); } catch {}
-    return res.json({ ok: true, status: 'COMPLETED' });
+    await db.query("UPDATE utrade_trades SET status = 'AWAITING_BUYER_LOGIN', updated_at = now(), meta = COALESCE(meta,'{}'::jsonb) || '{\"webapp_2fa_submitted\":true}'::jsonb WHERE id = $1", [id]);
+    try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [id, caller, '2fa_submitted_via_webapp_manual_review', JSON.stringify({ hasPassword: true })]); } catch {}
+    return res.json({ ok: true, status: 'AWAITING_BUYER_LOGIN', note: '2FA received but NOT verified — manual review / utradebot teleproto verification required. Trade NOT marked COMPLETED.' });
   }
-  // If code looks valid, advance to AWAITING_CODE then COMPLETED for demo (real verification via bot teleproto)
   if (/^\d{5,6}$/.test(code)) {
-    const newSt = trade.status === 'PHONE_SHARED' ? 'AWAITING_CODE' : 'COMPLETED';
-    const upd = newSt === 'COMPLETED' ? "status = 'COMPLETED', completed_at = now()" : "status = 'AWAITING_CODE'";
-    await db.query(`UPDATE utrade_trades SET ${upd}, updated_at = now() WHERE id = $1`, [id]);
-    try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [id, caller, 'code_submitted_via_webapp', JSON.stringify({ code: '***' })]); } catch {}
-    // Auto-complete after code for UI demo if was AWAITING_CODE
-    if (newSt === 'COMPLETED') return res.json({ ok: true, status: 'COMPLETED' });
-    // Second call will complete
-    return res.json({ ok: true, status: 'AWAITING_CODE', next: 'submit_2fa_if_required' });
+    // First code submission moves PHONE_SHARED -> AWAITING_CODE; subsequent stays AWAITING_CODE (never COMPLETED)
+    const newSt = st === 'PHONE_SHARED' ? 'AWAITING_CODE' : 'AWAITING_CODE';
+    await db.query(`UPDATE utrade_trades SET status = $1, updated_at = now(), meta = COALESCE(meta,'{}'::jsonb) || '{\"webapp_code_submitted\":true}'::jsonb WHERE id = $2`, [newSt, id]);
+    try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [id, caller, 'code_submitted_via_webapp_manual_review', JSON.stringify({ code: '***' })]); } catch {}
+    return res.json({ ok: true, status: 'AWAITING_CODE', note: 'Code received but NOT verified — manual review / utradebot verification required. Trade NOT marked COMPLETED.', next: 'await_manual_review' });
   }
   return res.status(400).json({ error: 'invalid_code' });
 }));
