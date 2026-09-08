@@ -1,5 +1,9 @@
 # TON Escrow Bot
 
+[![CI](https://github.com/algorithco/p2pbot/actions/workflows/ci.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/algorithco/p2pbot/actions/workflows/codeql.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/codeql.yml)
+[![Docker Publish](https://github.com/algorithco/p2pbot/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/docker-publish.yml)
+
 A peer-to-peer escrow service for Telegram: a grammY bot plus a Telegram Mini
 App that lets two parties trade TON or USDT (jettons) safely. Funds are held by
 an on-chain `Escrow` contract (Tact) when deployed, while the backend keeps a

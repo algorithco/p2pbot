@@ -5,6 +5,11 @@ dist/
 !*.env.example
 logs
 *.log
-contracts/output/
+coverage/
+.vite/
+*.tsbuildinfo
+sessions/
 .DS_Store
 Thumbs.db
+.idea/
+

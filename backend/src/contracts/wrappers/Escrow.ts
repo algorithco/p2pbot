@@ -118,7 +118,7 @@ export class Escrow implements Contract {
     return stack.readNumber();
   }
 
-  /** get fun dealInfo(): (Int, Address, Address, Address, Int, Int, Int, Int, Int) */
+  /** get fun dealInfo(): DealInfo (fields pushed to stack in declaration order) */
   async getDealInfo(provider: ContractProvider): Promise<EscrowDealInfo> {
     const { stack } = await provider.get('dealInfo', []);
     return {
