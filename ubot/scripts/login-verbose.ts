@@ -18,20 +18,25 @@ function ask(q: string): Promise<string> {
 }
 
 function syncEnvFile(enc: string): void {
+  let fd: number | null = null;
   try {
     const envPath = path.resolve(__dirname, '..', '.env');
-    if (!fs.existsSync(envPath)) return;
-    let content = fs.readFileSync(envPath, 'utf8');
+    // Open once and read+write through the same fd — avoids read-then-reopen TOCTOU race
+    fd = fs.openSync(envPath, 'r+');
+    let content = fs.readFileSync(fd, 'utf8');
     const hasKey = /^UBOT_SESSION_STRING=.*$/m.test(content);
     if (hasKey) content = content.replace(/^UBOT_SESSION_STRING=.*$/m, `UBOT_SESSION_STRING=${enc}`);
     else {
       if (!content.endsWith('\n')) content += '\n';
       content += `UBOT_SESSION_STRING=${enc}\n`;
     }
-    fs.writeFileSync(envPath, content, 'utf8');
+    fs.writeSync(fd, content, 0, 'utf8');
+    fs.ftruncateSync(fd, Buffer.byteLength(content, 'utf8'));
     console.log(`✔ Auto-updated .env UBOT_SESSION_STRING (${enc.slice(0, 12)}...${enc.slice(-12)})`);
   } catch (e) {
     console.warn('⚠ Could not auto-update .env:', (e as Error).message);
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch {} }
   }
 }
 
