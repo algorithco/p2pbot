@@ -11,18 +11,15 @@ export function depositComment(dealId: number | string): string {
   return `escrow#${dealId}`;
 }
 
-/** Try to extract deal id from a deposit comment. Supports: escrow#123, escrow:deal#123, Deal #123, deal#123 */
+/** Try to extract deal id from a deposit comment. Strict: requires escrow/deal prefix.
+ * Supports: escrow#123, escrow:123, escrow:deal#123, deal#123, Escrow #123.
+ * Bare "#123" or "thanks for #123" no longer matches (fix 3.2) to avoid mis-attribution.
+ */
 export function parseDepositComment(comment: string | null | undefined): number | null {
   if (!comment) return null;
   const s = String(comment).trim();
-  // escrow#123, escrow:deal#123, deal#123
-  let m = s.match(/(?:escrow|deal)\s*[:#]?\s*(\d{1,10})\b/i);
-  if (m) {
-    const n = Number(m[1]);
-    if (Number.isInteger(n) && n > 0) return n;
-  }
-  // "Escrow #123" or "#123"
-  m = s.match(/#\s*(\d{1,10})\b/);
+  // Require escrow/deal literal + separator : or # (not optional) — prevents `thanks for #123 pizza` misparse
+  const m = s.match(/(?:escrow|deal)\s*[:#]\s*(\d{1,10})\b/i);
   if (m) {
     const n = Number(m[1]);
     if (Number.isInteger(n) && n > 0) return n;
