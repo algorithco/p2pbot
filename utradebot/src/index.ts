@@ -1,4 +1,5 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { config, validateConfig } from './config';
 import logger from './logger';
 import { pool, ensureTables } from './db/queries';
@@ -7,8 +8,14 @@ import { startBot, getBot } from './bot/bot';
 const app = express();
 app.use(express.json({ limit: '256kb' }));
 
+// Global rate limiter — baseline protection for every route
+const globalLimiter = rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: true, legacyHeaders: false, message: { error: 'rate_limited' }, validate: false });
+app.use(globalLimiter);
+const healthLimiter = rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false, message: { error: 'rate_limited' }, validate: false });
+const tradesLimiter = rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false, message: { error: 'rate_limited' }, validate: false });
+
 // Health (no auth) — docker healthcheck
-app.get('/health', async (_req, res) => {
+app.get('/health', healthLimiter, async (_req, res) => {
   let dbOk = false;
   try {
     await pool.query('SELECT 1');
@@ -27,7 +34,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/api/trades/:id', async (req, res) => {
+app.get('/api/trades/:id', tradesLimiter, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const r = await pool.query('SELECT id, seller_telegram_id, buyer_telegram_id, phone, status, created_at FROM utrade_trades WHERE id = $1', [id]);

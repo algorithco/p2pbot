@@ -1,6 +1,7 @@
 // src/auth/guard.ts
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import expressRateLimit from 'express-rate-limit';
 import { config } from '../config';
 import logger from '../logger';
 import { validateInitData } from './initData';
@@ -126,40 +127,19 @@ export interface RateLimitOptions {
 }
 
 /**
- * In-memory sliding-window rate limiter keyed by ip + route-bucket name.
- * Returns 429 {error:'rate_limited'} with Retry-After once max hits/window exceeded.
- * Note: per-process only — if scaled horizontally, each instance has own counters (effective limit = max * replicas).
- * Same for listener cursors/monitoredAddresses (see listener.ts) — assumes single backend instance; use Redis if multi-instance needed.
+ * Rate limiter built on express-rate-limit (in-memory store) keyed by ip.
+ * Returns 429 {error:'rate_limited'} with RateLimit/Retry-After headers once max hits/window exceeded.
+ * Each call creates an independent bucket; `name` is kept for keying/observability.
  */
 export function rateLimit(options: RateLimitOptions): RequestHandler {
-  const windowMs = Math.max(1, Math.floor(options.windowMs));
-  const max = Math.max(1, Math.floor(options.max));
-  const hits = new Map<string, number[]>();
-
-  const pruneExpired = (now: number) => {
-    for (const [key, times] of hits) {
-      const alive = times.filter((t) => now - t < windowMs);
-      if (alive.length === 0) hits.delete(key);
-      else hits.set(key, alive);
-    }
-  };
-
-  return (req, res, next) => {
-    const now = Date.now();
-    if (hits.size > 10000) pruneExpired(now);
-
-    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-    const key = `${ip}|${options.name || 'default'}`;
-    const times = (hits.get(key) || []).filter((t) => now - t < windowMs);
-
-    if (times.length >= max) {
-      const retryAfterSec = Math.max(1, Math.ceil((times[0] + windowMs - now) / 1000));
-      res.setHeader('Retry-After', String(retryAfterSec));
-      return res.status(429).json({ error: 'rate_limited' });
-    }
-
-    times.push(now);
-    hits.set(key, times);
-    return next();
-  };
+  const limiter = expressRateLimit({
+    windowMs: Math.max(1, Math.floor(options.windowMs)),
+    limit: Math.max(1, Math.floor(options.max)),
+    standardHeaders: true, // RateLimit-* headers incl. Retry-After on 429
+    legacyHeaders: false,
+    keyGenerator: (req) => `${req.ip || req.socket?.remoteAddress || 'unknown'}|${options.name || 'default'}`,
+    message: { error: 'rate_limited' },
+    validate: false, // trust proxy configured at app level
+  });
+  return limiter as unknown as RequestHandler;
 }

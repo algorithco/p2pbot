@@ -100,6 +100,10 @@ app.use(cors({ origin: corsOrigin as never, credentials: false }));
 app.use(express.json({ limit: '256kb' }));
 app.use(identityAuth);
 
+// Global rate limiter — baseline protection for every route (per-route limiters below are stricter)
+const globalLimiter = rateLimit({ windowMs: 60_000, max: 300, name: 'global' });
+app.use(globalLimiter);
+
 type AsyncRequestHandler = (req: Request, res: Response, next: NextFunction) => Promise<unknown>;
 
 /** Wraps async handlers so rejections hit the error middleware -> 500 JSON. */
