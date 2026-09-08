@@ -1346,7 +1346,7 @@ const API_DOCS = {
   auth: {
     telegram: 'x-init-data (HMAC-SHA256 via BOT_TOKEN) + x-telegram-user-id — verified in src/auth/initData.ts, 24h window',
     apiKey: 'x-api-key: <API_KEY> header or ?api_key= (timing-safe, see src/auth/guard.ts)',
-    devFallback: 'x-telegram-user-id only when BOT_TOKEN and API_KEY unset (never in prod)',
+    devFallback: 'x-telegram-user-id only when ALLOW_DEV_AUTH=true and BOT_TOKEN+API_KEY unset (never in prod; NODE_ENV=production refuses to start without auth)',
     admin: 'Telegram id in ADMIN_TELEGRAM_IDS or any api-key caller',
   },
   rateLimits: 'create deal 10/min · join 20/min · chat post 60/min · notify 5/min (sliding window per IP+route)',
@@ -1650,6 +1650,14 @@ function startSchedulers() {
 }
 
 async function boot() {
+  // Fix 3.3: fail closed in production if no auth configured and dev not explicitly allowed
+  if (process.env.NODE_ENV === 'production' && !config.botToken && !config.apiKey && !config.allowDevAuth) {
+    logger.error('FATAL: NODE_ENV=production but BOT_TOKEN and API_KEY are both unset and ALLOW_DEV_AUTH != true — would run with open auth. Refusing to start.');
+    process.exit(1);
+  }
+  if (!config.botToken && !config.apiKey && !config.allowDevAuth) {
+    logger.warn('WARNING: BOT_TOKEN and API_KEY unset and ALLOW_DEV_AUTH != true — all identity routes will 401 until configured (dev header ignored)');
+  }
   // Retry DB with backoff — handles postgres "starting up" after unclean shutdown (40s recovery)
   let lastErr: unknown = null;
   for (let attempt = 1; attempt <= 6; attempt++) {

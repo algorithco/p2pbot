@@ -41,4 +41,6 @@ export const config = {
   ubotApiKey: process.env.UBOT_API_KEY || process.env.UBOT_API_KEY || '',
   utradeUrl: process.env.UTRADE_URL || 'http://utradebot:3003',
   utradeApiKey: process.env.UTRADE_API_KEY || '',
+  // Fix 3.3: dev auth requires explicit opt-in, never in production by accident
+  allowDevAuth: process.env.ALLOW_DEV_AUTH === 'true',
 };

@@ -56,16 +56,23 @@ export const identityAuth: RequestHandler = (req, _res, next) => {
     return next();
   }
 
-  if (!config.botToken && !config.apiKey) {
+  // Fix 3.3: dev auth only if explicitly allowed via ALLOW_DEV_AUTH=true
+  if (!config.botToken && !config.apiKey && config.allowDevAuth) {
     if (!devWarned) {
       devWarned = true;
-      logger.warn('AUTH DEV MODE — do not run in prod');
+      logger.warn('AUTH DEV MODE — ALLOW_DEV_AUTH=true, trusting x-telegram-user-id (never enable in prod)');
     }
     const headerId = req.headers['x-telegram-user-id'];
     const id = Number(Array.isArray(headerId) ? headerId[0] : headerId);
     if (isValidPositiveInt(id)) {
       req.user = { id };
       req.authMode = 'dev';
+    }
+  } else if (!config.botToken && !config.apiKey && !config.allowDevAuth) {
+    // No dev fallback — remain anonymous; requireIdentity will 401. Log once.
+    if (!devWarned) {
+      devWarned = true;
+      logger.warn('AUTH: BOT_TOKEN and API_KEY unset and ALLOW_DEV_AUTH != true — dev header ignored (requests will be 401)');
     }
   }
 
