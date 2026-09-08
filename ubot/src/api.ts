@@ -477,7 +477,7 @@ export function createApi() {
   app.get('/channel/:id', async (req: Request, res: Response) => {
     if (!isValidId(req.params.id)) return res.status(400).json({ error: 'invalid channel id' });
     try {
-      const info = await getChannelInfo(req.params.id);
+      const info = await getChannelInfo(String(req.params.id));
       res.json(info);
     } catch (e) {
       const mapped = mapTelegramError(e);
@@ -492,7 +492,7 @@ export function createApi() {
   app.get('/channel/:id/admins', async (req: Request, res: Response) => {
     if (!isValidId(req.params.id)) return res.status(400).json({ error: 'invalid channel id' });
     try {
-      const admins = await listChannelAdmins(req.params.id);
+      const admins = await listChannelAdmins(String(req.params.id));
       res.json(admins);
     } catch (e) {
       const mapped = mapTelegramError(e);
@@ -510,7 +510,7 @@ export function createApi() {
     if (!isValidId(userId)) return res.status(400).json({ error: 'userId required (numeric id or @username)' });
     if (rank && String(rank).length > 32) return res.status(400).json({ error: 'rank too long (max 32)' });
     try {
-      await promoteToAdmin(req.params.id, userId, rights, rank);
+      await promoteToAdmin(String(req.params.id), userId, rights, rank);
       res.json({ ok: true });
     } catch (e) {
       const mapped = mapTelegramError(e);
@@ -527,7 +527,7 @@ export function createApi() {
     const { userId } = req.body;
     if (!isValidId(userId)) return res.status(400).json({ error: 'userId required (numeric id or @username)' });
     try {
-      await addGroupMember(req.params.id, userId);
+      await addGroupMember(String(req.params.id), userId);
       res.json({ ok: true });
     } catch (e) {
       const mapped = mapTelegramError(e);
@@ -545,7 +545,7 @@ export function createApi() {
     if (!isValidId(newOwnerId)) return res.status(400).json({ error: 'newOwnerId required' });
     if (password && String(password).length > 128) return res.status(400).json({ error: 'password too long' });
     try {
-      await transferChannelOwnership(req.params.id, newOwnerId, password);
+      await transferChannelOwnership(String(req.params.id), newOwnerId, password);
       res.json({ ok: true });
     } catch (e) {
       const mapped = mapTelegramError(e);
@@ -574,7 +574,7 @@ export function createApi() {
 
     try {
       try {
-        await promoteToAdmin(req.params.id, newOwnerId, rights, rank || 'Owner');
+        await promoteToAdmin(String(req.params.id), newOwnerId, rights, rank || 'Owner');
       } catch (pe) {
         const m = String((pe as Error).message || pe);
         if (!m.includes('CHAT_NOT_MODIFIED') && !m.includes('already admin')) {
@@ -583,7 +583,7 @@ export function createApi() {
       }
       // human delay between promote and transfer to avoid ban (2500 + rand*2500)
       await sleep(2500 + Math.random() * 2500);
-      await transferChannelOwnership(req.params.id, newOwnerId, password);
+      await transferChannelOwnership(String(req.params.id), newOwnerId, password);
       const body = { ok: true, step: 'transferred' };
       if (idemKey) setIdempotency(idemKey, 200, body);
       res.json(body);
@@ -602,7 +602,7 @@ export function createApi() {
     const { userId, rights, rank } = req.body;
     if (!isValidId(userId)) return res.status(400).json({ error: 'userId required' });
     try {
-      await promoteGroupAdmin(req.params.id, userId, rights, rank);
+      await promoteGroupAdmin(String(req.params.id), userId, rights, rank);
       res.json({ ok: true });
     } catch (e) {
       const mapped = mapTelegramError(e);
@@ -619,7 +619,7 @@ export function createApi() {
     const { userId } = req.body;
     if (!isValidId(userId)) return res.status(400).json({ error: 'userId required' });
     try {
-      await addGroupMember(req.params.id, userId);
+      await addGroupMember(String(req.params.id), userId);
       res.json({ ok: true });
     } catch (e) {
       const mapped = mapTelegramError(e);
@@ -635,7 +635,7 @@ export function createApi() {
     const { newOwnerId, password } = req.body;
     if (!isValidId(newOwnerId)) return res.status(400).json({ error: 'newOwnerId required' });
     try {
-      await transferGroupOwnership(req.params.id, newOwnerId, password);
+      await transferGroupOwnership(String(req.params.id), newOwnerId, password);
       res.json({ ok: true });
     } catch (e) {
       const mapped = mapTelegramError(e);
@@ -662,12 +662,12 @@ export function createApi() {
 
     try {
       try {
-        await promoteGroupAdmin(req.params.id, newOwnerId, rights, rank || 'Owner');
+        await promoteGroupAdmin(String(req.params.id), newOwnerId, rights, rank || 'Owner');
       } catch (pe) {
         logger.warn('group takeover promote failed', redactSecrets({ group: req.params.id, newOwnerId, error: String((pe as Error).message || pe), reqId: (req as unknown as Record<string, unknown>).reqId }));
       }
       await sleep(2500 + Math.random() * 2500);
-      await transferGroupOwnership(req.params.id, newOwnerId, password);
+      await transferGroupOwnership(String(req.params.id), newOwnerId, password);
       const body = { ok: true, step: 'transferred' };
       if (idemKey) setIdempotency(idemKey, 200, body);
       res.json(body);
@@ -683,7 +683,7 @@ export function createApi() {
   app.get('/group/:id/isBasic', async (req: Request, res: Response) => {
     if (!isValidId(req.params.id)) return res.status(400).json({ error: 'invalid group id' });
     try {
-      const basic = await isBasicGroup(req.params.id);
+      const basic = await isBasicGroup(String(req.params.id));
       res.json({ isBasic: basic });
     } catch (e) {
       const mapped = mapTelegramError(e);
@@ -696,7 +696,7 @@ export function createApi() {
   app.post('/group/:id/migrate', migrateLimiter, async (req: Request, res: Response) => {
     if (!isValidId(req.params.id)) return res.status(400).json({ error: 'invalid group id' });
     try {
-      const ch = await migrateToSupergroup(req.params.id);
+      const ch = await migrateToSupergroup(String(req.params.id));
       // Handle both BigInt and number id
       const rawId = (ch as unknown as { id: unknown }).id;
       const channelId =

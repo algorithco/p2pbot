@@ -1180,7 +1180,7 @@ app.post('/api/refund', requireAdmin, asyncHandler(async (req, res) => {
 
 app.get('/api/status/:address', asyncHandler(async (req, res) => {
   try {
-    const addr = Address.parse(req.params.address);
+    const addr = Address.parse(String(req.params.address));
     const escrow = new Escrow(addr as any);
     const opened = openContract(escrow, ({ address: a }) => client.provider(a, null as any));
     const status = await opened.getStatus();
