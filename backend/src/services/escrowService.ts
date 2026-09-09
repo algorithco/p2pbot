@@ -11,7 +11,7 @@ import logger from '../logger';
 import { releaseComment } from '../utils/comments';
 import { sendTon, sendJetton } from '../blockchain/signerClient';
 import { encryptField } from '../utils/encryption';
-import { toBaseUnits, fromBaseUnits } from '../utils/money';
+import { toBaseUnits, fromBaseUnits, dealPricing } from '../utils/money';
 import * as notify from '../bot/notify';
 
 function isAdmin(telegramId: number): boolean {
@@ -122,7 +122,7 @@ function isPendingStatus(status: unknown): boolean {
 
 interface PayoutPlan {
   assetUpper: string;
-  principalHuman: string; // what the party receives (price; == amount for refunds)
+  principalHuman: string; // what the party receives (price on release; price+fee on refund)
   amountStr: string; // deal price (human), for logging/alerts
   feeHuman: string;
   feeBase: bigint;
@@ -240,6 +240,7 @@ export async function reconcileStuckPayouts(stuckAfterMinutes = 15): Promise<num
  * Shared guarded transition for RELEASED/REFUNDED.
  * MONEY MODEL: deal.amount = price (seller net). Buyer deposited price+fee.
  * On RELEASED: seller gets amount, feeAddress gets fee.
+ * On REFUNDED: buyer gets amount+fee (their full original deposit); no fee leg fires.
  * Crash-safe: three-phase PENDING + idempotency key (see IDEMPOTENCY MODEL above).
  */
 async function guardedTransition(dealId: number, status: string, opts?: { toAddress?: string; amount?: string | number; asset?: string; terms?: string }) {
@@ -297,6 +298,19 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
         if (payoutHuman === '0' || payoutHuman === '-0') payoutHuman = amountStr;
       } catch (e) {
         logger.warn(`Fee calc failed for deal #${dealId}`, e);
+        payoutHuman = amountStr;
+      }
+    } else if (isRefund) {
+      // REFUND: the buyer deposited price+fee (listener confirms only exact
+      // expectedDeposit), so the FULL deposit must go back to the buyer.
+      // feeBase deliberately stays 0: the fee portion returns inside the
+      // principal — no separate fee leg to feeAddress may fire on a refund.
+      try {
+        const pricing = dealPricing(amountStr, assetUpper, (deal as any).fee_bps ?? config.feeBps ?? 100);
+        payoutHuman = fromBaseUnits(pricing.expectedDeposit, assetUpper);
+        if (payoutHuman === '0' || payoutHuman === '-0') payoutHuman = amountStr;
+      } catch (e) {
+        logger.warn(`Refund calc failed for deal #${dealId}`, e);
         payoutHuman = amountStr;
       }
     }
@@ -397,7 +411,7 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     const { addDealMessage } = await import('./dealService');
     const sysText = status === DEAL_STATUS.RELEASED
       ? `Tizim: Yakunlandi (Deal #${dealId}) — ${plan!.principalHuman} ${plan!.assetUpper} sotuvchiga yuborildi${feeFailed ? ` (komissiya yuborilmadi — admin tekshiradi)` : plan!.feeHuman !== '0' ? ` (komissiya ${plan!.feeHuman} ${plan!.assetUpper})` : ''}.`
-      : `Tizim: Qaytarildi (Deal #${dealId}) — ${plan!.amountStr} ${plan!.assetUpper} xaridorga qaytarildi.`;
+      : `Tizim: Qaytarildi (Deal #${dealId}) — ${plan!.principalHuman} ${plan!.assetUpper} xaridorga qaytarildi.`;
     await addDealMessage(dealId, 0, sysText);
   } catch (e) {
     logger.warn(`post-commit system message failed for deal #${dealId}`, e);
