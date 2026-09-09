@@ -3,7 +3,7 @@
 [![CI](https://github.com/algorithco/p2pbot/actions/workflows/ci.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/algorithco/p2pbot/actions/workflows/codeql.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/codeql.yml)
 [![Docker Publish](https://github.com/algorithco/p2pbot/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/docker-publish.yml)
-[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Telegram Mini App](https://img.shields.io/badge/Telegram-Mini_App-2CA5E0?logo=telegram)](https://core.telegram.org/bots/webapps)
 [![TON](https://img.shields.io/badge/TON-W5-0098EA?logo=ton)](https://ton.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
@@ -171,6 +171,8 @@ Minimum for off-chain: `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL` (backen
 
 ## License
 
-**Proprietary — Strict, All Rights Reserved.** See [LICENSE](LICENSE).
+**GNU Affero General Public License v3.0 (AGPL-3.0) — Strict, Official, OSI-Approved.** See [LICENSE](LICENSE).
 
-This repository and its contents are proprietary and confidential. No permission is granted to use, copy, modify, distribute, or host this Software without the prior express written consent of the licensor. Unauthorized use is strictly prohibited and will be pursued to the fullest extent permitted by law. For licensing inquiries, contact the repository owner via GitHub Issues.
+This is the strictest official OSI-approved license. It ensures anyone who runs a modified version over a network (e.g., as a Telegram bot / Mini App backend) must make the complete Corresponding Source available to all remote users via a network server at no charge (Section 13). Includes strong copyleft and explicit patent grant. Commercial use without source disclosure is not permitted — use the network clause to preserve user freedom for SaaS.
+
+*Other strict official alternatives:* `GPL-3.0` (copyleft without network clause) and `Apache-2.0` (permissive, patent grant, commercial-friendly). This project uses `AGPL-3.0` for maximum strictness.
