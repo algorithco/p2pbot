@@ -1,0 +1,10 @@
+# Guard the commit: format + lint staged files, then scan for secrets.
+npx lint-staged
+
+# Fail the commit if staged content looks like a secret (no-op if gitleaks
+# is not installed; CI runs the same check unconditionally).
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --verbose
+else
+  echo "husky: gitleaks not installed, skipping local secret scan (CI will scan)."
+fi

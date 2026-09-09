@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.vite
+package-lock.json
+**/package-lock.json
+**/*.min.js
+sessions
+*.log
+.husky
