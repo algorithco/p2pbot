@@ -51,6 +51,40 @@ export function toBaseUnits(amount: number | string, asset: string): string {
   return parseToScaled(amount, decimals).toString();
 }
 
+/**
+ * One pricing function for the whole escrow path (deep module behind Deal).
+ *
+ * MONEY MODEL: the buyer pays `amount + fee`; the seller receives `amount`;
+ * the fee is `amount * feeBps / 10000` (feeBps in basis points, 100 = 1%).
+ * `expectedDeposit` is the total that must land in the escrow address before
+ * the deposit is confirmed by the listener. All three sites that used to
+ * hand-roll these numbers (deal create, deposit verify, payout) read from here.
+ */
+export function dealPricing(
+  amount: number | string,
+  asset: string,
+  feeBpsRaw: number | string | null | undefined
+): {
+  priceBase: bigint;
+  feeBase: bigint;
+  expectedDeposit: bigint;
+  sellerHuman: string;
+  feeHuman: string;
+} {
+  const assetUpper = String(asset || 'TON').toUpperCase();
+  const priceBase = BigInt(toBaseUnits(amount, assetUpper));
+  const n = Number(feeBpsRaw ?? 100);
+  const feeBps = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 100;
+  const feeBase = feeBps <= 0 ? 0n : (priceBase * BigInt(Math.min(feeBps, 10000))) / 10000n;
+  return {
+    priceBase,
+    feeBase,
+    expectedDeposit: priceBase + feeBase,
+    sellerHuman: fromBaseUnits(priceBase, assetUpper),
+    feeHuman: fromBaseUnits(feeBase, assetUpper),
+  };
+}
+
 /** Convert base units back to a human-readable plain decimal string. */
 export function fromBaseUnits(v: string | bigint, asset: string): string {
   const decimals = ASSET_DECIMALS[asset];
