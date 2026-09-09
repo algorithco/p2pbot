@@ -134,6 +134,18 @@ export async function ensureTables() {
   await pool.query('CREATE INDEX IF NOT EXISTS idx_join_requests_deal_token ON deal_join_requests(deal_id, token)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_join_requests_status ON deal_join_requests(status)');
 
+  // Deal lookups by party/status: /api/deals/mine + /api/deals filter
+  // `WHERE buyer_telegram_id = $1 OR seller_telegram_id = $1`, the scheduler and the
+  // listener seed filter on status. OR-queries use bitmap-or over single-column
+  // indexes, so singles (not a composite) are the correct shape here.
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_deals_buyer ON deals(buyer_telegram_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_deals_seller ON deals(seller_telegram_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status)');
+  // One pending join request per (deal, requester): closes the select-then-insert
+  // race in createJoinRequest — the unique violation is caught and mapped to the
+  // existing row (see dealService.createJoinRequest).
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_join_requests_pending ON deal_join_requests(deal_id, requester_telegram_id) WHERE status = 'pending'`);
+
   // Telegram IDs exceed 32-bit range — widen legacy INTEGER id columns to BIGINT.
   await pool.query('ALTER TABLE deals ALTER COLUMN buyer_id TYPE BIGINT');
   await pool.query('ALTER TABLE deals ALTER COLUMN seller_id TYPE BIGINT');
@@ -156,6 +168,21 @@ export async function ensureTables() {
     if (!msg.includes('already exists') && !msg.includes('chk_deals_amount_pos')) {
       // If existing rows violate (e.g. NaN), log but don't crash boot
       console.warn('Could not add chk_deals_amount_pos (existing bad rows?)', msg.slice(0,300));
+    }
+  }
+
+  // Defense-in-depth: restrict deals.status to the canonical enum (incl. transient
+  // payout PENDING states from group A). NOTE: Postgres has no
+  // `ADD CONSTRAINT IF NOT EXISTS`, so same try/catch pattern as above.
+  try {
+    await pool.query(`ALTER TABLE deals ADD CONSTRAINT chk_deals_status CHECK (status IN (
+      'AWAITING_DEPOSIT','DEPOSIT_CONFIRMED','ITEM_SENT','BUYER_CONFIRMED',
+      'RELEASE_PENDING','REFUND_PENDING','RELEASED','REFUNDED'
+    ))`);
+  } catch (e) {
+    const msg = String((e as Error).message || '');
+    if (!msg.includes('already exists') && !msg.includes('chk_deals_status')) {
+      console.warn('Could not add chk_deals_status (existing bad rows?)', msg.slice(0,300));
     }
   }
 }

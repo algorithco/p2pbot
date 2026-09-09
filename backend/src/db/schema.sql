@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS deals (
   id SERIAL PRIMARY KEY,
+  -- DEPRECATED (write-only, never read — ownership is buyer/seller_telegram_id):
+  -- buyer_id / seller_id are kept for backward-compat only. Do not add new readers;
+  -- a future migration may stop writing them. See createDealRecord.
   buyer_id BIGINT,
   seller_id BIGINT,
   buyer_telegram_id BIGINT,
@@ -55,6 +58,17 @@ CREATE TABLE IF NOT EXISTS deals (
 );
 CREATE INDEX IF NOT EXISTS idx_deals_type ON deals(deal_type);
 CREATE INDEX IF NOT EXISTS idx_deals_channel_id ON deals(channel_id) WHERE channel_id IS NOT NULL;
+-- Party/status lookups (/api/deals/mine, scheduler, listener seed). Singles, not a
+-- composite: the hot query is `buyer=$1 OR seller=$1` (bitmap-or shape).
+CREATE INDEX IF NOT EXISTS idx_deals_buyer ON deals(buyer_telegram_id);
+CREATE INDEX IF NOT EXISTS idx_deals_seller ON deals(seller_telegram_id);
+CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);
+-- Enum guard (boot applies via try/catch ADD CONSTRAINT — PG has no IF NOT EXISTS
+-- for constraints — see queries.ts ensureTables).
+ALTER TABLE deals ADD CONSTRAINT chk_deals_status CHECK (status IN (
+  'AWAITING_DEPOSIT','DEPOSIT_CONFIRMED','ITEM_SENT','BUYER_CONFIRMED',
+  'RELEASE_PENDING','REFUND_PENDING','RELEASED','REFUNDED'
+));
 
 CREATE TABLE IF NOT EXISTS notifications (
   id SERIAL PRIMARY KEY,
@@ -106,3 +120,5 @@ CREATE INDEX IF NOT EXISTS idx_messages_deal_created ON messages(deal_id, create
 CREATE INDEX IF NOT EXISTS idx_deal_links_expires ON deal_links(expires_at);
 CREATE INDEX IF NOT EXISTS idx_join_requests_deal_token ON deal_join_requests(deal_id, token);
 CREATE INDEX IF NOT EXISTS idx_join_requests_status ON deal_join_requests(status);
+-- One pending request per (deal, requester); app maps the violation to "already requested".
+CREATE UNIQUE INDEX IF NOT EXISTS uq_join_requests_pending ON deal_join_requests(deal_id, requester_telegram_id) WHERE status = 'pending';

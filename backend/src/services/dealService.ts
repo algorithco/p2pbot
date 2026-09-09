@@ -77,7 +77,11 @@ export function normalizeChannelUsername(v: unknown): string | null {
   return s.startsWith('@') ? s : `@${s}`;
 }
 
-/** Create a new deal record with optional role telegram IDs */
+/** Create a new deal record with optional role telegram IDs.
+ * NOTE: buyerId/sellerId (deals.buyer_id/seller_id) are DEPRECATED write-only columns —
+ * ownership is buyer/seller_telegram_id. They are still written for backward-compat
+ * (additive, harmless) but nothing reads them; do not add new readers.
+ */
 export async function createDealRecord(params: {
   buyerId?: number | null;
   sellerId?: number | null;
@@ -374,12 +378,26 @@ export async function createJoinRequest(params: {
     [dealId, token, requesterTelegramId]
   );
   if (existing.rows[0]) return existing.rows[0];
-  const res = await db.query(
-    `INSERT INTO deal_join_requests (deal_id, token, requester_telegram_id, requester_username, requester_first_name, requester_photo_url, status)
-     VALUES ($1,$2,$3,$4,$5,$6,'pending') RETURNING *`,
-    [dealId, token, requesterTelegramId, requesterUsername || null, requesterFirstName || null, requesterPhotoUrl || null]
-  );
-  return res.rows[0];
+  try {
+    const res = await db.query(
+      `INSERT INTO deal_join_requests (deal_id, token, requester_telegram_id, requester_username, requester_first_name, requester_photo_url, status)
+       VALUES ($1,$2,$3,$4,$5,$6,'pending') RETURNING *`,
+      [dealId, token, requesterTelegramId, requesterUsername || null, requesterFirstName || null, requesterPhotoUrl || null]
+    );
+    return res.rows[0];
+  } catch (e) {
+    // Concurrent double-click race: partial unique index uq_join_requests_pending
+    // rejected the second INSERT — return the winner's row as a clean "already
+    // requested" instead of a raw DB error.
+    if ((e as { code?: string }).code === '23505') {
+      const winner = await db.query(
+        `SELECT * FROM deal_join_requests WHERE deal_id = $1 AND requester_telegram_id = $2 AND status = 'pending' ORDER BY id ASC LIMIT 1`,
+        [dealId, requesterTelegramId]
+      );
+      if (winner.rows[0]) return winner.rows[0];
+    }
+    throw e;
+  }
 }
 
 export async function getJoinRequestById(id: number) {
