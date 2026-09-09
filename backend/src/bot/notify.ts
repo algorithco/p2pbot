@@ -7,7 +7,8 @@ type DealLike = { id: number | string; amount: string | number; asset: string; t
 function dealUrl(dealId: number | string): string | undefined {
   const base = (config.webappUrl || '').replace(/\/$/, '');
   if (!base) return undefined;
-  return `${base}/#/deal/${dealId}`;
+  // Creator approves join requests inside the mini-app deal CHAT (not bot, no separate page).
+  return `${base}/#/deal/${dealId}/chat`;
 }
 
 function kbFor(dealId: number | string): InlineKeyboard | undefined {
@@ -32,7 +33,7 @@ async function send(chatId: number | string, text: string, dealId?: number | str
 }
 
 export async function joinRequestToCreator(creatorId: number, deal: DealLike, requesterLabel: string): Promise<void> {
-  const text = [`🤝 Deal #${deal.id} ga so'rov: ${requesterLabel}`, `${deal.amount} ${deal.asset} — sherik bo'lmoqchi.`, `Ilovani ochib tasdiqlang.`].join('\n');
+  const text = [`🤝 Deal #${deal.id} ga so'rov: ${requesterLabel}`, `${deal.amount} ${deal.asset} — sherik bo'lmoqchi.`, `Bitim chati ichida tasdiqlang (mini-app → chat).`].join('\n');
   await send(creatorId, text, deal.id);
 }
 

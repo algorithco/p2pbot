@@ -380,8 +380,9 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
     return res.status(400).json({ error: 'invalid_amount', detail: String((e as Error).message || e).slice(0,200) });
   }
 
-  // Desired flow: buyer is creator. For identity-auth callers, buyerId is forced to caller.
-  // Seller is counterparty via invite link; link-only is allowed (seller null).
+  // Either side can create a deal. The creator occupies their own role slot and
+  // the counterparty joins via invite link (link-only allowed: other slot null).
+  // role=buy (default) → caller is buyer; role=sell → caller is seller.
   let sellerId = isValidPositiveInt(req.body.sellerId) ? Number(req.body.sellerId) : null;
   let buyerId = isValidPositiveInt(req.body.buyerId) ? Number(req.body.buyerId) : null;
   // Support alternative param names from webapp
@@ -391,30 +392,25 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
   if (req.authMode !== 'api-key') {
     const meId = req.user ? req.user.id : Number(req.headers['x-telegram-user-id']) || null;
     if (!meId) return res.status(401).json({ error: 'identity_required' });
-    // Enforce buyer creator per desired flow — buyer is always caller
-    // Keep role hint for backward compat: if role === 'sell' we still treat caller as buyer (webapp compatibility)
-    const role = String((req.body as Record<string, unknown>).role || '').toLowerCase();
-    if (role === 'sell') {
-      logger.warn(`Deal create with role=sell from ${sanitizeLogValue(meId)} — coercing to buyer per desired flow`);
-    }
+    const role = String((req.body as Record<string, unknown>).role || 'buy').toLowerCase();
     const origSellerId = sellerId;
     const origBuyerId = buyerId;
-    // Buyer is always the caller
-    buyerId = meId;
-    // Determine seller counterparty: explicit origSellerId, or cpId, or origBuyerId as counterparty (legacy), else link-only null
-    if (origSellerId !== null && origSellerId !== meId) {
-      sellerId = origSellerId;
-    } else if (cpId !== null && cpId !== meId) {
-      sellerId = cpId;
-    } else if (origBuyerId !== null && origBuyerId !== meId) {
-      sellerId = origBuyerId;
-    } else if (origSellerId !== null && origSellerId === meId) {
-      // self-trade, invalid — treat as link-only
-      sellerId = null;
+    // Counterparty hint from any explicit field (not equal to self)
+    const counterparty =
+      (origSellerId !== null && origSellerId !== meId) ? origSellerId
+      : (cpId !== null && cpId !== meId) ? cpId
+      : (origBuyerId !== null && origBuyerId !== meId) ? origBuyerId
+      : null;
+    if (role === 'sell') {
+      // Caller creates as seller; buyer joins via link (or explicit counterparty)
+      sellerId = meId;
+      buyerId = counterparty;
     } else {
-      sellerId = null;
+      // Default: caller creates as buyer; seller joins via link (or explicit counterparty)
+      buyerId = meId;
+      sellerId = counterparty;
     }
-    // Link-only: no counterparty required — seller will be filled via invite link
+    // Link-only: no counterparty required — other side is filled via invite link
   }
 
   // Link-only validation: at least one side must be set, single side via invite is allowed
@@ -545,9 +541,9 @@ app.post('/api/deals/:id/join/:token', joinLimiter, requireIdentity, asyncHandle
   if (deal.buyer_telegram_id != null && deal.seller_telegram_id != null) {
     return res.status(409).json({ error: 'deal_already_full' });
   }
-  // Buyer must be creator per desired flow
-  if (deal.buyer_telegram_id == null) {
-    return res.status(400).json({ error: 'deal_has_no_buyer_creator' });
+  // Either side can be the creator — at least one slot must be occupied.
+  if (deal.buyer_telegram_id == null && deal.seller_telegram_id == null) {
+    return res.status(400).json({ error: 'deal_has_no_creator' });
   }
   const link = await getDealLink(token).catch(() => null);
   if (!link || Number(link.deal_id) !== dealId) return res.status(404).json({ error: 'invalid_token' });
@@ -567,13 +563,21 @@ app.post('/api/deals/:id/join/:token', joinLimiter, requireIdentity, asyncHandle
       requesterPhotoUrl: null,
     });
 
-    // Notify ONLY buyer for approval (desired flow) via notify hub
-    const buyerId = Number(deal.buyer_telegram_id);
-    try {
-      const label = requesterUsername ? `@${requesterUsername}` : (requesterFirstName || String(telegramId));
-      await notify.joinRequestToCreator(buyerId, { id: deal.id, amount: String(deal.amount), asset: String(deal.asset), terms: String(deal.terms || '') }, label);
-    } catch (notifyErr) {
-      logger.warn(`Could not notify buyer ${sanitizeLogValue(buyerId)} about join request ${sanitizeLogValue(joinReq.id)}`, notifyErr);
+    // Notify the creator (whichever side created the deal) for approval in mini-app chat.
+    // The creator opens the deal chat and approves there — no bot-side approval.
+    const creatorId =
+      deal.buyer_telegram_id != null ? Number(deal.buyer_telegram_id)
+      : deal.seller_telegram_id != null ? Number(deal.seller_telegram_id)
+      : null;
+    if (creatorId !== null) {
+      try {
+        const label = requesterUsername ? `@${requesterUsername}` : (requesterFirstName || String(telegramId));
+        await notify.joinRequestToCreator(creatorId, { id: deal.id, amount: String(deal.amount), asset: String(deal.asset), terms: String(deal.terms || '') }, label);
+      } catch (notifyErr) {
+        logger.warn(`Could not notify creator ${sanitizeLogValue(creatorId)} about join request ${sanitizeLogValue(joinReq.id)}`, notifyErr);
+      }
+    } else {
+      logger.warn(`Join request ${sanitizeLogValue(joinReq.id)} has no creator to notify (deal #${sanitizeLogValue(dealId)})`);
     }
 
     void purgeExpiredLinks().catch((err) => logger.warn('purgeExpiredLinks failed', err));
@@ -1391,11 +1395,11 @@ const API_DOCS = {
     { method: 'GET', path: '/api/deals', auth: 'Identity (party or admin)', desc: 'List deals where caller is buyer/seller (admin sees all) — private' },
     { method: 'GET', path: '/api/deals/:id', auth: 'Identity (party or admin, token preview)', desc: 'Single deal by id — only buyer/seller/admin or valid invite token ?token=' },
     { method: 'GET', path: '/api/deals/mine', auth: 'Identity', desc: 'Alias for GET /api/deals — deals where caller is buyer or seller (requires x-init-data or x-api-key)' },
-    { method: 'POST', path: '/api/deals', auth: 'Identity', desc: 'Create deal {sellerId, asset TON|USDT, amount, terms?, deadline?} — caller forced to one side, returns {deal, link, webappLink, encryption}' },
-    { method: 'POST', path: '/api/deals/:id/join/:token', auth: 'Identity', desc: 'Consume one-time link atomically, assign missing buyer/seller role' },
+    { method: 'POST', path: '/api/deals', auth: 'Identity', desc: 'Create deal {role: buy|sell, asset TON|USDT, amount, terms?, deadline?} — caller becomes buyer (buy) or seller (sell), counterparty joins via link, returns {deal, link, webappLink, encryption}' },
+    { method: 'POST', path: '/api/deals/:id/join/:token', auth: 'Identity', desc: 'Request to join via link — creates pending request for creator approval in deal chat (joiner fills empty slot)' },
     { method: 'POST', path: '/api/deals/:id/confirm', auth: 'Identity (party)', desc: 'DEPRECATED alias to /approve — buyer-only approveReceipt. Use POST /api/deals/:id/approve (was mutual, now buyer only)' },
-    { method: 'GET', path: '/api/deals/:id/join-requests', auth: 'Identity (party or admin)', desc: 'List pending join requests for deal (photo + username) — only creator party can approve' },
-    { method: 'POST', path: '/api/deals/:id/join-requests/:requestId/approve', auth: 'Identity (party)', desc: 'Approve join request atomically → assign role + delete link + ensure chat key' },
+    { method: 'GET', path: '/api/deals/:id/join-requests', auth: 'Identity (party or admin)', desc: 'List pending join requests for deal — creator approves inside mini-app deal chat' },
+    { method: 'POST', path: '/api/deals/:id/join-requests/:requestId/approve', auth: 'Identity (party)', desc: 'Approve join request from deal chat → joiner fills empty slot + link consumed + chat key ensured' },
     { method: 'POST', path: '/api/deals/:id/join-requests/:requestId/reject', auth: 'Identity (party)', desc: 'Reject join request' },
     { method: 'GET', path: '/api/inbox', auth: 'Identity', desc: 'Global inbox — all pending join requests across caller deals' },
     { method: 'GET', path: '/api/deals/:id/key', auth: 'Identity (party or admin)', desc: 'Get per-deal E2E chat key {key, algo: aes-256-gcm} — only buyer/seller/admin' },

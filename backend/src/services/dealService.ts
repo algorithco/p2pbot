@@ -297,7 +297,9 @@ export async function assignRoleToDeal(dealId: number | string, role: 'buyer' | 
   }
 }
 
-/** Atomic join: assign role + consume link in a transaction to prevent race */
+/** Atomic join: joiner fills the EMPTY slot (creator keeps theirs) + consume link.
+ *  Either side can be the creator: buyer-created → joiner becomes seller,
+ *  seller-created → joiner becomes buyer. */
 export async function atomicJoinDeal(dealId: number, token: string, telegramId: number): Promise<'buyer' | 'seller'> {
   const client = await db.connect();
   try {
@@ -306,11 +308,16 @@ export async function atomicJoinDeal(dealId: number, token: string, telegramId: 
     const dealRes = await client.query('SELECT buyer_telegram_id, seller_telegram_id FROM deals WHERE id = $1 FOR UPDATE', [dealId]);
     if (dealRes.rows.length === 0) throw new Error('deal_not_found');
     const deal = dealRes.rows[0];
+    if (
+      (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === Number(telegramId)) ||
+      (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === Number(telegramId))
+    ) throw new Error('already_party_to_deal');
     const linkRes = await client.query('SELECT * FROM deal_links WHERE token = $1 AND deal_id = $2 AND expires_at > now() FOR UPDATE', [token, dealId]);
     if (linkRes.rows.length === 0) throw new Error('invalid_token');
     let role: 'buyer' | 'seller';
-    if (deal.buyer_telegram_id == null) role = 'buyer';
-    else if (deal.seller_telegram_id == null) role = 'seller';
+    if (deal.buyer_telegram_id != null && deal.seller_telegram_id == null) role = 'seller';
+    else if (deal.seller_telegram_id != null && deal.buyer_telegram_id == null) role = 'buyer';
+    else if (deal.buyer_telegram_id == null && deal.seller_telegram_id == null) throw new Error('deal_has_no_creator');
     else throw new Error('deal_already_full');
     const col = role === 'buyer' ? 'buyer_telegram_id' : 'seller_telegram_id';
     await client.query(`UPDATE deals SET ${col} = $1, updated_at = now() WHERE id = $2`, [telegramId, dealId]);
@@ -443,8 +450,9 @@ export async function updateJoinRequestStatus(id: number, status: 'approved' | '
   await db.query('UPDATE deal_join_requests SET status = $1, updated_at = now() WHERE id = $2', [status, id]);
 }
 
-/** Approve a join request — atomic: assign role + consume link + mark request approved
- *  Desired flow: ONLY buyer can approve seller joining. Buyer is creator.
+/** Approve a join request — atomic: assign role + consume link + mark request approved.
+ *  Either side can create a deal, so the CREATOR (whichever slot is occupied)
+ *  approves from the mini-app deal chat. The joiner fills the empty slot.
  */
 export async function approveJoinRequest(requestId: number, approverTelegramId: number): Promise<'buyer' | 'seller'> {
   const req = await getJoinRequestById(requestId);
@@ -452,10 +460,13 @@ export async function approveJoinRequest(requestId: number, approverTelegramId: 
   if (req.status !== 'pending') throw new Error('request_already_handled');
   const deal = await getDealById(req.deal_id);
   if (!deal) throw new Error('deal_not_found');
-  // Only the BUYER (creator) can approve — per desired flow: bot asks buyer "Are you trading with this person?"
-  const isBuyer = deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === approverTelegramId;
-  if (!isBuyer) throw new Error('not_authorized_to_approve: only_buyer_can_approve');
-  // Perform atomic join
+  // Only the creator (the already-joined party) can approve.
+  const isCreator =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === approverTelegramId) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === approverTelegramId);
+  if (!isCreator) throw new Error('not_authorized_to_approve: only_creator_can_approve');
+  if (Number(req.requester_telegram_id) === approverTelegramId) throw new Error('cannot_approve_own_request');
+  // Perform atomic join (assigns the empty slot)
   const role = await atomicJoinDeal(req.deal_id, req.token, req.requester_telegram_id);
   await updateJoinRequestStatus(requestId, 'approved');
   return role;
@@ -467,8 +478,10 @@ export async function rejectJoinRequest(requestId: number, approverTelegramId: n
   if (req.status !== 'pending') throw new Error('request_already_handled');
   const deal = await getDealById(req.deal_id);
   if (!deal) throw new Error('deal_not_found');
-  const isBuyer = deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === approverTelegramId;
-  if (!isBuyer) throw new Error('not_authorized_to_approve: only_buyer_can_approve');
+  const isCreator =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === approverTelegramId) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === approverTelegramId);
+  if (!isCreator) throw new Error('not_authorized_to_approve: only_creator_can_approve');
   await updateJoinRequestStatus(requestId, 'rejected');
 }
 

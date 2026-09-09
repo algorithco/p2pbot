@@ -33,7 +33,6 @@
     { re: /^#\/deal\/(\d+)$/, fn: viewDeal },
     { re: /^#\/profile$/, fn: viewProfile },
     { re: /^#\/admin$/, fn: function(){ location.hash='#/home'; if(window.UI) window.UI.toast('Admin faqat bot orqali','err'); } },
-    { re: /^#\/inbox$/, fn: function(){ return window.__viewInbox && window.__viewInbox(); } },
     { re: /^#\/trade$/, fn: function(){ return window.__viewTrade && window.__viewTrade(); } },
     { re: /^#\/channels$/, fn: function(){ return window.__viewChannels && window.__viewChannels(); } }
   ];
@@ -270,7 +269,7 @@
 
   /* ============ Join requests — inline approve/reject (deal detail + chat) ============
      Renders pending join requests with ✅/❌ right where the creator looks
-     (deal page + Mini App chat), not only the separate #/inbox page.
+     (deal page + Mini App chat). This is the ONLY approval place — no separate page, no bot buttons.
      - Empty → renders nothing (no noise).
      - Polls every pollMs; timer auto-cleared on route change via cleanupFns.
      - onChange() fires after approve/reject so the host view reloads. */
@@ -310,7 +309,7 @@
             onChange();
             loadReqs();
           } else if (m.indexOf('not_authorized') !== -1) {
-            UI.toast("Faqat yaratuvchi (xaridor) tasdiqlay oladi", 'err');
+            UI.toast("Faqat bitim yaratuvchisi tasdiqlay oladi", 'err');
           } else {
             UI.toast("Tasdiqlanmadi — qayta urinib ko'ring", 'err');
           }
@@ -1573,11 +1572,11 @@
         party('Sotuvchi', deal.seller_telegram_id, iAmSeller)
       ]));
 
-      // Inline join requests — buyer approves right here (not only #/inbox)
+      // Inline join requests — creator (either side) approves right here in the mini app
       (function () {
         var openSlot = !deal.buyer_telegram_id || !deal.seller_telegram_id;
         if (!openSlot || UI.isFinalStatus(deal.status)) return;
-        if (!iAmBuyer) return; // only buyer (creator) can approve
+        if (!iAmBuyer && !iAmSeller) return; // only the creator (joined party) can approve
         var wrap = UI.h('div', {});
         wrap.appendChild(UI.h('div', { class: 'section-title', text: "Qo'shilish so'rovlari" }));
         wrap.appendChild(joinRequestsBox(deal.id, { pollMs: 8000, onChange: function () { load(); } }));
@@ -1833,13 +1832,14 @@
     // Boot
     updateStatus();
     initKey();
-    // Inline join approvals at top of chat — buyer tasdiqlaydi, shu yerda (not only #/inbox)
+    // Inline join approvals at top of chat — creator (either side) approves here.
+    // This is the ONLY approval place in the mini app (no separate page, no bot buttons).
     Api.deal(id).then(function (deal) {
       if (!deal) return;
       var uid = App.state.meId;
-      var isBuyer = Number(deal.buyer_telegram_id) === uid;
+      var isParty = Number(deal.buyer_telegram_id) === uid || Number(deal.seller_telegram_id) === uid;
       var openSlot = !deal.buyer_telegram_id || !deal.seller_telegram_id;
-      if (!isBuyer || !openSlot || UI.isFinalStatus(deal.status)) return;
+      if (!isParty || !openSlot || UI.isFinalStatus(deal.status)) return;
       joinReqBar.appendChild(joinRequestsBox(id, {
         compact: true,
         pollMs: 5000,
@@ -1859,7 +1859,7 @@
     if (m.indexOf('deal_already_full') !== -1) return "Bitim allaqachon to'lgan";
     if (m.indexOf('link_expired') !== -1) return "Havola muddati o'tgan";
     if (m.indexOf('invalid_token') !== -1) return "Havola noto'g'ri";
-    if (m.indexOf('deal_has_no_buyer_creator') !== -1) return "Bitimda yaratuvchi yo'q";
+    if (m.indexOf('deal_has_no_buyer_creator') !== -1 || m.indexOf('deal_has_no_creator') !== -1) return "Bitimda yaratuvchi yo'q";
     return "Qo'shilib bo'lmadi — qayta urinib ko'ring";
   }
 
@@ -1875,14 +1875,44 @@
 
     function showPending() {
       box.innerHTML = '';
+      var statusLine = UI.h('p', { class: 'small muted', style: 'text-align:center', text: "Holat tekshirilmoqda…" });
       box.appendChild(UI.h('div', { class: 'success-panel' }, [
         UI.h('div', { class: 'check-ring', html: '<svg viewBox="0 0 34 34" width="44" height="44"><path d="M8 18l6 6L26 11"/></svg>' }),
         UI.h('h2', { text: "So'rov yuborildi" }),
-        UI.h('p', { text: "Yaratuvchi bitim chati ichida tasdiqlaydi — tasdiqlangach bitim boshlanadi." }),
+        UI.h('p', { text: "Yaratuvchi bitim chati ichida tasdiqlaydi — tasdiqlangach avtomatik bitim chatiga o'tasiz." }),
+        statusLine,
         UI.h('div', { class: 'btn-row' }, [
-          UI.h('button', { class: 'btn btn-primary', onclick: function () { go('#/home'); } }, ['Bosh sahifa'])
+          UI.h('button', { class: 'btn btn-primary', onclick: function () { go('#/home'); } }, ['Bosh sahifa']),
+          UI.h('button', { class: 'btn btn-ghost', onclick: function () { checkApproved(true); } }, ['Hozir tekshirish'])
         ])
       ]));
+      var stopped = false;
+      App.cleanupFns.push(function () { stopped = true; if (timer) clearInterval(timer); });
+      function checkApproved(manual) {
+        Api.deal(id).then(function (deal) {
+          if (stopped) return;
+          if (!deal) return;
+          var uid = App.state.meId;
+          var iAmParty = Number(deal.buyer_telegram_id) === uid || Number(deal.seller_telegram_id) === uid;
+          if (iAmParty) {
+            stopped = true;
+            if (timer) clearInterval(timer);
+            TG.haptic.success();
+            UI.toast("Tasdiqlandi — bitim chati ochilmoqda", 'ok');
+            go('#/deal/' + id + '/chat');
+          } else if (manual) {
+            statusLine.textContent = "Hali tasdiqlanmagan — yaratuvchi bitim chatida ko'radi.";
+          } else {
+            statusLine.textContent = "Yaratuvchi tasdig'i kutilmoqda…";
+          }
+        }).catch(function () {
+          // Not a party yet (403) or offline — keep waiting silently
+          if (manual) statusLine.textContent = "Hali tasdiqlanmagan — birozdan keyin qayta tekshiring.";
+        });
+      }
+      var timer = setInterval(function () { checkApproved(false); }, 4000);
+      App.cleanupFns.push(function () { if (timer) clearInterval(timer); });
+      checkApproved(false);
     }
 
     Api.deal(id, token).then(function (deal) {

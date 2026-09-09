@@ -54,9 +54,12 @@ function enhanceApp(App: any) {
   patchViewCreate();
 
   // Expose new views to legacy router (added to ROUTES in src/legacy/app.js)
-  (window as any).__viewInbox = viewInbox;
+  // NOTE: join-request approval lives ONLY in the mini-app deal chat
+  // (inline box in viewDeal/viewChat) — there is no separate inbox page.
   (window as any).__viewTrade = viewTrade;
   (window as any).__viewChannels = viewChannels;
+  // Old #/inbox bookmarks redirect home (approval happens in deal chat now).
+  if (location.hash.startsWith('#/inbox')) location.hash = '#/home';
 
   // Schedule inbox badge polling
   setTimeout(pollInboxBadge, 1200);
@@ -106,7 +109,7 @@ function enhanceApp(App: any) {
 }
 
 function isNewRoute(hash: string): boolean {
-  return /^#\/inbox/.test(hash) || /^#\/trade/.test(hash) || /^#\/channels/.test(hash);
+  return /^#\/trade/.test(hash) || /^#\/channels/.test(hash);
 }
 
 function handleHash(hash: string): boolean {
@@ -116,7 +119,6 @@ function handleHash(hash: string): boolean {
 }
 
 function renderNewRoute(hash: string) {
-  if (hash.startsWith('#/inbox')) return viewInbox();
   if (hash.startsWith('#/trade')) return viewTrade();
   if (hash.startsWith('#/channels')) return viewChannels();
 }
@@ -185,17 +187,18 @@ function patchTabbar() {
 function patchViewHome() {
   const origViewHome = (window as any).viewHome;
   if (!origViewHome) {
-    // Hook via capturing after legacy viewHome renders: we add inbox entry injection (search already native in viewHome premium)
+    // Search is natively rendered in legacy viewHome — only inject for backward compat.
+    // No inbox entry: join requests are approved inside the deal chat.
     const viewEl = document.getElementById('view')!;
     const obs = new MutationObserver(() => {
       if (location.hash === '#/home' || location.hash === '') {
         const view = document.getElementById('view');
         if (view && view.querySelector('.hero')) {
-          // search is now natively rendered in viewHome; only inject if missing (backward compat)
           if (!view.querySelector('.search-row') && !view.querySelector('.search-input')) {
             injectHomeSearch(view);
           }
-          if (!view.querySelector('#inbox-entry')) injectInboxEntry(view);
+          // Drop any stale inbox entry from older cached bundles
+          view.querySelector('#inbox-entry')?.remove();
         }
       }
     });
@@ -220,45 +223,6 @@ function injectHomeSearch(view: HTMLElement) {
     })
   ]) as HTMLElement;
   seg.parentNode!.insertBefore(searchRow, seg.nextSibling);
-
-  // inbox quick entry
-  const stats = view.querySelector('.stats-grid');
-  if (stats && !view.querySelector('#inbox-entry')) {
-    const inboxBtn = UI.h('button', {
-      class: 'card row',
-      style: 'width:100%;text-align:left;padding:12px 14px;margin-top:10px',
-      onclick() { TG.haptic.light(); go('#/inbox'); }
-    }, [
-      UI.h('div', { class: 'li-icon', text: '📥' }),
-      UI.h('div', { class: 'li-main' }, [
-        UI.h('b', { text: "Kiruvchi — qo'shilish so'rovlari" }),
-        UI.h('span', { text: "Sherik tasdig'i (rasm + username)" })
-      ]),
-      UI.h('span', { class: 'li-value', text: '→' })
-    ]);
-    (inboxBtn as any).id = 'inbox-entry';
-    stats.parentNode!.insertBefore(inboxBtn, seg);
-  }
-}
-
-function injectInboxEntry(view: HTMLElement) {
-  if (view.querySelector('#inbox-entry')) return;
-  const seg = view.querySelector('.segmented');
-  if (!seg) return;
-  const card = UI.h('button', {
-    class: 'card row',
-    style: 'width:100%;text-align:left;padding:12px 14px;margin-top:8px',
-    onclick() { go('#/inbox'); }
-  }, [
-    UI.h('div', { class: 'li-icon', text: '📥' }),
-    UI.h('div', { class: 'li-main' }, [
-      UI.h('b', { text: 'Kiruvchi' }),
-      UI.h('span', { text: "Kutilayotgan qo'shilish so'rovlari" })
-    ]),
-    UI.h('span', { class: 'li-value', text: '→' })
-  ]);
-  (card as any).id = 'inbox-entry';
-  seg.parentNode!.insertBefore(card, seg);
 }
 
 function filterDealCards() {
@@ -621,88 +585,6 @@ async function injectConfirmBar(view: HTMLElement, hash: string){
   return injectWebappBar(view, hash);
 }
 
-// ---------------- Inbox View ----------------
-async function viewInbox() {
-  setTabbarPatched(true);
-  setTopbarPatched('Kiruvchi', { back: () => navBack('#/home') });
-  TG.showBack(() => navBack('#/home'));
-  const view = document.getElementById('view')!;
-  view.innerHTML = '';
-  const root = UI.h('div', {}, [
-    UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: "Sheriklar bitimlaringizga qo'shilish uchun so'rov yuboradi. Rasmi va username ni ko'rib tasdiqlaysiz — kim qo'shilishini siz hal qilasiz." }) ]),
-    UI.h('div', { class: 'sk', style: 'height:80px;border-radius:18px' })
-  ]);
-  view.appendChild(root);
-
-  let requests: any[] = [];
-  try {
-    // Try global inbox first, fallback to per-deal enumeration via deals list
-    try { requests = await Api.inbox(); } catch {}
-    if (!requests.length) {
-      const deals = await Api.deals();
-      const pending: any[] = [];
-      for (const d of deals.slice(0, 20)) {
-        try {
-          const reqs = await Api.joinRequests(d.id);
-          reqs.forEach((r: any) => pending.push({ ...r, deal: d }));
-        } catch {}
-      }
-      requests = pending;
-    }
-  } catch (e: any) {
-    root.innerHTML = '';
-      root.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || "Kiruvchi so'rovlar yuklanmadi" }) ]));
-    return;
-  }
-
-  root.innerHTML = '';
-  root.appendChild(UI.h('div', { class: 'banner info' }, [ UI.h('div', { class: 'small', text: requests.length ? `${requests.length} ta kutilayotgan so'rov` : "Kutilayotgan qo'shilish so'rovlari yo'q — bot havola orqali taklif qiling." }) ]));
-
-  if (!requests.length) {
-    root.appendChild(UI.h('div', { class: 'empty' }, [
-      UI.h('div', { class: 'art', text: '📥' }),
-      UI.h('h3', { text: "Kutilayotgan so'rovlar yo'q" }),
-      UI.h('p', { text: "Bitim tafsilotidan bot taklif havolasini (t.me) ulashing. Kimdir ochganda rasmi va username shu yerda ko'rinadi." })
-    ]));
-    return;
-  }
-
-  requests.forEach((r: any) => {
-    const deal = r.deal || { id: r.deal_id };
-    const card = UI.h('div', { class: 'studio-card inbox-card' }, [
-      UI.h('div', { class: 'studio-head' }, [
-        UI.h('div', { class: 'avatar ' + UI.avatarClass(r.requester_telegram_id), text: String(r.requester_first_name || r.requester_username || r.requester_telegram_id || '?').slice(0,2) }),
-        UI.h('div', {}, [
-          UI.h('b', { text: r.requester_first_name || r.requester_username || ('ID ' + r.requester_telegram_id) }),
-          UI.h('div', { class: 'small muted', text: `@${r.requester_username || '—'} · Deal #${deal.id} · ${UI.timeAgo(r.created_at)}` })
-        ])
-      ]),
-      r.requester_photo_url ? UI.h('img', { src: r.requester_photo_url, style: 'width:56px;height:56px;border-radius:50%;object-fit:cover;margin-bottom:8px' } as any) : null,
-      UI.h('div', { class: 'inbox-actions' }, [
-        UI.h('button', {
-          class: 'btn btn-primary',
-          onclick: async (e: any) => {
-            const btn = e.currentTarget as HTMLButtonElement;
-            btn.setAttribute('disabled',''); btn.textContent='Tasdiqlanmoqda…';
-            try { await Api.approveJoin(deal.id, r.id); TG.haptic.success(); UI.toast('Tasdiqlandi — bitim boshlandi', 'ok'); viewInbox(); }
-            catch (err: any) { TG.haptic.error(); UI.toast("Tasdiqlanmadi — qayta urinib ko'ring",'err'); btn.removeAttribute('disabled'); btn.textContent='Tasdiqlash'; }
-          }
-        }, ['Tasdiqlash']),
-        UI.h('button', {
-          class: 'btn btn-ghost',
-          onclick: async (e: any) => {
-            const btn = e.currentTarget as HTMLButtonElement;
-            btn.setAttribute('disabled',''); btn.textContent='Rad etilmoqda…';
-            try { await Api.rejectJoin(deal.id, r.id); TG.haptic.success(); UI.toast('Rad etildi','ok'); viewInbox(); }
-            catch (err: any) { TG.haptic.error(); UI.toast("Rad etilmadi — qayta urinib ko'ring",'err'); btn.removeAttribute('disabled'); btn.textContent='Rad etish'; }
-          }
-        }, ['Rad etish'])
-      ])
-    ]);
-    root.appendChild(card);
-  });
-}
-
 function wrapWalletPayForVerification() {
   const origPay = Wallet.pay.bind(Wallet);
   (Wallet as any).pay = async (to: string, amountTon: number, comment: string) => {
@@ -771,20 +653,27 @@ function patchProfile() {
   obs.observe(viewEl, { childList: true, subtree: true });
 }
 
+// Global pending-request notifier — approval itself lives ONLY in the deal chat
+// (inline joinRequestsBox, polling every 5-8s). This just toasts + badges so the
+// creator knows which deal chat to open. No separate inbox page.
 async function pollInboxBadge() {
   try {
-    let count = 0;
-    try { const inbox = await Api.inbox(); count = inbox.length; } catch {
+    let rows: any[] = [];
+    try { rows = await Api.inbox(); } catch {
       const deals = await Api.deals().catch(()=>[]);
       for (const d of (deals as any[]).slice(0,5)) {
-        try { const reqs = await Api.joinRequests(d.id); count += reqs.length; } catch {}
+        try { const reqs = await Api.joinRequests(d.id); reqs.forEach((r: any) => rows.push({ ...r, deal_id: (r as any).deal_id ?? d.id })); } catch {}
       }
     }
+    const count = rows.length;
     const prev = Number((window as any).__inboxPrev || 0);
-    if (count > prev && prev >= 0 && count > 0) {
+    if (count > prev && count > 0 && (window as any).__inboxInit) {
       try {
-        // Faqat yaratuvchi ko'radi — inbox unga tegishli so'rovlar
-        if (prev > 0 || (window as any).__inboxInit) UI.toast("Yangi qo'shilish so'rovi — kiruvchi so'rovlarni tekshiring", 'ok');
+        const first = rows[0] || {};
+        const did = (first as any).deal_id ?? (first as any).deal?.id;
+        try { (TG.haptic as any)?.success?.(); } catch {}
+        UI.toast(did ? `Yangi qo'shilish so'rovi (Deal #${did}) — bitim chatini ochib tasdiqlang` : "Yangi qo'shilish so'rovi — bitim chatini ochib tasdiqlang", 'ok');
+        // If the creator is already inside that deal chat, the inline box appears on its own poll.
       } catch {}
     }
     (window as any).__inboxPrev = count;
