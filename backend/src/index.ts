@@ -28,6 +28,8 @@ import {
   getDealMessages,
   addEncryptedMessage,
   createJoinRequest,
+  getMyJoinStatus,
+  purgeStaleJoinRequests,
   updateDealStatus,
   addDealMessage,
   approveJoinRequest,
@@ -546,6 +548,14 @@ app.post('/api/deals/:id/join/:token', joinLimiter, requireIdentity, asyncHandle
   if (deal.buyer_telegram_id == null && deal.seller_telegram_id == null) {
     return res.status(400).json({ error: 'deal_has_no_creator' });
   }
+  // No joining a finished or payout-in-flight deal — there is nothing to join.
+  const dealStatus = String(deal.status || '').toUpperCase();
+  if (dealStatus === 'RELEASED' || dealStatus === 'REFUNDED') {
+    return res.status(409).json({ error: 'deal_finished: bitim allaqachon yakunlangan' });
+  }
+  if (dealStatus === 'RELEASE_PENDING' || dealStatus === 'REFUND_PENDING') {
+    return res.status(409).json({ error: 'deal_locked: tolov jarayonda, birozdan keyin urinib koring' });
+  }
   const link = await getDealLink(token).catch(() => null);
   if (!link || Number(link.deal_id) !== dealId) return res.status(404).json({ error: 'invalid_token' });
   if (new Date(link.expires_at).getTime() <= Date.now()) {
@@ -553,42 +563,73 @@ app.post('/api/deals/:id/join/:token', joinLimiter, requireIdentity, asyncHandle
     return res.status(410).json({ error: 'link_expired' });
   }
 
-  // Create pending join request (upsert)
+  // Create pending join request (upsert — duplicate taps return the same row)
   try {
-    const joinReq = await createJoinRequest({
+    // Best-effort: grab the requester's profile photo file_id so the creator can
+    // SEE who is asking (rendered in the mini-app chat approval card). file_id
+    // only — file URLs embed the bot token and are never stored or served.
+    const photoFileId = await resolveRequesterPhotoFileId(telegramId);
+    const { request: joinReq, created } = await createJoinRequest({
       dealId,
       token,
       requesterTelegramId: telegramId,
       requesterUsername,
       requesterFirstName,
       requesterPhotoUrl: null,
+      requesterPhotoFileId: photoFileId,
     });
 
-    // Notify the creator (whichever side created the deal) for approval in mini-app chat.
+    // Notify the creator ONLY for genuinely new requests (no DM spam on re-taps).
     // The creator opens the deal chat and approves there — no bot-side approval.
-    const creatorId =
-      deal.buyer_telegram_id != null ? Number(deal.buyer_telegram_id)
-      : deal.seller_telegram_id != null ? Number(deal.seller_telegram_id)
-      : null;
-    if (creatorId !== null) {
-      try {
-        const label = requesterUsername ? `@${requesterUsername}` : (requesterFirstName || String(telegramId));
-        await notify.joinRequestToCreator(creatorId, { id: deal.id, amount: String(deal.amount), asset: String(deal.asset), terms: String(deal.terms || '') }, label);
-      } catch (notifyErr) {
-        logger.warn(`Could not notify creator ${sanitizeLogValue(creatorId)} about join request ${sanitizeLogValue(joinReq.id)}`, notifyErr);
+    if (created) {
+      const creatorId =
+        deal.buyer_telegram_id != null ? Number(deal.buyer_telegram_id)
+        : deal.seller_telegram_id != null ? Number(deal.seller_telegram_id)
+        : null;
+      if (creatorId !== null) {
+        try {
+          const label = requesterUsername ? `@${requesterUsername}` : (requesterFirstName || String(telegramId));
+          await notify.joinRequestToCreator(creatorId, { id: deal.id, amount: String(deal.amount), asset: String(deal.asset), terms: String(deal.terms || '') }, label);
+        } catch (notifyErr) {
+          logger.warn(`Could not notify creator ${sanitizeLogValue(creatorId)} about join request ${sanitizeLogValue(joinReq.id)}`, notifyErr);
+        }
+      } else {
+        logger.warn(`Join request ${sanitizeLogValue(joinReq.id)} has no creator to notify (deal #${sanitizeLogValue(dealId)})`);
       }
-    } else {
-      logger.warn(`Join request ${sanitizeLogValue(joinReq.id)} has no creator to notify (deal #${sanitizeLogValue(dealId)})`);
     }
 
     void purgeExpiredLinks().catch((err) => logger.warn('purgeExpiredLinks failed', err));
-    return res.status(202).json({ ok: true, pending: true, requestId: joinReq.id, message: 'Join request sent — awaiting buyer approval' });
+    void purgeStaleJoinRequests().catch((err) => logger.warn('purgeStaleJoinRequests failed', err));
+    return res.status(202).json({ ok: true, pending: true, requestId: joinReq.id, message: 'Join request sent — awaiting creator approval in deal chat' });
   } catch (err) {
     const msg = String((err as Error).message || '');
     logger.warn('join request failed', err);
     return res.status(400).json({ error: msg || 'join_failed' });
   }
 }));
+
+/** Best-effort Telegram profile photo file_id for a join requester (4s cap).
+ *  Returns null on ANY failure — a missing photo must never block joining.
+ */
+async function resolveRequesterPhotoFileId(telegramId: number): Promise<string | null> {
+  try {
+    const bot = getBot();
+    if (!bot || !config.botToken) return null;
+    const photos = await Promise.race([
+      bot.api.getUserProfilePhotos(telegramId, { limit: 1 }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('photo_timeout')), 4000)),
+    ]);
+    const sizes: Array<{ file_id?: string; file_size?: number }> = (photos as any)?.photos?.[0] || [];
+    let best: string | null = null;
+    let bestSize = -1;
+    for (const s of sizes) {
+      if (s?.file_id && Number(s.file_size || 0) >= bestSize) { best = String(s.file_id); bestSize = Number(s.file_size || 0); }
+    }
+    return best;
+  } catch {
+    return null;
+  }
+}
 
 // Per-deal E2E chat key — only buyer, seller or admin may fetch (ciphertext never leaves client decrypted on server)
 app.get('/api/deals/:id/key', requireIdentity, asyncHandler(async (req, res) => {
@@ -775,7 +816,20 @@ app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asy
   if (caller === null) return res.status(401).json({ error: 'identity_required' });
   const { approveJoinRequest } = await import('./services/dealService');
   try {
-    const role = await approveJoinRequest(requestId, caller);
+    const { role, autoRejected } = await approveJoinRequest(requestId, caller);
+    // The deal is full now — tell the losers their invite is dead (best-effort each).
+    if (Array.isArray(autoRejected) && autoRejected.length > 0) {
+      for (const loser of autoRejected) {
+        try {
+          if (loser?.requester_telegram_id != null) {
+            await notify.joinRejected(Number(loser.requester_telegram_id), { id: dealId, amount: '?', asset: '' });
+          }
+        } catch (e) {
+          logger.warn(`auto-reject notify failed for deal #${sanitizeLogValue(dealId)}`, e);
+        }
+      }
+      logger.info(`Deal #${sanitizeLogValue(dealId)} join approved — ${autoRejected.length} sibling request(s) auto-rejected`);
+    }
     try { await getDealChatKey(dealId); } catch {} // best-effort: chat key backfills lazily on first /key or message post.
     try {
       const { addDealMessage } = await import('./services/dealService');
@@ -821,6 +875,8 @@ app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asy
     if (msg === 'request_not_found') return res.status(404).json({ error: msg });
     if (msg.includes('not_authorized')) return res.status(403).json({ error: msg });
     if (msg.includes('already_handled')) return res.status(409).json({ error: msg });
+    if (msg.includes('link_expired')) return res.status(410).json({ error: msg });
+    if (msg.includes('deal_already_full')) return res.status(409).json({ error: msg });
     return res.status(400).json({ error: msg });
   }
 }));
@@ -855,6 +911,69 @@ app.post('/api/deals/:id/join-requests/:requestId/reject', requireIdentity, asyn
     if (msg === 'request_not_found') return res.status(404).json({ error: msg });
     if (msg.includes('not_authorized')) return res.status(403).json({ error: msg });
     return res.status(400).json({ error: msg });
+  }
+}));
+
+// Joiner's own request status — lets the mini-app join page show pending /
+// approved / rejected instead of polling blindly forever after a rejection.
+// Token-scoped AND caller-bound: only the invite holder sees only their own row.
+app.get('/api/deals/:id/join-status', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  const token = String((req.query.token as string) || '').trim();
+  if (!Number.isInteger(dealId) || dealId <= 0 || !token) return res.status(400).json({ error: 'invalid_request' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const jr = await getMyJoinStatus(dealId, token, caller).catch(() => null);
+  const isPartyNow =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
+  if (!jr) return res.json({ status: 'none', isPartyNow });
+  return res.json({ status: String(jr.status || 'pending'), requestId: jr.id, isPartyNow, updatedAt: jr.updated_at || null });
+}));
+
+// Requester profile photo — proxied bytes, party/admin only.
+// The DB stores a Telegram file_id (never a file URL: URLs embed the bot token).
+// The token stays server-side: we fetch upstream and stream bytes, never redirect.
+app.get('/api/deals/:id/join-requests/:requestId/photo', requireIdentity, asyncHandler(async (req, res) => {
+  const dealId = Number(req.params.id);
+  const requestId = Number(req.params.requestId);
+  if (!Number.isInteger(dealId) || !Number.isInteger(requestId)) return res.status(400).json({ error: 'invalid_id' });
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const deal = await getDealById(dealId);
+  if (!deal) return res.status(404).json({ error: 'deal_not_found' });
+  const isParty =
+    (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === caller) ||
+    (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === caller);
+  const isAdminCaller = (req as any).authMode === 'api-key' || isAdminTelegramId(caller);
+  if (!isParty && !isAdminCaller) return res.status(403).json({ error: 'not_a_party_to_deal' });
+  const jr = await getJoinRequestById(requestId).catch(() => null);
+  if (!jr || Number(jr.deal_id) !== dealId) return res.status(404).json({ error: 'request_not_found' });
+  const fileId = String((jr as any).requester_photo_file_id || '').trim();
+  const bot = getBot();
+  if (!fileId || !bot || !config.botToken) return res.status(404).json({ error: 'photo_not_available' });
+  try {
+    const file = await bot.api.getFile(fileId);
+    if (!file?.file_path) return res.status(404).json({ error: 'photo_not_available' });
+    const upstream = `https://api.telegram.org/file/bot${config.botToken}/${file.file_path}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    let up: { ok: boolean; headers: { get(name: string): string | null }; arrayBuffer(): Promise<ArrayBuffer> };
+    try {
+      up = await fetch(upstream, { signal: ctrl.signal }) as unknown as { ok: boolean; headers: { get(name: string): string | null }; arrayBuffer(): Promise<ArrayBuffer> };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!up.ok) return res.status(502).json({ error: 'photo_upstream_failed' });
+    const buf = Buffer.from(await up.arrayBuffer());
+    if (!buf.length || buf.length > 1024 * 1024) return res.status(502).json({ error: 'photo_upstream_failed' });
+    res.setHeader('Content-Type', up.headers.get('content-type') || 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    return res.send(buf);
+  } catch {
+    return res.status(502).json({ error: 'photo_upstream_failed' });
   }
 }));
 
@@ -1401,7 +1520,9 @@ const API_DOCS = {
     { method: 'POST', path: '/api/deals/:id/join/:token', auth: 'Identity', desc: 'Request to join via link — creates pending request for creator approval in deal chat (joiner fills empty slot)' },
     { method: 'POST', path: '/api/deals/:id/confirm', auth: 'Identity (party)', desc: 'DEPRECATED alias to /approve — buyer-only approveReceipt. Use POST /api/deals/:id/approve (was mutual, now buyer only)' },
     { method: 'GET', path: '/api/deals/:id/join-requests', auth: 'Identity (party or admin)', desc: 'List pending join requests for deal — creator approves inside mini-app deal chat' },
-    { method: 'POST', path: '/api/deals/:id/join-requests/:requestId/approve', auth: 'Identity (party)', desc: 'Approve join request from deal chat → joiner fills empty slot + link consumed + chat key ensured' },
+    { method: 'POST', path: '/api/deals/:id/join-requests/:requestId/approve', auth: 'Identity (party)', desc: 'Approve join request from deal chat → joiner fills empty slot + link consumed + chat key ensured + siblings auto-rejected' },
+    { method: 'GET', path: '/api/deals/:id/join-status?token=', auth: 'Identity', desc: 'Joiner own request status (none|pending|approved|rejected) — token-scoped, caller-bound' },
+    { method: 'GET', path: '/api/deals/:id/join-requests/:requestId/photo', auth: 'Identity (party or admin)', desc: 'Requester profile photo bytes proxied server-side (bot token never leaves server)' },
     { method: 'POST', path: '/api/deals/:id/join-requests/:requestId/reject', auth: 'Identity (party)', desc: 'Reject join request' },
     { method: 'GET', path: '/api/inbox', auth: 'Identity', desc: 'Global inbox — all pending join requests across caller deals' },
     { method: 'GET', path: '/api/deals/:id/key', auth: 'Identity (party or admin)', desc: 'Get per-deal E2E chat key {key, algo: aes-256-gcm} — only buyer/seller/admin' },
