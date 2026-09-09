@@ -190,17 +190,39 @@ export async function getDealById(id: number | string) {
   return res.rows[0] || null;
 }
 
-/** Get plaintext per-deal chat key (only for parties/admin). Returns null if not found. */
+/** Get plaintext per-deal chat key (only for parties/admin). Returns null if not found.
+ * Backfill path is atomic: the row is locked with SELECT ... FOR UPDATE (same pattern
+ * as atomicJoinDeal) so two concurrent first-time chat opens cannot generate two
+ * different keys where only one wins in storage while the other party's client
+ * caches the losing one.
+ */
 export async function getDealChatKey(dealId: number | string): Promise<string | null> {
-  const deal = await getDealById(dealId);
-  if (!deal || !deal.chat_key) {
-    // Backfill: generate & persist if missing (legacy deals)
+  const id = Number(dealId);
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query('SELECT chat_key FROM deals WHERE id = $1 FOR UPDATE', [id]);
+    if (locked.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const stored = locked.rows[0].chat_key as string | null;
+    if (stored) {
+      await client.query('COMMIT');
+      return decryptDealKey(String(stored));
+    }
+    // Backfill: generate & persist if missing (legacy deals) — still under the lock.
     const newKey = generateDealChatKey();
     const enc = encryptDealKey(newKey);
-    await db.query('UPDATE deals SET chat_key = $1, chat_key_created_at = now(), updated_at = now() WHERE id = $2', [enc, Number(dealId)]);
+    await client.query('UPDATE deals SET chat_key = $1, chat_key_created_at = now(), updated_at = now() WHERE id = $2', [enc, id]);
+    await client.query('COMMIT');
     return newKey;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw e;
+  } finally {
+    client.release();
   }
-  return decryptDealKey(String(deal.chat_key));
 }
 
 /** Ensure a deal has a chat_key, return plaintext. */
