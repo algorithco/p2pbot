@@ -113,11 +113,20 @@ function asyncHandler(fn: AsyncRequestHandler): RequestHandler {
   };
 }
 
-// Rate limiters (per-ip sliding window)
+// Rate limiters (per-ip sliding window).
+// TODO(scale): rateLimit() in auth/guard.ts is an IN-MEMORY express-rate-limit store —
+// limits are enforced per backend PROCESS, not globally. If a second backend instance
+// is ever added, move to a shared store (e.g. rate-limit-redis backed by a Redis
+// service in docker-compose.yml — none exists today, so this is intentionally not
+// implemented here) or limits will be N× too generous with N instances.
 const notifyLimiter = rateLimit({ windowMs: 60_000, max: 5, name: 'notify' });
 const dealsCreateLimiter = rateLimit({ windowMs: 60_000, max: 10, name: 'deals-create' });
 const chatPostLimiter = rateLimit({ windowMs: 60_000, max: 60, name: 'chat-post' });
 const joinLimiter = rateLimit({ windowMs: 60_000, max: 20, name: 'join' });
+// Public TON proxies fan out to paid external APIs (TONCenter/TON API) — conservative.
+const publicTonLimiter = rateLimit({ windowMs: 60_000, max: 30, name: 'public-ton-api' });
+// State-changing deal actions are DB-guarded but must not be hammerable.
+const dealActionLimiter = rateLimit({ windowMs: 60_000, max: 20, name: 'deal-action' });
 
 function isAdminTelegramId(id: number): boolean {
   return config.adminTelegramIds.map(Number).includes(Number(id));
@@ -679,7 +688,7 @@ app.post('/api/deals/:id/chat', chatPostLimiter, requireIdentity, asyncHandler(a
 // Confirm endpoint — DEPRECATED alias to /approve (buyer-only)
 // Legacy mutual confirm (both parties) removed. Web app should use POST /approve.
 // Kept for TG fallback with deprecation warning. Always calls buyerApproveReceipt.
-app.post('/api/deals/:id/confirm', requireIdentity, asyncHandler(async (req, res) => {
+app.post('/api/deals/:id/confirm', dealActionLimiter, requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
   const caller = getIdentityId(req);
@@ -696,7 +705,7 @@ app.post('/api/deals/:id/confirm', requireIdentity, asyncHandler(async (req, res
 }));
 
 // Seller signals "I sent the item" — webapp-first: moves DEPOSIT_CONFIRMED -> ITEM_SENT and notifies buyer via chat + bot
-app.post('/api/deals/:id/ship', requireIdentity, asyncHandler(async (req, res) => {
+app.post('/api/deals/:id/ship', dealActionLimiter, requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
   const caller = getIdentityId(req);
@@ -712,7 +721,7 @@ app.post('/api/deals/:id/ship', requireIdentity, asyncHandler(async (req, res) =
 
 // Buyer confirms receipt — webapp-first: moves ITEM_SENT -> RELEASED minus fee
 // If seller TON address missing, returns 402 needSellerAddress so web app can prompt seller to set payout
-app.post('/api/deals/:id/approve', requireIdentity, asyncHandler(async (req, res) => {
+app.post('/api/deals/:id/approve', dealActionLimiter, requireIdentity, asyncHandler(async (req, res) => {
   const dealId = Number(req.params.id);
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
   const caller = getIdentityId(req);
@@ -1265,7 +1274,7 @@ app.post('/api/refund', requireAdmin, asyncHandler(async (req, res) => {
   return res.json(result);
 }));
 
-app.get('/api/status/:address', asyncHandler(async (req, res) => {
+app.get('/api/status/:address', publicTonLimiter, asyncHandler(async (req, res) => {
   try {
     const addr = Address.parse(String(req.params.address));
     const escrow = new Escrow(addr as any);
@@ -1280,7 +1289,7 @@ app.get('/api/status/:address', asyncHandler(async (req, res) => {
 
 // TON wallet balance — public, proxied via backend to keep TONCENTER_API_KEY server-side
 // Supports both raw (0:hex) and friendly (EQ/UQ) addresses; returns balance in nanotons + TON
-app.get('/api/balance/:address', asyncHandler(async (req, res) => {
+app.get('/api/balance/:address', publicTonLimiter, asyncHandler(async (req, res) => {
   const raw = String(req.params.address || '').trim();
   if (!raw) return res.status(400).json({ error: 'address_required' });
   try {
@@ -1309,7 +1318,7 @@ app.get('/api/balance/:address', asyncHandler(async (req, res) => {
 }));
 
 // TON payload helpers — memo is ENCRYPTED and auto-injected (not shown to user)
-app.get('/api/ton/payload', asyncHandler(async (req, res) => {
+app.get('/api/ton/payload', publicTonLimiter, asyncHandler(async (req, res) => {
   const comment = String(req.query.comment || '').trim();
   if (!comment) return res.status(400).json({ error: 'comment_required' });
   if (comment.length > 120) return res.status(400).json({ error: 'comment_too_long', max: 120 });
@@ -1367,7 +1376,7 @@ const API_DOCS = {
     devFallback: 'x-telegram-user-id only when ALLOW_DEV_AUTH=true and BOT_TOKEN+API_KEY unset (never in prod; NODE_ENV=production refuses to start without auth)',
     admin: 'Telegram id in ADMIN_TELEGRAM_IDS or any api-key caller',
   },
-  rateLimits: 'create deal 10/min · join 20/min · chat post 60/min · notify 5/min (sliding window per IP+route)',
+  rateLimits: 'global 300/min · create deal 10/min · join/recheck 20/min · chat post 60/min · notify 5/min · deal confirm/ship/approve 20/min · public TON status/balance/payload 30/min (sliding window per IP+route, in-memory per process)',
   endpoints: [
     { method: 'GET', path: '/api/info', auth: 'public', desc: 'Health + feeBps, paymentAddress, network, adminTelegramIds, encryption' },
     { method: 'GET', path: '/tonconnect-manifest.json', auth: 'public', desc: 'TON Connect manifest (dynamic origin)' },
