@@ -1,7 +1,7 @@
-/* app.js — TonEscrow Mini App: router, views, controllers */
+﻿/* app.js — TonEscrow Mini App: router, views, controllers */
 (function () {
   'use strict';
-  var TG = window.TG; var Api = window.Api; var UI = window.UI; var ChatCrypto = window.ChatCrypto; var Wallet = window.Wallet;
+  var TG = window.TG; var Api = window.Api; var UI = window.UI; var ChatCrypto = window.ChatCrypto; var Wallet = window.Wallet; var FX = window.FX;
 
   var App = {
     state: {
@@ -48,6 +48,7 @@
   }
 
   function router() {
+    var dirBack = App._navBack;
     cleanup();
     App.backHandler = null;
     App.actionHandler = null;
@@ -65,12 +66,13 @@
     }
 
     var root = document.getElementById('view');
-    root.classList.remove('view-enter');
+    root.classList.remove('view-enter', 'view-enter-fwd', 'view-enter-back');
     void root.offsetWidth;
 
     if (!matched) { location.hash = '#/home'; return; }
     matched.fn.apply(null, m.slice(1));
-    root.classList.add('view-enter');
+    // directional entrance: back navigations slide from the top, forward from below
+    root.classList.add(dirBack ? 'view-enter-back' : 'view-enter-fwd');
     root.scrollTop = 0;
   }
 
@@ -83,6 +85,50 @@
     var prev = App.navStack.length ? App.navStack[App.navStack.length - 1] : null;
     if (prev && prev !== (location.hash || '#/home')) { App._navBack = true; go(prev); }
     else go(fallbackHash || '#/home');
+  }
+
+  /* Pull-to-refresh — bound once, active only on Home (and any view exposing App._homeReload) */
+  function bindPullToRefresh(viewEl) {
+    if (!viewEl || App._ptrBound) return;
+    App._ptrBound = true;
+    var py0 = 0, pdist = 0, pactive = false;
+    viewEl.addEventListener('touchstart', function (e) {
+      pactive = false;
+      if (!App._homeReload) return;
+      if (!/^#\/home/.test(location.hash || '#/home')) return;
+      if (viewEl.scrollTop > 2 || e.touches.length !== 1) return;
+      if (!viewEl.querySelector('.ptr')) return;
+      pactive = true; py0 = e.touches[0].clientY; pdist = 0;
+    }, { passive: true });
+    viewEl.addEventListener('touchmove', function (e) {
+      if (!pactive) return;
+      var ptrEl = viewEl.querySelector('.ptr');
+      if (!ptrEl) { pactive = false; return; }
+      pdist = Math.max(0, Math.min(96, (e.touches[0].clientY - py0) * 0.5));
+      ptrEl.style.height = Math.round(pdist) + 'px';
+      var sp = ptrEl.querySelector('.ptr-spinner');
+      if (sp) sp.style.transform = 'rotate(' + Math.round(pdist * 3.5) + 'deg)';
+      ptrEl.classList.toggle('ready', pdist > 52);
+      if (pdist > 4) e.preventDefault();
+    }, { passive: false });
+    viewEl.addEventListener('touchend', function () {
+      if (!pactive) return;
+      pactive = false;
+      var ptrEl = viewEl.querySelector('.ptr');
+      if (pdist > 52 && App._homeReload) {
+        TG.haptic.light();
+        if (ptrEl) ptrEl.classList.add('busy');
+        Promise.resolve(App._homeReload(true)).catch(function () {}).then(function () {
+          if (ptrEl) { ptrEl.classList.remove('busy', 'ready'); ptrEl.style.height = '0px'; }
+        });
+      } else if (ptrEl) {
+        ptrEl.style.transition = 'height .2s var(--ease)';
+        ptrEl.style.height = '0px';
+        ptrEl.classList.remove('ready');
+        setTimeout(function () { ptrEl.style.transition = ''; }, 220);
+      }
+      pdist = 0;
+    });
   }
 
   /* ================= Chrome (topbar / tabs) ================= */
@@ -149,15 +195,16 @@
       ? otherRole + ' · ID ' + otherId
       : (deal.buyer_telegram_id ? 'Xaridor ' + deal.buyer_telegram_id : 'Ochiq bitim') +
         (deal.seller_telegram_id ? ' · Sotuvchi ' + deal.seller_telegram_id : '');
+    var chev = UI.h('div', { class: 'deal-chevron', html: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18 15 12 9 6"/></svg>' });
 
     return UI.h('button', {
       class: 'deal-card',
       onclick: function () { TG.haptic.light(); go('#/deal/' + deal.id); }
     }, [
-      UI.h('div', { class: 'row' }, [
+      UI.h('div', { class: 'deal-top' }, [
         UI.h('div', { class: 'asset-glyph ' + am.cls, text: am.glyph }),
-        UI.h('div', {}, [
-          UI.h('div', { class: 'deal-title', text: 'Bitim #' + deal.id }),
+        UI.h('div', { class: 'deal-mid' }, [
+          UI.h('div', { class: 'deal-title', text: 'Bitim #' + deal.id + ' · ' + am.symbol }),
           UI.h('div', { class: 'deal-sub', text: sub })
         ]),
         UI.h('div', { class: 'deal-amt' }, [
@@ -165,37 +212,101 @@
           UI.h('div', {}, [
             UI.h('span', { class: 'badge ' + sm.cls, text: sm.label, style: 'margin-top:5px' })
           ])
-        ])
+        ]),
+        chev
       ])
     ]);
   }
 
   function emptyState(art, title, text, ctaText, ctaHash) {
+    var isShield = art === '🛡️' || art === '🔒' || art === '🔍';
+    var artEl;
+    if (isShield) {
+      var shieldSvg = art === '🔒'
+        ? '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="1.7"><rect x="7" y="10" width="10" height="8" rx="1.5"/><path d="M10 10V8.5A2.5 2.5 0 0 1 12.5 6h0A2.5 2.5 0 0 1 15 8.5V10"/><circle cx="12" cy="14" r="1.2" fill="#A78BFA" stroke="none"/></svg>'
+        : art === '🔍'
+        ? '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="1.7"><circle cx="11" cy="11" r="6"/><path d="M15 15 19 19"/></svg>'
+        : '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="1.7"><path d="M12 3 5 7v6c0 4.2 2.9 8 7 9 4.1-1 7-4.8 7-9V7l-7-4Z"/><path d="M9 12.5 11.2 15 15 9"/></svg>';
+      artEl = UI.h('div', { class: 'art', html: shieldSvg });
+    } else {
+      artEl = UI.h('div', { class: 'art', text: art });
+    }
     var box = UI.h('div', { class: 'empty' }, [
-      UI.h('div', { class: 'art', text: art }),
+      artEl,
       UI.h('h3', { text: title }),
       UI.h('p', { text: text })
     ]);
     if (ctaText) {
       box.appendChild(UI.h('button', {
         class: 'btn btn-primary',
-        onclick: function () { go(ctaHash || '#/create'); }
+        style: 'width:auto;padding:12px 22px',
+        onclick: function () { TG.haptic.medium(); go(ctaHash || '#/create'); }
       }, [ctaText]));
+      // helper hint like mockup
+      var hint = UI.h('div', { class: 'small muted', style: 'margin-top:10px', text: "Havolani ulashing — sherik bir bosingda qo'shiladi." });
+      box.appendChild(hint);
     }
     return box;
   }
 
   function errorBox(message, retry) {
-    return UI.h('div', { class: 'banner error' }, [
-      UI.h('div', { style: 'flex:1' }, [
-        UI.h('div', { style: 'font-weight:700;margin-bottom:2px', text: "Serverga ulanib bo'lmadi" }),
-        UI.h('div', { class: 'small', text: message })
-      ]),
-      retry ? UI.h('button', { class: 'link-btn', onclick: retry, text: 'Qayta urinish' }) : null
+    var code = String(message||'').slice(0,120);
+    var isNetwork = /network|503|unreach|timeout|failed/i.test(code);
+    var human = "Serverga ulanib bo'lmadi";
+    var sub = isNetwork ? "Internet aloqangizni tekshiring va qayta urinib ko'ring. Mablag'laringiz escrow'da xavfsiz qoladi." : "So'rovni bajarib bo'lmadi. Qayta urinib ko'ring.";
+    return UI.h('div', { class: 'error-card' }, [
+      UI.h('div', { class: 'error-icon', html: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 13.5 9 9"/><path d="M16.5 9a5 5 0 0 0-7 0"/><path d="M18.8 6.7a8 8 0 0 0-11.6 0"/><path d="M8 14a3 3 0 0 1 4 0"/><path d="M9 18h6"/><path d="M12 18v2"/></svg>' }),
+      UI.h('div', { style: 'flex:1;min-width:0' }, [
+        UI.h('h4', { text: human }),
+        UI.h('div', { class: 'sub', text: sub }),
+        UI.h('div', { class: 'code', text: code }),
+        UI.h('div', { style: 'display:flex;gap:8px;margin-top:12px' }, [
+          retry ? UI.h('button', { class: 'btn btn-primary', style: 'flex:1;padding:11px', onclick: function(){ TG.haptic.medium(); retry(); }, text: 'Retry' }) : null,
+          UI.h('button', { class: 'btn btn-ghost', style: 'flex:1', onclick: function(){ UI.toast('Offline rejim — keyinroq sinab ko\'ring'); }, text: 'Go offline' })
+        ].filter(Boolean))
+      ])
     ]);
   }
 
   /* ================= Wallet ================= */
+
+  function walletConnectSheet() {
+    var content = UI.h('div', {}, [
+      UI.h('div', { class: 'sheet-grabber' }),
+      UI.h('h3', { text: 'Hamyonni ulash' }),
+      UI.h('p', { class: 'sub', text: "TON hamyoningizni tanlang. Kalitlar faqat sizning qurilmangizda qoladi — non-custodial." }),
+      UI.h('button', { class: 'wallet-opt selected', onclick: function(){ TG.haptic.tap(); Wallet.connect().catch(function(e){ UI.toast('Hamyon ulanmadi','err'); }); UI.sheetClose(); } }, [
+        UI.h('div', { class: 'w-icon w-tk', text: '◈' }),
+        UI.h('div', { style: 'flex:1;text-align:left' }, [ UI.h('div', { style:'font-weight:800;font-size:14px', text:'Tonkeeper' }), UI.h('div', { class:'small muted', text:'Eng mashhur · tavsiya qilinadi' }) ]),
+        UI.h('span', { style:'color:#3B82F6;font-weight:800', text:'✓' })
+      ]),
+      UI.h('button', { class: 'wallet-opt', onclick: function(){ TG.haptic.tap(); Wallet.connect().catch(function(e){ UI.toast('Hamyon ulanmadi','err'); }); UI.sheetClose(); } }, [
+        UI.h('div', { class: 'w-icon w-mt', text: '◎' }),
+        UI.h('div', { style: 'flex:1;text-align:left' }, [ UI.h('div', { style:'font-weight:800;font-size:14px', text:'MyTonWallet' }), UI.h('div', { class:'small muted', text:'Open-source' }) ]),
+        UI.h('span', { class:'small muted', text:'→' })
+      ]),
+      UI.h('button', { class: 'wallet-opt', onclick: function(){ TG.haptic.tap(); Wallet.connect().catch(function(e){ UI.toast('Hamyon ulanmadi','err'); }); UI.sheetClose(); } }, [
+        UI.h('div', { class: 'w-icon w-w', text: '₮' }),
+        UI.h('div', { style: 'flex:1;text-align:left' }, [ UI.h('div', { style:'font-weight:800;font-size:14px', text:'@wallet in Telegram' }), UI.h('div', { class:'small muted', text:'Ilova ichida · kengaytmasiz' }) ]),
+        UI.h('span', { class:'small muted', text:'→' })
+      ]),
+      UI.h('button', { class: 'btn btn-primary', style: 'margin-top:8px', onclick: function(){ TG.haptic.medium(); Wallet.connect().catch(function(e){ UI.toast('Hamyon ulanmadi','err'); }); UI.sheetClose(); }, text: 'Tonkeeper bilan davom etish' }),
+      UI.h('div', { style:'text-align:center;margin-top:10px' }, [ UI.h('button', { class:'link-btn', onclick: function(){ UI.sheetClose(); }, text:'Keyinroq' }) ]),
+      UI.h('div', { style:'margin-top:14px;padding:10px;border-radius:12px;background:var(--success-soft);border:1px solid rgba(52,211,153,.22);display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700' }, [
+        UI.h('span', { style:'width:8px;height:8px;border-radius:50%;background:var(--success);box-shadow:0 0 0 6px var(--success-soft);display:inline-block' }),
+        UI.h('span', { text:'Audited escrow · non-custodial' }),
+        UI.h('span', { style:'margin-left:auto;font-size:11px;font-weight:800;padding:4px 8px;border-radius:999px;background:#0B0E14;color:var(--success);border:1px solid rgba(52,211,153,.3)', text:'TON' })
+      ])
+    ]);
+    // Build sheet manually to avoid double grabber
+    var root = document.getElementById('sheet-root');
+    root.innerHTML='';
+    var backdrop = UI.h('div', { class:'sheet-backdrop', onclick: function(){ UI.sheetClose(); }});
+    var sheet = UI.h('div', { class:'sheet', role:'dialog', html: ''});
+    sheet.appendChild(content);
+    // remove extra grabber dup (content already has one)
+    root.appendChild(backdrop); root.appendChild(sheet); root.classList.add('open');
+  }
 
   function walletPill() {
     var balEl = UI.h('span', { class: 'wallet-bal small muted', style: 'margin-left:8px', text: '' });
@@ -205,38 +316,43 @@
         TG.haptic.tap();
         if (!Wallet.available()) { UI.toast('Hamyon SDK yuklanmoqda…'); return; }
         if (Wallet.connected()) walletSheet();
-        else Wallet.connect().catch(function (err) {
-          console.warn('[App] connect failed', err);
-          UI.toast('Hamyon ulanmadi', 'err');
-        });
+        else walletConnectSheet();
       }
     }, ['🔌 Hamyonni ulash']);
-    var wrap = UI.h('div', { class: 'wallet-pill-wrap', style: 'display:flex;align-items:center' }, [btn, balEl]);
+    var wrap = UI.h('div', { class: 'wallet-pill-wrap', style: 'display:flex;align-items:center;flex-wrap:wrap;gap:8px' }, [btn, balEl]);
 
     var render = function (acc) {
-      // acc may be passed from onStatus, else use Wallet
       var isConn = Wallet.connected();
       var addr = Wallet.address();
-      // If onStatus gave us acc directly, prefer it
       if (acc && acc.address) { isConn = true; addr = acc.address; }
       if (isConn && addr) {
         var friendly = Wallet.addressFriendly ? Wallet.addressFriendly() : (UI.toFriendly ? UI.toFriendly(addr) : addr);
-        btn.textContent = '👛 ' + UI.shortAddr(friendly);
+        var chain = Wallet.chain ? Wallet.chain() : null;
+        var chainLabel = chain === -239 ? 'Mainnet' : chain === -3 ? 'Testnet' : (chain != null ? 'Chain ' + chain : 'TON');
         btn.classList.add('connected');
-        // Fetch balance async
+        btn.classList.add('dot');
+        btn.textContent = '👛 ' + UI.shortAddr(friendly);
+        balEl.textContent = chainLabel;
+        balEl.style.display='';
+        // Fetch balance async — merge into pill like mockup: "UQAb…7f2k · 42.18 TON"
         balEl.textContent = '…';
         Wallet.getBalance().then(function (r) {
           var ton = r.balanceTon || (Number(r.balance) / 1e9).toString();
           var n = Number(ton);
-          balEl.textContent = isFinite(n) ? n.toFixed(4).replace(/\.?0+$/, '') + ' TON' : ton + ' TON';
+          var bal = isFinite(n) ? n.toFixed(4).replace(/\.?0+$/, '') + ' TON' : ton + ' TON';
+          btn.textContent = '👛 ' + UI.shortAddr(friendly) + ' · ' + bal;
+          balEl.textContent = chainLabel;
         }).catch(function (err) {
           console.warn('[App] balance fetch failed', err);
-          balEl.textContent = '';
+          btn.textContent = '👛 ' + UI.shortAddr(friendly);
+          balEl.textContent = chainLabel;
         });
       } else {
         btn.textContent = '🔌 Hamyonni ulash';
         btn.classList.remove('connected');
+        btn.classList.remove('dot');
         balEl.textContent = '';
+        balEl.style.display='none';
       }
     };
 
@@ -270,7 +386,14 @@
       console.warn('[App] walletSheet balance failed', err);
     });
 
+    var connectedBadge = UI.h('div', { style:'display:flex;align-items:center;gap:8px;padding:10px;border-radius:12px;background:var(--success-soft);border:1px solid rgba(52,211,153,.22);margin-bottom:12px' }, [
+      UI.h('span', { style:'width:8px;height:8px;border-radius:50%;background:var(--success);box-shadow:0 0 0 6px var(--success-soft);display:inline-block' }),
+      UI.h('span', { style:'font-size:12.5px;font-weight:700', text: UI.shortAddr(friendly) + ' · connected' }),
+      UI.h('span', { style:'margin-left:auto;font-size:11px;font-weight:800;padding:4px 8px;border-radius:999px;background:#0B0E14;color:var(--success);border:1px solid rgba(52,211,153,.3)', text: chainLabel || 'TON' })
+    ]);
+
     var content = UI.h('div', {}, [
+      connectedBadge,
       UI.h('h3', { text: 'Hamyoningiz' }),
       UI.h('p', { class: 'sub', text: (Wallet.walletName() || 'Ulangan') + (chainLabel ? ' · ' + chainLabel : '') + ' · nusxalash uchun manzilni bosing' }),
       UI.h('button', {
@@ -286,13 +409,17 @@
         UI.h('span', { class: 'small muted', text: 'xom' })
       ]),
       balRow,
-      UI.h('button', {
-        class: 'btn btn-danger',
-        onclick: function () {
-          TG.haptic.medium();
-          Wallet.disconnect().then(function () { UI.sheetClose(); UI.toast('Hamyon uzildi'); });
-        }
-      }, ['Uzish'])
+      UI.h('div', { style:'display:flex;gap:8px;margin-top:12px' }, [
+        UI.h('button', { class:'btn btn-ghost', style:'flex:1', onclick: function(){ UI.sheetClose(); }, text:'Yopish' }),
+        UI.h('button', {
+          class: 'btn btn-danger',
+          style:'flex:1',
+          onclick: function () {
+            TG.haptic.medium();
+            Wallet.disconnect().then(function () { UI.sheetClose(); UI.toast('Hamyon uzildi'); });
+          }
+        }, ['Uzish'])
+      ])
     ]);
     UI.sheetOpen(content);
   }
@@ -312,21 +439,54 @@
       segBtn('all', 'Barchasi')
     ]);
 
+    // sliding thumb indicator
+    var segThumb = UI.h('div', { class: 'seg-thumb' });
+    seg.appendChild(segThumb);
+    function moveThumb() {
+      var idx = ['active', 'done', 'all'].indexOf(App.state.filter);
+      var b = seg.children[idx];
+      if (!b || !b.offsetWidth) return;
+      segThumb.style.width = b.offsetWidth + 'px';
+      segThumb.style.transform = 'translateX(' + b.offsetLeft + 'px)';
+    }
+    try {
+      var onResize = function () { moveThumb(); };
+      window.addEventListener('resize', onResize);
+      App.cleanupFns.push(function () { window.removeEventListener('resize', onResize); });
+    } catch (e) {}
+
     var stats = UI.h('div', { class: 'stats-grid' });
     var listBox = UI.h('div', { class: 'deal-list' });
+    var ptr = UI.h('div', { class: 'ptr', 'aria-hidden': 'true' }, [UI.h('div', { class: 'ptr-spinner' })]);
+    var heroAppIcon = UI.h('div', { class: 'hero-appicon', html: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 9l9 6 9-6-9-6Z"/><path d="M3 12 12 18l9-6"/><path d="M3 15 12 21l9-6"/></svg>' });
+    var heroEl = UI.h('div', { class: 'hero' }, [
+      heroAppIcon,
+      UI.h('h1', { text: 'Salom, ' + name + ' 👋' }),
+      UI.h('p', { text: "Mablag'ni escrow'da bloklang va ishonchli P2P savdo qiling. Har bir bitim himoyalangan." }),
+      UI.h('div', { class: 'wallet-row' }, [walletPill()])
+    ]);
+
+    // Search bar -- mockup spec: pill, left icon, muted placeholder 50% opacity, 46px height
+    var searchInputEl = UI.h('input', {
+      class: 'search-input',
+      placeholder: 'ID, aktiv yoki sherik bo\'yicha qidirish…',
+      oninput: function(e){
+        App.state.searchQuery = (e.target.value||'').toLowerCase().trim();
+        renderList();
+      }
+    });
+    var searchRow = UI.h('label', { class: 'search-row', style: 'margin-top:4px' }, [searchInputEl]);
 
     var root = UI.h('div', {}, [
+      ptr,
       (!TG.realUser()) ?
         UI.h('div', { class: 'banner info' }, [
           UI.h('div', {}, UI.h('div', { class: 'small', text: "Ko'rib chiqish rejimi — to'liq ishlashi uchun sahifani Telegram ichida oching." }))
         ]) : null,
-      UI.h('div', { class: 'hero' }, [
-        UI.h('h1', { text: 'Salom, ' + name + ' 👋' }),
-        UI.h('p', { text: "Mablag'ni escrow'da bloklang va ishonchli P2P savdo qiling." }),
-        UI.h('div', { class: 'row', style: 'margin-top:12px' }, [walletPill()])
-      ]),
+      heroEl,
       stats,
       seg,
+      searchRow,
       listBox
     ].filter(Boolean));
 
@@ -339,6 +499,7 @@
           Array.prototype.forEach.call(seg.children, function (b) { b.classList.remove('active'); });
           seg.children[['active', 'done', 'all'].indexOf(key)].classList.add('active');
           renderList();
+          moveThumb();
         }
       }, [label]);
     }
@@ -351,26 +512,49 @@
         else { active++; if (u === 'DEPOSIT_CONFIRMED' || u === 'BUYER_CONFIRMED') volume += Number(d.amount) || 0; }
       });
       stats.innerHTML = '';
+      var keys = [done + active, active, done];
+      var changed = !App._lastStats || App._lastStats.join(',') !== keys.join(',');
+      App._lastStats = keys;
       [[done + active, 'Jami'], [active, 'Jarayonda'], [done, 'Yakunlangan']].forEach(function (p) {
+        var b = UI.h('b');
         stats.appendChild(UI.h('div', { class: 'stat' }, [
-          UI.h('b', { text: String(p[0]) }),
+          b,
           UI.h('span', { text: p[1] })
         ]));
+        if (changed && FX) FX.countUp(b, p[0]);
+        else b.textContent = String(p[0]);
       });
     }
 
     function matchesFilter(d) {
       var u = String(d.status || '').toUpperCase();
       var f = App.state.filter;
-      if (f === 'all') return true;
-      if (f === 'done') return u === 'RELEASED' || u === 'REFUNDED';
-      return u !== 'RELEASED' && u !== 'REFUNDED';
+      var q = (App.state.searchQuery||'').toLowerCase();
+      if (f === 'all') { if(q && String(d.id).indexOf(q)===-1 && String(d.asset||'').toLowerCase().indexOf(q)===-1 && String(d.status||'').toLowerCase().indexOf(q)===-1) return false; return true; }
+      if (f === 'done') { var isDone = u === 'RELEASED' || u === 'REFUNDED'; if(!isDone) return false; }
+      else { if(u === 'RELEASED' || u === 'REFUNDED') return false; }
+      if(q){
+        var hay = (String(d.id)+' '+String(d.asset||'')+' '+String(d.status||'')+' '+String(d.buyer_telegram_id||'')+' '+String(d.seller_telegram_id||'')).toLowerCase();
+        if(hay.indexOf(q)===-1) return false;
+      }
+      return true;
     }
 
     function renderList() {
       listBox.innerHTML = '';
       var visible = App.state.deals.filter(matchesFilter);
       if (!visible.length) {
+        // Check if search active vs truly empty
+        if(App.state.searchQuery){
+          var nb = UI.h('div', { class:'empty', style:'padding:24px 16px' }, [
+            UI.h('div', { class:'art', html:'<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#8494AD" stroke-width="1.7"><circle cx="11" cy="11" r="6"/><path d="M15 15 19 19"/></svg>' }),
+            UI.h('h3', { text:'Hech narsa topilmadi' }),
+            UI.h('p', { text:'"'+App.state.searchQuery+'" bo\'yicha bitim yo\'q — boshqa so\'z bilan qidiring.' }),
+            UI.h('button', { class:'btn btn-ghost', style:'width:auto;padding:10px 18px', onclick:function(){ searchInputEl.value=''; App.state.searchQuery=''; renderList(); }, text:'Qidiruvni tozalash' })
+          ]);
+          listBox.appendChild(nb);
+          return;
+        }
         listBox.appendChild(emptyState(
           '🛡️',
           App.state.filter === 'active' ? "Faol bitimlar yo'q" : "Hozircha bo'sh",
@@ -380,12 +564,24 @@
         return;
       }
       visible.forEach(function (d) { listBox.appendChild(dealCard(d)); });
+      // entrance stagger only on the first paint of this view session
+      if (firstListRender && FX) { FX.staggerIn(listBox.querySelectorAll('.deal-card')); firstListRender = false; }
     }
+    var firstListRender = true;
 
     function load(silent) {
       if (!silent) {
         listBox.innerHTML = '';
         listBox.appendChild(UI.skeletonDeals(4));
+        // premium skeleton for stats (3 pills)
+        stats.innerHTML='';
+        for(var si=0;si<3;si++){
+          var skStat = UI.h('div', { class:'stat', style:'padding:12px 10px' }, [
+            UI.h('div', { class:'sk-line', style:'width:38px;height:16px;margin:0 auto 8px' }),
+            UI.h('span', { text:'...' })
+          ]);
+          stats.appendChild(skStat);
+        }
       }
       return Api.deals()
         .then(function (deals) {
@@ -417,6 +613,11 @@
 
     document.getElementById('view').innerHTML = '';
     document.getElementById('view').appendChild(root);
+    App._homeReload = load;
+    bindPullToRefresh(document.getElementById('view'));
+    requestAnimationFrame(moveThumb);
+    // Three.js hero backdrop (lazy, guarded, auto-disposed on route change)
+    try { if (window.HeroFX) App.cleanupFns.push(window.HeroFX.mount(heroEl)); } catch (e) {}
     load(false);
 
     setTopbar('TonEscrow');
@@ -536,6 +737,7 @@
           UI.h('button', { class: 'btn btn-soft', onclick: function () { go('#/create'); } }, ['Yana yaratish'])
         ])
       ]));
+      if (FX) FX.confetti();
     }
 
     function renderStep() {
@@ -1351,15 +1553,24 @@
       return out;
     }
 
+    var lastMsgCount = 0;
     function renderMessages(list) {
       var nearBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 60;
+      var prevCount = lastMsgCount;
       scroller.innerHTML = '';
       if (!list.length) {
+        lastMsgCount = 0;
         scroller.appendChild(emptyState('💬', "Hozircha xabarlar yo'q", 'Savdo tafsilotlarini shu yerda kelishing. Aniq yozing. Xabarlar uchdan-uchga shifrlangan.'));
         return;
       }
-      list.forEach(function (msg) { scroller.appendChild(bubble(msg)); });
-      if (nearBottom) scroller.scrollTop = scroller.scrollHeight;
+      list.forEach(function (msg, i) {
+        var b = bubble(msg);
+        // pop-in animation only for messages that arrived after the first paint
+        if (prevCount > 0 && i >= prevCount) b.classList.add('msg-new');
+        scroller.appendChild(b);
+      });
+      lastMsgCount = list.length;
+      if (nearBottom || list.length > prevCount) scroller.scrollTop = scroller.scrollHeight;
     }
 
     function updateStatus() {
@@ -1544,7 +1755,9 @@
 
       UI.sheetOpen(content, {});
 
-      function doJoin() {
+      function doJoin(e) {
+        var btn = e && e.currentTarget;
+        if (btn) btn.classList.add('is-busy');
         TG.haptic.medium();
         Api.joinDeal(id, token)
           .then(function (res) {
@@ -1561,7 +1774,9 @@
           .catch(function (err) {
             TG.haptic.error();
             UI.toast(joinErrUz(err && err.message), 'err');
-          });
+            if (btn) FX && FX.shake(btn);
+          })
+          .then(function () { if (btn) btn.classList.remove('is-busy'); });
       }
     }).catch(function (err) {
       box.innerHTML = '';

@@ -185,14 +185,17 @@ function patchTabbar() {
 function patchViewHome() {
   const origViewHome = (window as any).viewHome;
   if (!origViewHome) {
-    // Hook via capturing after legacy viewHome renders: we add search bar injection after render
+    // Hook via capturing after legacy viewHome renders: we add inbox entry injection (search already native in viewHome premium)
     const viewEl = document.getElementById('view')!;
     const obs = new MutationObserver(() => {
       if (location.hash === '#/home' || location.hash === '') {
         const view = document.getElementById('view');
-        if (view && view.querySelector('.hero') && !view.querySelector('.search-row')) {
-          injectHomeSearch(view);
-          injectInboxEntry(view);
+        if (view && view.querySelector('.hero')) {
+          // search is now natively rendered in viewHome; only inject if missing (backward compat)
+          if (!view.querySelector('.search-row') && !view.querySelector('.search-input')) {
+            injectHomeSearch(view);
+          }
+          if (!view.querySelector('#inbox-entry')) injectInboxEntry(view);
         }
       }
     });
