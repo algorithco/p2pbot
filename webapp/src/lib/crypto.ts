@@ -53,7 +53,11 @@ async function decrypt(b64Cipher: string, b64Key: string): Promise<string> {
   return new TextDecoder().decode(plainBuf);
 }
 function isAvailable(): boolean {
-  try { return !!(window.crypto && (window.crypto as any).subtle); } catch { return false; }
+  try {
+    return !!(window.crypto && (window.crypto as any).subtle);
+  } catch {
+    return false;
+  }
 }
 export const ChatCrypto = {
   isAvailable,

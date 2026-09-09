@@ -1,11 +1,6 @@
 // src/services/escrowService.ts
 import { db } from '../db/queries';
-import {
-  DEAL_STATUS,
-  getDealById,
-  updateDealStatus,
-  setConfirmation,
-} from './dealService';
+import { DEAL_STATUS, getDealById } from './dealService';
 import { config } from '../config';
 import logger from '../logger';
 import { releaseComment } from '../utils/comments';
@@ -40,8 +35,12 @@ async function notifyAdminsHub(memo: string, amount = '', asset = ''): Promise<v
  * Priority: explicit opts.toAddress > per-deal payout_address > users.ton_address (seller/buyer) > DB fallback.
  * Returns null if none found — caller must throw seller_ton_address_required.
  */
-async function resolvePayoutAddress(deal: any, optsToAddress: string | undefined, targetTelegramId: number | null): Promise<string | null> {
-  let toAddress = (optsToAddress || '').trim();
+async function resolvePayoutAddress(
+  deal: any,
+  optsToAddress: string | undefined,
+  targetTelegramId: number | null,
+): Promise<string | null> {
+  const toAddress = (optsToAddress || '').trim();
   if (toAddress) return toAddress;
   const payoutAddr = (deal as any).payout_address as string | undefined;
   if (payoutAddr && payoutAddr.trim()) return payoutAddr.trim();
@@ -50,7 +49,9 @@ async function resolvePayoutAddress(deal: any, optsToAddress: string | undefined
     // silently would surface later as a misleading "address missing" error. Warn,
     // then fall through to the next source (callers still fail closed on null).
     try {
-      const res = await db.query('SELECT ton_address FROM users WHERE telegram_id = $1 LIMIT 1', [Number(targetTelegramId)]);
+      const res = await db.query('SELECT ton_address FROM users WHERE telegram_id = $1 LIMIT 1', [
+        Number(targetTelegramId),
+      ]);
       if (res.rows[0]?.ton_address) return String(res.rows[0].ton_address).trim();
     } catch (e) {
       logger.warn(`resolvePayoutAddress: users lookup failed for deal #${deal.id}`, e);
@@ -68,15 +69,26 @@ async function resolvePayoutAddress(deal: any, optsToAddress: string | undefined
 /** Valid transitions for guarded release/refund. */
 function isValidTransition(currentStatus: string, nextStatus: string): boolean {
   if (nextStatus === DEAL_STATUS.REFUNDED) {
-    return [DEAL_STATUS.AWAITING_DEPOSIT, DEAL_STATUS.DEPOSIT_CONFIRMED, DEAL_STATUS.ITEM_SENT, DEAL_STATUS.BUYER_CONFIRMED].includes(currentStatus as any);
+    return [
+      DEAL_STATUS.AWAITING_DEPOSIT,
+      DEAL_STATUS.DEPOSIT_CONFIRMED,
+      DEAL_STATUS.ITEM_SENT,
+      DEAL_STATUS.BUYER_CONFIRMED,
+    ].includes(currentStatus as any);
   }
   if (nextStatus === DEAL_STATUS.RELEASED) {
-    return [DEAL_STATUS.DEPOSIT_CONFIRMED, DEAL_STATUS.ITEM_SENT, DEAL_STATUS.BUYER_CONFIRMED].includes(currentStatus as any);
+    return [DEAL_STATUS.DEPOSIT_CONFIRMED, DEAL_STATUS.ITEM_SENT, DEAL_STATUS.BUYER_CONFIRMED].includes(
+      currentStatus as any,
+    );
   }
   return false;
 }
 
-function feeParts(amountStr: string, assetUpper: string, feeBpsRaw: unknown): { sellerHuman: string; feeHuman: string; feeBase: bigint } {
+function feeParts(
+  amountStr: string,
+  assetUpper: string,
+  feeBpsRaw: unknown,
+): { sellerHuman: string; feeHuman: string; feeBase: bigint } {
   const priceBase = BigInt(toBaseUnits(amountStr, assetUpper));
   const n = Number(feeBpsRaw ?? config.feeBps ?? 100);
   const feeBps = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 100;
@@ -145,7 +157,10 @@ interface PayoutPlan {
  * must still finalize — but the missing fee is returned for persistent recording
  * (`fee_payout_failed`), never just a log line.
  */
-async function executePayout(plan: PayoutPlan, dealId: number): Promise<{ feeFailed: boolean; feeError: string | null }> {
+async function executePayout(
+  plan: PayoutPlan,
+  dealId: number,
+): Promise<{ feeFailed: boolean; feeError: string | null }> {
   const { assetUpper, principalHuman, amountStr, feeHuman, feeBase, toAddress, encryptedMemo, idempotencyKey } = plan;
   let feeFailed = false;
   let feeError: string | null = null;
@@ -158,22 +173,30 @@ async function executePayout(plan: PayoutPlan, dealId: number): Promise<{ feeFai
       await saveAdminAlert(
         'fee_payout_failed',
         `Deal #${dealId} fee ${feeHuman} ${assetUpper} NOT sent to fee address: ${feeError} — reconcile manually`,
-        { dealId, feeHuman, asset: assetUpper, feeError, feeAddress: config.feeAddress }
+        { dealId, feeHuman, asset: assetUpper, feeError, feeAddress: config.feeAddress },
       );
     } catch {} // best-effort: hub notify below is the backstop; alert-table write must not throw.
     await notifyAdminsHub(
       `Deal #${dealId} fee failed: ${feeError} — ${feeHuman} ${assetUpper} to fee address not sent.`,
       feeHuman,
-      assetUpper
+      assetUpper,
     );
   };
   if (assetUpper === 'TON') {
     await sendTon({ to: toAddress, value: principalHuman, comment: encryptedMemo, bounce: false, idempotencyKey });
-    logger.info(`Custodial payout for deal #${dealId} to ${toAddress} amount ${principalHuman} (price ${amountStr} fee ${feeHuman})`);
+    logger.info(
+      `Custodial payout for deal #${dealId} to ${toAddress} amount ${principalHuman} (price ${amountStr} fee ${feeHuman})`,
+    );
     if (feeBase > 0n && config.feeAddress && feeHuman !== '0') {
       try {
         const feeMemo = encryptField(`Fee for Escrow #${dealId} — ${feeHuman} ${assetUpper}`);
-        await sendTon({ to: config.feeAddress, value: feeHuman, comment: feeMemo, bounce: false, idempotencyKey: `${idempotencyKey}:fee` });
+        await sendTon({
+          to: config.feeAddress,
+          value: feeHuman,
+          comment: feeMemo,
+          bounce: false,
+          idempotencyKey: `${idempotencyKey}:fee`,
+        });
         logger.info(`Fee ${feeHuman} ${assetUpper} sent to ${config.feeAddress} for deal #${dealId}`);
       } catch (feeErr) {
         await recordFeeFailure(feeErr);
@@ -182,12 +205,26 @@ async function executePayout(plan: PayoutPlan, dealId: number): Promise<{ feeFai
   } else {
     const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
     if (!jettonMaster) throw new Error(`jetton_master_not_configured: jetton sozlanmagan, admin bilan bog'laning`);
-    await sendJetton({ jettonMasterAddress: jettonMaster, to: toAddress, amount: principalHuman, forwardComment: encryptedMemo, forwardTonAmount: '0.01', idempotencyKey });
+    await sendJetton({
+      jettonMasterAddress: jettonMaster,
+      to: toAddress,
+      amount: principalHuman,
+      forwardComment: encryptedMemo,
+      forwardTonAmount: '0.01',
+      idempotencyKey,
+    });
     logger.info(`Custodial Jetton payout for deal #${dealId} to ${toAddress} amount ${principalHuman}`);
     if (feeBase > 0n && config.feeAddress && feeHuman !== '0') {
       try {
         const feeMemo = encryptField(`Fee for Escrow #${dealId} — ${feeHuman} ${assetUpper}`);
-        await sendJetton({ jettonMasterAddress: jettonMaster, to: config.feeAddress, amount: feeHuman, forwardComment: feeMemo, forwardTonAmount: '0.01', idempotencyKey: `${idempotencyKey}:fee` });
+        await sendJetton({
+          jettonMasterAddress: jettonMaster,
+          to: config.feeAddress,
+          amount: feeHuman,
+          forwardComment: feeMemo,
+          forwardTonAmount: '0.01',
+          idempotencyKey: `${idempotencyKey}:fee`,
+        });
       } catch (feeErr) {
         await recordFeeFailure(feeErr);
       }
@@ -210,7 +247,7 @@ export async function reconcileStuckPayouts(stuckAfterMinutes = 15): Promise<num
       `SELECT id, status, payout_idempotency_key, payout_attempted_at, amount, asset
        FROM deals WHERE status = ANY($1) AND payout_attempted_at IS NOT NULL AND payout_attempted_at < $2
        ORDER BY id ASC LIMIT 100`,
-      [[DEAL_STATUS.RELEASE_PENDING, DEAL_STATUS.REFUND_PENDING], cutoff]
+      [[DEAL_STATUS.RELEASE_PENDING, DEAL_STATUS.REFUND_PENDING], cutoff],
     );
     rows = res.rows;
   } catch (e) {
@@ -225,7 +262,8 @@ export async function reconcileStuckPayouts(stuckAfterMinutes = 15): Promise<num
     try {
       const { saveAdminAlert } = await import('../db/queries');
       await saveAdminAlert('payout_stuck', text, {
-        dealId: Number(r.id), status: String(r.status),
+        dealId: Number(r.id),
+        status: String(r.status),
         idempotencyKey: String(r.payout_idempotency_key ?? ''),
         attemptedAt: String(r.payout_attempted_at ?? ''),
       });
@@ -243,7 +281,11 @@ export async function reconcileStuckPayouts(stuckAfterMinutes = 15): Promise<num
  * On REFUNDED: buyer gets amount+fee (their full original deposit); no fee leg fires.
  * Crash-safe: three-phase PENDING + idempotency key (see IDEMPOTENCY MODEL above).
  */
-async function guardedTransition(dealId: number, status: string, opts?: { toAddress?: string; amount?: string | number; asset?: string; terms?: string }) {
+async function guardedTransition(
+  dealId: number,
+  status: string,
+  opts?: { toAddress?: string; amount?: string | number; asset?: string; terms?: string },
+) {
   const isRelease = status === DEAL_STATUS.RELEASED;
   const isRefund = status === DEAL_STATUS.REFUNDED;
   const pendingStatus = pendingStatusFor(status);
@@ -269,7 +311,9 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     // before finalizing). Refuse to start a second send for the same logical payout.
     if (isPendingStatus(deal.status)) {
       await client.query('ROLLBACK');
-      throw new Error(`payout_in_progress: Deal #${dealId} "${deal.status}" holatda — to'lov allaqachon jarayonda (key ${deal.payout_idempotency_key || idemKey}). Takrorlamang; admin on-chain tekshirsin.`);
+      throw new Error(
+        `payout_in_progress: Deal #${dealId} "${deal.status}" holatda — to'lov allaqachon jarayonda (key ${deal.payout_idempotency_key || idemKey}). Takrorlamang; admin on-chain tekshirsin.`,
+      );
     }
     if (!isValidTransition(String(deal.status), status)) {
       await client.query('ROLLBACK');
@@ -321,10 +365,17 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     if (memoPlain.length > 120) memoPlain = memoPlain.slice(0, 119) + '…';
     const encryptedMemo = encryptField(memoPlain);
 
-    const toAddress = await resolvePayoutAddress(deal, opts?.toAddress, targetTelegramId != null ? Number(targetTelegramId) : null);
+    const toAddress = await resolvePayoutAddress(
+      deal,
+      opts?.toAddress,
+      targetTelegramId != null ? Number(targetTelegramId) : null,
+    );
     if (!toAddress) {
       await client.query('ROLLBACK');
-      if (isRelease) throw new Error(`seller_ton_address_required: sotuvchi TON manzilni ilovada kiritishi shart (Bitim → To'lov manzili yoki Profil → TON manzil)`);
+      if (isRelease)
+        throw new Error(
+          `seller_ton_address_required: sotuvchi TON manzilni ilovada kiritishi shart (Bitim → To'lov manzili yoki Profil → TON manzil)`,
+        );
       if (isRefund) {
         throw new Error(`buyer_ton_address_required: xaridor TON manzili yo'q, ilovada kiriting`);
       }
@@ -332,8 +383,14 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     }
 
     plan = {
-      assetUpper, principalHuman: isRelease ? payoutHuman : amountStr, amountStr,
-      feeHuman, feeBase, toAddress, encryptedMemo, idempotencyKey: idemKey,
+      assetUpper,
+      principalHuman: isRelease ? payoutHuman : amountStr,
+      amountStr,
+      feeHuman,
+      feeBase,
+      toAddress,
+      encryptedMemo,
+      idempotencyKey: idemKey,
     };
 
     // Durably record the attempt BEFORE any money moves. From here on, a crash no
@@ -341,7 +398,7 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     const mark = await client.query(
       `UPDATE deals SET status = $1, payout_idempotency_key = $2, payout_attempted_at = now(), updated_at = now()
        WHERE id = $3 AND status = $4 RETURNING id`,
-      [pendingStatus, idemKey, dealId, fromStatus]
+      [pendingStatus, idemKey, dealId, fromStatus],
     );
     if (mark.rowCount === 0) {
       await client.query('ROLLBACK');
@@ -349,7 +406,9 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     }
     await client.query('COMMIT');
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
+    try {
+      await client.query('ROLLBACK');
+    } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
     throw e;
   } finally {
     client.release();
@@ -367,7 +426,11 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     // transfer with this idempotency key already landed, or the retry double-pays.
     const msg = String((e as Error).message || '');
     try {
-      await db.query(`UPDATE deals SET status = $1, updated_at = now() WHERE id = $2 AND status = $3`, [fromStatus!, dealId, pendingStatus]);
+      await db.query(`UPDATE deals SET status = $1, updated_at = now() WHERE id = $2 AND status = $3`, [
+        fromStatus!,
+        dealId,
+        pendingStatus,
+      ]);
     } catch (rbErr) {
       logger.error(`Payout rollback failed for deal #${dealId} — manual reconciliation required`, rbErr);
     }
@@ -376,12 +439,16 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
       await saveAdminAlert(
         'payout_failed',
         `Deal #${dealId} ${status} failed: ${msg} — amount ${plan!.principalHuman} to ${plan!.toAddress} (key ${idemKey}). ON-CHAIN TEKSHIRING: transfer executed bo'lishi mumkin; qayta yuborishdan oldin tekshiring.`,
-        { dealId, status, error: msg, to: plan!.toAddress, amount: plan!.principalHuman, idempotencyKey: idemKey }
+        { dealId, status, error: msg, to: plan!.toAddress, amount: plan!.principalHuman, idempotencyKey: idemKey },
       );
     } catch {}
     if (isRelease) {
       logger.warn(`Payout failed for deal #${dealId} — not marking ${status}, manual required: ${msg}`, e);
-      await notifyAdminsHub(`Deal #${dealId} payout failed: ${msg} — amount ${plan!.principalHuman} to ${plan!.toAddress}.`, plan!.principalHuman, plan!.assetUpper);
+      await notifyAdminsHub(
+        `Deal #${dealId} payout failed: ${msg} — amount ${plan!.principalHuman} to ${plan!.toAddress}.`,
+        plan!.principalHuman,
+        plan!.assetUpper,
+      );
       throw new Error(`payout_failed: ${msg}`);
     }
     logger.error(`On-chain send failed for deal #${dealId} (${status})`, e);
@@ -392,7 +459,7 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
   const upd = await db.query(
     `UPDATE deals SET status = $1, fee_payout_failed = $2, fee_payout_error = $3, updated_at = now(), resolved_at = now()
      WHERE id = $4 AND status = $5 AND payout_idempotency_key = $6 RETURNING id`,
-    [status, feeFailed, feeError, dealId, pendingStatus, idemKey]
+    [status, feeFailed, feeError, dealId, pendingStatus, idemKey],
   );
   if (upd.rowCount === 0) {
     // Money moved but the row moved underneath us (manual admin edit?). Never silent:
@@ -401,7 +468,12 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     logger.error(text);
     try {
       const { saveAdminAlert } = await import('../db/queries');
-      await saveAdminAlert('payout_finalize_conflict', text, { dealId, idempotencyKey: idemKey, to: plan!.toAddress, amount: plan!.principalHuman });
+      await saveAdminAlert('payout_finalize_conflict', text, {
+        dealId,
+        idempotencyKey: idemKey,
+        to: plan!.toAddress,
+        amount: plan!.principalHuman,
+      });
     } catch {}
     await notifyAdminsHub(text, plan!.principalHuman, plan!.assetUpper);
     throw new Error(`concurrent_transition: payout sent but deal status changed during send (key ${idemKey})`);
@@ -409,9 +481,10 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
   // System message after commit (best-effort)
   try {
     const { addDealMessage } = await import('./dealService');
-    const sysText = status === DEAL_STATUS.RELEASED
-      ? `Tizim: Yakunlandi (Deal #${dealId}) — ${plan!.principalHuman} ${plan!.assetUpper} sotuvchiga yuborildi${feeFailed ? ` (komissiya yuborilmadi — admin tekshiradi)` : plan!.feeHuman !== '0' ? ` (komissiya ${plan!.feeHuman} ${plan!.assetUpper})` : ''}.`
-      : `Tizim: Qaytarildi (Deal #${dealId}) — ${plan!.principalHuman} ${plan!.assetUpper} xaridorga qaytarildi.`;
+    const sysText =
+      status === DEAL_STATUS.RELEASED
+        ? `Tizim: Yakunlandi (Deal #${dealId}) — ${plan!.principalHuman} ${plan!.assetUpper} sotuvchiga yuborildi${feeFailed ? ` (komissiya yuborilmadi — admin tekshiradi)` : plan!.feeHuman !== '0' ? ` (komissiya ${plan!.feeHuman} ${plan!.assetUpper})` : ''}.`
+        : `Tizim: Qaytarildi (Deal #${dealId}) — ${plan!.principalHuman} ${plan!.assetUpper} xaridorga qaytarildi.`;
     await addDealMessage(dealId, 0, sysText);
   } catch (e) {
     logger.warn(`post-commit system message failed for deal #${dealId}`, e);
@@ -425,20 +498,35 @@ export async function adminRelease(adminTelegramId: number | string, dealId: num
   }
   try {
     const deal = await getDealById(id);
-    await guardedTransition(id, DEAL_STATUS.RELEASED, deal ? { toAddress: undefined, amount: deal.amount, asset: deal.asset, terms: deal.terms } : undefined);
-    const like = deal ? dealLike({ id, amount: String(deal.amount), asset: String(deal.asset), terms: deal.terms }) : { id, amount: '', asset: 'TON' };
+    await guardedTransition(
+      id,
+      DEAL_STATUS.RELEASED,
+      deal ? { toAddress: undefined, amount: deal.amount, asset: deal.asset, terms: deal.terms } : undefined,
+    );
+    const like = deal
+      ? dealLike({ id, amount: String(deal.amount), asset: String(deal.asset), terms: deal.terms })
+      : { id, amount: '', asset: 'TON' };
     const partyText = `Admin qarori: pul sotuvchiga chiqarildi (Deal #${id}).`;
     try {
-      if (deal?.buyer_telegram_id != null) await notify.adminDecisionToParty(Number(deal.buyer_telegram_id), like, partyText);
+      if (deal?.buyer_telegram_id != null)
+        await notify.adminDecisionToParty(Number(deal.buyer_telegram_id), like, partyText);
     } catch {}
     try {
-      if (deal?.seller_telegram_id != null) await notify.adminDecisionToParty(Number(deal.seller_telegram_id), like, partyText);
+      if (deal?.seller_telegram_id != null)
+        await notify.adminDecisionToParty(Number(deal.seller_telegram_id), like, partyText);
     } catch {}
     try {
       const { saveAdminAlert } = await import('../db/queries');
-      await saveAdminAlert('admin_release', `Deal #${id} admin tomonidan chiqarildi`, { dealId: id, by: Number(adminTelegramId) });
+      await saveAdminAlert('admin_release', `Deal #${id} admin tomonidan chiqarildi`, {
+        dealId: id,
+        by: Number(adminTelegramId),
+      });
     } catch {}
-    await notifyAdminsHub(`Deal #${id} admin tomonidan chiqarildi (${adminTelegramId})`, String(deal?.amount ?? ''), String(deal?.asset ?? ''));
+    await notifyAdminsHub(
+      `Deal #${id} admin tomonidan chiqarildi (${adminTelegramId})`,
+      String(deal?.amount ?? ''),
+      String(deal?.asset ?? ''),
+    );
     return { success: true, message: `Pul chiqarildi (shifrlangan memo)` };
   } catch (err) {
     logger.error(`adminRelease failed for deal #${id}`, err);
@@ -454,20 +542,35 @@ export async function adminRefund(adminTelegramId: number | string, dealId: numb
   }
   try {
     const deal = await getDealById(id);
-    await guardedTransition(id, DEAL_STATUS.REFUNDED, deal ? { amount: deal.amount, asset: deal.asset, terms: deal.terms } : undefined);
-    const like = deal ? dealLike({ id, amount: String(deal.amount), asset: String(deal.asset), terms: deal.terms }) : { id, amount: '', asset: 'TON' };
+    await guardedTransition(
+      id,
+      DEAL_STATUS.REFUNDED,
+      deal ? { amount: deal.amount, asset: deal.asset, terms: deal.terms } : undefined,
+    );
+    const like = deal
+      ? dealLike({ id, amount: String(deal.amount), asset: String(deal.asset), terms: deal.terms })
+      : { id, amount: '', asset: 'TON' };
     const partyText = `Admin qarori: pul xaridorga qaytarildi (Deal #${id}).`;
     try {
-      if (deal?.buyer_telegram_id != null) await notify.adminDecisionToParty(Number(deal.buyer_telegram_id), like, partyText);
+      if (deal?.buyer_telegram_id != null)
+        await notify.adminDecisionToParty(Number(deal.buyer_telegram_id), like, partyText);
     } catch {}
     try {
-      if (deal?.seller_telegram_id != null) await notify.adminDecisionToParty(Number(deal.seller_telegram_id), like, partyText);
+      if (deal?.seller_telegram_id != null)
+        await notify.adminDecisionToParty(Number(deal.seller_telegram_id), like, partyText);
     } catch {}
     try {
       const { saveAdminAlert } = await import('../db/queries');
-      await saveAdminAlert('admin_refund', `Deal #${id} admin tomonidan qaytarildi`, { dealId: id, by: Number(adminTelegramId) });
+      await saveAdminAlert('admin_refund', `Deal #${id} admin tomonidan qaytarildi`, {
+        dealId: id,
+        by: Number(adminTelegramId),
+      });
     } catch {}
-    await notifyAdminsHub(`Deal #${id} admin tomonidan qaytarildi (${adminTelegramId})`, String(deal?.amount ?? ''), String(deal?.asset ?? ''));
+    await notifyAdminsHub(
+      `Deal #${id} admin tomonidan qaytarildi (${adminTelegramId})`,
+      String(deal?.amount ?? ''),
+      String(deal?.asset ?? ''),
+    );
     return { success: true, message: `Pul qaytarildi (shifrlangan memo)` };
   } catch (err) {
     logger.error(`adminRefund failed for deal #${id}`, err);
@@ -498,9 +601,15 @@ export async function markItemSent(sellerTelegramId: number, dealId: number | st
     }
     if (deal.status !== DEAL_STATUS.DEPOSIT_CONFIRMED) {
       await client.query('ROLLBACK');
-      return { success: false, message: `Deal #${id} "${deal.status}" holatda — faqat DEPOSIT_CONFIRMED dan yuborilgan deb belgilash mumkin.` };
+      return {
+        success: false,
+        message: `Deal #${id} "${deal.status}" holatda — faqat DEPOSIT_CONFIRMED dan yuborilgan deb belgilash mumkin.`,
+      };
     }
-    const upd = await client.query(`UPDATE deals SET status = $1, updated_at = now() WHERE id = $2 AND status = $3 RETURNING id`, [DEAL_STATUS.ITEM_SENT, id, DEAL_STATUS.DEPOSIT_CONFIRMED]);
+    const upd = await client.query(
+      `UPDATE deals SET status = $1, updated_at = now() WHERE id = $2 AND status = $3 RETURNING id`,
+      [DEAL_STATUS.ITEM_SENT, id, DEAL_STATUS.DEPOSIT_CONFIRMED],
+    );
     if (upd.rowCount === 0) {
       await client.query('ROLLBACK');
       return { success: false, message: `concurrent_transition` };
@@ -510,19 +619,30 @@ export async function markItemSent(sellerTelegramId: number, dealId: number | st
     try {
       const { addDealMessage } = await import('./dealService');
       await addDealMessage(id, 0, `Tizim: Sotuvchi yetkazdi (Deal #${id}) — xaridor ilovada qabulni tasdiqlang.`);
-    } catch (e) { logger.warn(`markItemSent system message failed #${id}`, e); }
+    } catch (e) {
+      logger.warn(`markItemSent system message failed #${id}`, e);
+    }
     const buyerId = Number(deal.buyer_telegram_id);
     if (buyerId) {
       try {
-        await notify.shippedToBuyer(buyerId, dealLike({ id, amount: String(deal.amount), asset: String(deal.asset), terms: deal.terms }));
+        await notify.shippedToBuyer(
+          buyerId,
+          dealLike({ id, amount: String(deal.amount), asset: String(deal.asset), terms: deal.terms }),
+        );
       } catch (e) {
         logger.warn(`markItemSent notify failed for #${id}`, e);
       }
     }
     logger.info(`Deal #${id} marked ITEM_SENT by seller ${sellerTelegramId}`);
-    return { success: true, message: `Yetkazildi deb belgilandi — xaridor xabardor qilindi.`, status: DEAL_STATUS.ITEM_SENT };
+    return {
+      success: true,
+      message: `Yetkazildi deb belgilandi — xaridor xabardor qilindi.`,
+      status: DEAL_STATUS.ITEM_SENT,
+    };
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
+    try {
+      await client.query('ROLLBACK');
+    } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
     logger.error(`markItemSent failed for #${id}`, e);
     return { success: false, message: String((e as Error).message || 'internal_error') };
   } finally {
@@ -559,19 +679,29 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
     // Same PENDING guard as guardedTransition: never start a second send.
     if (isPendingStatus(deal.status)) {
       await client.query('ROLLBACK');
-      return { success: false, message: `Deal #${id} "${deal.status}" holatda — to'lov allaqachon jarayonda. Takrorlamang; admin on-chain tekshirsin.` };
+      return {
+        success: false,
+        message: `Deal #${id} "${deal.status}" holatda — to'lov allaqachon jarayonda. Takrorlamang; admin on-chain tekshirsin.`,
+      };
     }
     const allowed = [DEAL_STATUS.ITEM_SENT];
     if (!allowed.includes(deal.status as any)) {
       if (deal.status === DEAL_STATUS.DEPOSIT_CONFIRMED) {
         await client.query('ROLLBACK');
-        return { success: false, message: `Deal #${id} "DEPOSIT_CONFIRMED" holatda — avval sotuvchi "Yetkazdim" ni bosishi shart, keyin chiqarish mumkin.`, needItemSent: true } as any;
+        return {
+          success: false,
+          message: `Deal #${id} "DEPOSIT_CONFIRMED" holatda — avval sotuvchi "Yetkazdim" ni bosishi shart, keyin chiqarish mumkin.`,
+          needItemSent: true,
+        } as any;
       }
       if (deal.status === DEAL_STATUS.BUYER_CONFIRMED) {
         logger.warn(`buyerApproveReceipt legacy BUYER_CONFIRMED for deal #${id}`);
       } else {
         await client.query('ROLLBACK');
-        return { success: false, message: `Deal #${id} "${deal.status}" holatda — faqat ITEM_SENT dan tasdiqlash mumkin (sotuvchi avval yuborishi shart).` };
+        return {
+          success: false,
+          message: `Deal #${id} "${deal.status}" holatda — faqat ITEM_SENT dan tasdiqlash mumkin (sotuvchi avval yuborishi shart).`,
+        };
       }
     }
     fromStatus = String(deal.status);
@@ -582,7 +712,10 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
     // Record buyer confirmation inside transaction
     try {
       const confirmations: Record<string, boolean> = { ...(deal.confirmations || {}), buyer: true };
-      await client.query('UPDATE deals SET confirmations = $1::jsonb, updated_at = now() WHERE id = $2', [JSON.stringify(confirmations), id]);
+      await client.query('UPDATE deals SET confirmations = $1::jsonb, updated_at = now() WHERE id = $2', [
+        JSON.stringify(confirmations),
+        id,
+      ]);
     } catch (e) {
       logger.warn(`setConfirmation failed for #${id}`, e);
     }
@@ -601,19 +734,31 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
       logger.warn(`Fee calc failed for deal #${id}`, e);
     }
 
-    const payoutAddress = await resolvePayoutAddress(deal, undefined, deal.seller_telegram_id != null ? Number(deal.seller_telegram_id) : null);
+    const payoutAddress = await resolvePayoutAddress(
+      deal,
+      undefined,
+      deal.seller_telegram_id != null ? Number(deal.seller_telegram_id) : null,
+    );
     if (!payoutAddress) {
       await client.query('ROLLBACK');
       const msg = `seller_ton_address_required: sotuvchi TON manzilni ilovada kiritishi shart (Bitim → To'lov manzili yoki Profil → TON manzil)`;
       try {
         const sellerId = Number(deal.seller_telegram_id);
         if (sellerId) {
-          await notify.adminDecisionToParty(sellerId, dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }), `To'lov manzilingizni kiriting (Deal #${id})`);
+          await notify.adminDecisionToParty(
+            sellerId,
+            dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }),
+            `To'lov manzilingizni kiriting (Deal #${id})`,
+          );
         }
       } catch {}
       try {
         const { addDealMessage } = await import('./dealService');
-        await addDealMessage(id, 0, `Tizim: Xaridor qabul qildi (Deal #${id}), lekin sotuvchi to'lov manzili yo'q — sotuvchi ilovada manzilni kiriting.`);
+        await addDealMessage(
+          id,
+          0,
+          `Tizim: Xaridor qabul qildi (Deal #${id}), lekin sotuvchi to'lov manzili yo'q — sotuvchi ilovada manzilni kiriting.`,
+        );
       } catch {}
       logger.warn(`buyerApproveReceipt #${id}: missing payout address`);
       return { success: false, message: msg, needSellerAddress: true } as any;
@@ -625,15 +770,21 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
     const encryptedMemo = encryptField(memoPlain);
 
     plan = {
-      assetUpper, principalHuman: sellerHuman, amountStr,
-      feeHuman, feeBase, toAddress: payoutAddress, encryptedMemo, idempotencyKey: idemKey,
+      assetUpper,
+      principalHuman: sellerHuman,
+      amountStr,
+      feeHuman,
+      feeBase,
+      toAddress: payoutAddress,
+      encryptedMemo,
+      idempotencyKey: idemKey,
     };
 
     // Durably record the attempt BEFORE money moves (see IDEMPOTENCY MODEL above).
     const mark = await client.query(
       `UPDATE deals SET status = $1, payout_idempotency_key = $2, payout_attempted_at = now(), updated_at = now()
        WHERE id = $3 AND status = $4 RETURNING id`,
-      [pendingStatus, idemKey, id, fromStatus]
+      [pendingStatus, idemKey, id, fromStatus],
     );
     if (mark.rowCount === 0) {
       await client.query('ROLLBACK');
@@ -641,7 +792,9 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
     }
     await client.query('COMMIT');
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
+    try {
+      await client.query('ROLLBACK');
+    } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
     logger.error(`buyerApproveReceipt failed for #${id}`, e);
     return { success: false, message: String((e as Error).message || 'internal_error') };
   } finally {
@@ -659,7 +812,11 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
     // before any manual retry (idempotency key) — a blind retry would double-pay.
     const msg = String((e as Error).message || '');
     try {
-      await db.query(`UPDATE deals SET status = $1, updated_at = now() WHERE id = $2 AND status = $3`, [fromStatus!, id, pendingStatus]);
+      await db.query(`UPDATE deals SET status = $1, updated_at = now() WHERE id = $2 AND status = $3`, [
+        fromStatus!,
+        id,
+        pendingStatus,
+      ]);
     } catch (rbErr) {
       logger.error(`buyerApproveReceipt rollback failed for #${id} — manual reconciliation required`, rbErr);
     }
@@ -669,51 +826,90 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
       await saveAdminAlert(
         'payout_failed',
         `Deal #${id} buyer-approve payout failed: ${msg} — ${plan!.principalHuman} to ${plan!.toAddress} (key ${idemKey}). ON-CHAIN TEKSHIRING: qayta yuborishdan oldin tekshiring.`,
-        { dealId: id, error: msg, to: plan!.toAddress, amount: plan!.principalHuman, idempotencyKey: idemKey }
+        { dealId: id, error: msg, to: plan!.toAddress, amount: plan!.principalHuman, idempotencyKey: idemKey },
       );
     } catch {}
-    await notifyAdminsHub(`Deal #${id} to'lov xatosi: ${msg} — ${plan!.principalHuman} manzil ${plan!.toAddress}.`, plan!.principalHuman, plan!.assetUpper);
-    return { success: false, message: msg.startsWith('payout_failed') ? msg : `payout_failed: to'lov yuborilmadi: ${msg}` };
+    await notifyAdminsHub(
+      `Deal #${id} to'lov xatosi: ${msg} — ${plan!.principalHuman} manzil ${plan!.toAddress}.`,
+      plan!.principalHuman,
+      plan!.assetUpper,
+    );
+    return {
+      success: false,
+      message: msg.startsWith('payout_failed') ? msg : `payout_failed: to'lov yuborilmadi: ${msg}`,
+    };
   }
 
   // ── Phase 3: finalize only if the row is still OUR pending attempt ──
   const upd = await db.query(
     `UPDATE deals SET status = $1, fee_payout_failed = $2, fee_payout_error = $3, updated_at = now(), resolved_at = now()
      WHERE id = $4 AND status = $5 AND payout_idempotency_key = $6 RETURNING id`,
-    [DEAL_STATUS.RELEASED, feeFailed, feeError, id, pendingStatus, idemKey]
+    [DEAL_STATUS.RELEASED, feeFailed, feeError, id, pendingStatus, idemKey],
   );
   if (upd.rowCount === 0) {
     const text = `Deal #${id} buyer-approve payout SENT (${plan!.principalHuman} ${plan!.assetUpper} to ${plan!.toAddress}, key ${idemKey}) but status is no longer ${pendingStatus} — human reconciliation required.`;
     logger.error(text);
     try {
       const { saveAdminAlert } = await import('../db/queries');
-      await saveAdminAlert('payout_finalize_conflict', text, { dealId: id, idempotencyKey: idemKey, to: plan!.toAddress, amount: plan!.principalHuman });
+      await saveAdminAlert('payout_finalize_conflict', text, {
+        dealId: id,
+        idempotencyKey: idemKey,
+        to: plan!.toAddress,
+        amount: plan!.principalHuman,
+      });
     } catch {}
     await notifyAdminsHub(text, plan!.principalHuman, plan!.assetUpper);
-    return { success: false, message: `concurrent_transition: payout sent but deal status changed during send (key ${idemKey})` };
+    return {
+      success: false,
+      message: `concurrent_transition: payout sent but deal status changed during send (key ${idemKey})`,
+    };
   }
   // Post-finalize side effects (best-effort)
   const done = plan!;
   let finalDeal: any = null;
-  try { finalDeal = await getDealById(id); } catch {}
+  try {
+    finalDeal = await getDealById(id);
+  } catch {}
   try {
     const { addDealMessage } = await import('./dealService');
-    await addDealMessage(id, 0, `Tizim: Yakunlandi (Deal #${id}) — ${done.principalHuman} ${done.assetUpper} sotuvchiga yuborildi${feeFailed ? ` (komissiya yuborilmadi — admin tekshiradi)` : ` (komissiya ${done.feeHuman} ${done.assetUpper})`}.`);
-  } catch (e) { logger.warn(`buyerApproveReceipt system message failed #${id}`, e); }
+    await addDealMessage(
+      id,
+      0,
+      `Tizim: Yakunlandi (Deal #${id}) — ${done.principalHuman} ${done.assetUpper} sotuvchiga yuborildi${feeFailed ? ` (komissiya yuborilmadi — admin tekshiradi)` : ` (komissiya ${done.feeHuman} ${done.assetUpper})`}.`,
+    );
+  } catch (e) {
+    logger.warn(`buyerApproveReceipt system message failed #${id}`, e);
+  }
   try {
     const buyerId = finalDeal ? Number(finalDeal.buyer_telegram_id) : buyerTelegramId;
-    if (buyerId) await notify.releasedToBuyer(buyerId, dealLike({ id, amount: done.amountStr, asset: done.assetUpper, terms: finalDeal?.terms }));
+    if (buyerId)
+      await notify.releasedToBuyer(
+        buyerId,
+        dealLike({ id, amount: done.amountStr, asset: done.assetUpper, terms: finalDeal?.terms }),
+      );
   } catch (e) {
     logger.warn(`releasedToBuyer notify failed for #${id}`, e);
   }
   try {
     const sellerId = finalDeal && finalDeal.seller_telegram_id != null ? Number(finalDeal.seller_telegram_id) : null;
-    if (sellerId) await notify.releasedToSeller(sellerId, dealLike({ id, amount: done.amountStr, asset: done.assetUpper, terms: finalDeal?.terms }), done.principalHuman);
+    if (sellerId)
+      await notify.releasedToSeller(
+        sellerId,
+        dealLike({ id, amount: done.amountStr, asset: done.assetUpper, terms: finalDeal?.terms }),
+        done.principalHuman,
+      );
   } catch (e) {
     logger.warn(`releasedToSeller notify failed for #${id}`, e);
   }
-  logger.info(`Deal #${id} RELEASED by buyer ${buyerTelegramId} approval (seller ${done.principalHuman}, fee ${done.feeHuman})`);
-  return { success: true, message: `Qabul qilindi — pul sotuvchiga chiqarildi (komissiya chegirilgan). Bitim yopildi.`, released: true, status: DEAL_STATUS.RELEASED };
+  logger.info(
+    `Deal #${id} RELEASED by buyer ${buyerTelegramId} approval (seller ${done.principalHuman}, fee ${done.feeHuman})`,
+  );
+  return {
+    success: true,
+    message: `Qabul qilindi — pul sotuvchiga chiqarildi (komissiya chegirilgan). Bitim yopildi.`,
+    released: true,
+    status: DEAL_STATUS.RELEASED,
+  };
 }
 
 // ── CHANNEL/GROUP custodial escrow (via @gramchioka) ──
@@ -729,147 +925,269 @@ function isChannelDeal(deal: any): boolean {
 async function ubotFetch(path: string, init?: RequestInit): Promise<any> {
   const base = (config as any).ubotUrl || process.env.UBOT_URL || 'http://ubot:3002';
   const key = (config as any).ubotApiKey || process.env.UBOT_API_KEY || '';
-  const headers: Record<string,string> = { 'Content-Type':'application/json' };
-  if (key) headers['x-api-key']=key;
-  const url = base.replace(/\/+$/,'') + path;
-  const res = await fetch(url, { ...init, headers:{ ...headers, ...(init?.headers as any||{}) } } as any);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (key) headers['x-api-key'] = key;
+  const url = base.replace(/\/+$/, '') + path;
+  const res = await fetch(url, { ...init, headers: { ...headers, ...((init?.headers as any) || {}) } } as any);
   const txt = await res.text();
-  let data:any = txt; try{ data=txt?JSON.parse(txt):null;}catch{} // best-effort: non-JSON upstream body surfaces as raw text in the error below.
+  let data: any = txt;
+  try {
+    data = txt ? JSON.parse(txt) : null;
+  } catch {} // best-effort: non-JSON upstream body surfaces as raw text in the error below.
   if (!res.ok) {
     const err: any = new Error(data?.error || txt || `ubot ${res.status}`);
-    err.status = res.status; err.body = data;
+    err.status = res.status;
+    err.body = data;
     if (data?.retryAfter) err.retryAfter = data.retryAfter;
     throw err;
   }
   return data;
 }
 
-export async function verifyChannelOwnershipForDeal(dealId: number | string, sellerTelegramId?: number | null): Promise<{ ok:boolean; verified:boolean; channelId?:string; title?:string; username?:string; members?:number; error?:string; }> {
-  const deal:any = await getDealById(dealId);
-  if (!deal) return { ok:false, verified:false, error:'deal_not_found' };
-  if (!isChannelDeal(deal)) return { ok:false, verified:false, error:'not_channel_deal' };
+export async function verifyChannelOwnershipForDeal(
+  dealId: number | string,
+  sellerTelegramId?: number | null,
+): Promise<{
+  ok: boolean;
+  verified: boolean;
+  channelId?: string;
+  title?: string;
+  username?: string;
+  members?: number;
+  error?: string;
+}> {
+  const deal: any = await getDealById(dealId);
+  if (!deal) return { ok: false, verified: false, error: 'deal_not_found' };
+  if (!isChannelDeal(deal)) return { ok: false, verified: false, error: 'not_channel_deal' };
   const rawUsername = deal.channel_username || deal.channelUsername;
-  if (!rawUsername) return { ok:false, verified:false, error:'channel_username_required' };
+  if (!rawUsername) return { ok: false, verified: false, error: 'channel_username_required' };
   const channelId = rawUsername as string;
   try {
-    const info: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}`, { method:'GET' });
-    const admins: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/admins`, { method:'GET' });
-    const creator = Array.isArray(admins) ? admins.find((a:any)=> a.isCreator) : null;
+    const info: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}`, { method: 'GET' });
+    const admins: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/admins`, { method: 'GET' });
+    const creator = Array.isArray(admins) ? admins.find((a: any) => a.isCreator) : null;
     const creatorId = creator ? Number(creator.id) : null;
     const expected = sellerTelegramId != null ? Number(sellerTelegramId) : Number(deal.seller_telegram_id);
     const verified = creatorId != null && expected != null && creatorId === expected;
-    const snapshot = { title: info.title, username: info.username, channelId: String(info.id), isChannel: info.isChannel, creatorId, verifiedAt: new Date().toISOString() };
+    const snapshot = {
+      title: info.title,
+      username: info.username,
+      channelId: String(info.id),
+      isChannel: info.isChannel,
+      creatorId,
+      verifiedAt: new Date().toISOString(),
+    };
     const { updateChannelVerification } = await import('./dealService');
-    await updateChannelVerification(Number(dealId), { channelId: String(info.id), channelTitle: String(info.title||''), channelSnapshot: snapshot as any, verified });
+    await updateChannelVerification(Number(dealId), {
+      channelId: String(info.id),
+      channelTitle: String(info.title || ''),
+      channelSnapshot: snapshot as any,
+      verified,
+    });
     try {
       const { addDealMessage } = await import('./dealService');
-      if (verified) await addDealMessage(Number(dealId), 0, `Tizim: Kanal ${rawUsername} tasdiqlandi — ega ${creatorId} sotuvchi ${expected} ga mos.`);
-      else await addDealMessage(Number(dealId), 0, `Tizim: Kanal ${rawUsername} mos kelmadi: yaratuvchi ${creatorId ?? "noma'lum"} va sotuvchi ${expected}. @gramchioka admin ekanini va sotuvchi yaratuvchi ekanini tekshiring.`);
+      if (verified)
+        await addDealMessage(
+          Number(dealId),
+          0,
+          `Tizim: Kanal ${rawUsername} tasdiqlandi — ega ${creatorId} sotuvchi ${expected} ga mos.`,
+        );
+      else
+        await addDealMessage(
+          Number(dealId),
+          0,
+          `Tizim: Kanal ${rawUsername} mos kelmadi: yaratuvchi ${creatorId ?? "noma'lum"} va sotuvchi ${expected}. @gramchioka admin ekanini va sotuvchi yaratuvchi ekanini tekshiring.`,
+        );
     } catch {}
-    return { ok:true, verified, channelId: String(info.id), title: info.title, username: info.username, error: verified ? undefined : 'owner_mismatch' };
-  } catch (e:any) {
-    const msg = String(e?.message||e);
+    return {
+      ok: true,
+      verified,
+      channelId: String(info.id),
+      title: info.title,
+      username: info.username,
+      error: verified ? undefined : 'owner_mismatch',
+    };
+  } catch (e: any) {
+    const msg = String(e?.message || e);
     if (msg.includes('FLOOD_WAIT') || msg.includes('429') || msg.includes('FloodWait')) {
-      return { ok:false, verified:false, error: msg };
+      return { ok: false, verified: false, error: msg };
     }
-    return { ok:false, verified:false, error: msg };
+    return { ok: false, verified: false, error: msg };
   }
 }
 
-export async function checkEscrowHolderOwnership(dealId: number | string): Promise<{ ok:boolean; isEscrowOwner:boolean; currentCreatorId?: number; error?:string }> {
-  const deal:any = await getDealById(dealId);
-  if (!deal) return { ok:false, isEscrowOwner:false, error:'deal_not_found' };
-  if (!isChannelDeal(deal)) return { ok:false, isEscrowOwner:false, error:'not_channel_deal' };
+export async function checkEscrowHolderOwnership(
+  dealId: number | string,
+): Promise<{ ok: boolean; isEscrowOwner: boolean; currentCreatorId?: number; error?: string }> {
+  const deal: any = await getDealById(dealId);
+  if (!deal) return { ok: false, isEscrowOwner: false, error: 'deal_not_found' };
+  if (!isChannelDeal(deal)) return { ok: false, isEscrowOwner: false, error: 'not_channel_deal' };
   const channelId = deal.channel_username || deal.channel_id;
-  if (!channelId) return { ok:false, isEscrowOwner:false, error:'channel_username_required' };
+  if (!channelId) return { ok: false, isEscrowOwner: false, error: 'channel_username_required' };
   try {
-    const admins: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/admins`, { method:'GET' });
-    const creator = Array.isArray(admins) ? admins.find((a:any)=> a.isCreator) : null;
+    const admins: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/admins`, { method: 'GET' });
+    const creator = Array.isArray(admins) ? admins.find((a: any) => a.isCreator) : null;
     const creatorId = creator ? Number(creator.id) : null;
     const isEscrowOwner = creatorId === ESCROW_HOLDER_ID;
     if (isEscrowOwner) {
       const { setTransferToEscrow } = await import('./dealService');
       await setTransferToEscrow(Number(dealId));
-      try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `Tizim: Escrow ${channelId} kanalni qabul qildi — ${ESCROW_HOLDER_USERNAME} endi ega.`);} catch {}
+      try {
+        const { addDealMessage } = await import('./dealService');
+        await addDealMessage(
+          Number(dealId),
+          0,
+          `Tizim: Escrow ${channelId} kanalni qabul qildi — ${ESCROW_HOLDER_USERNAME} endi ega.`,
+        );
+      } catch {}
     }
-    return { ok:true, isEscrowOwner, currentCreatorId: creatorId ?? undefined };
-  } catch (e:any) {
-    return { ok:false, isEscrowOwner:false, error: String(e?.message||e) };
+    return { ok: true, isEscrowOwner, currentCreatorId: creatorId ?? undefined };
+  } catch (e: any) {
+    return { ok: false, isEscrowOwner: false, error: String(e?.message || e) };
   }
 }
 
-export async function requestTransferToEscrow(dealId: number | string, sellerTelegramId: number): Promise<{ ok:boolean; message?:string; error?:string }> {
-  const deal:any = await getDealById(dealId);
-  if (!deal) return { ok:false, error:'deal_not_found' };
-  if (Number(deal.seller_telegram_id) !== Number(sellerTelegramId)) return { ok:false, error:'only_seller_can_transfer' };
-  if (String(deal.status) !== DEAL_STATUS.DEPOSIT_CONFIRMED && String(deal.status) !== DEAL_STATUS.AWAITING_DEPOSIT) return { ok:false, error:`invalid_status ${deal.status} need DEPOSIT_CONFIRMED` };
+export async function requestTransferToEscrow(
+  dealId: number | string,
+  sellerTelegramId: number,
+): Promise<{ ok: boolean; message?: string; error?: string }> {
+  const deal: any = await getDealById(dealId);
+  if (!deal) return { ok: false, error: 'deal_not_found' };
+  if (Number(deal.seller_telegram_id) !== Number(sellerTelegramId))
+    return { ok: false, error: 'only_seller_can_transfer' };
+  if (String(deal.status) !== DEAL_STATUS.DEPOSIT_CONFIRMED && String(deal.status) !== DEAL_STATUS.AWAITING_DEPOSIT)
+    return { ok: false, error: `invalid_status ${deal.status} need DEPOSIT_CONFIRMED` };
   const channelId = deal.channel_username || deal.channel_id;
   try {
     const { addDealMessage } = await import('./dealService');
-    await addDealMessage(Number(dealId), 0, `Tizim: Sotuvchi ${channelId} egaligini hozir ${ESCROW_HOLDER_USERNAME} ga o'tkazing. O'tkazgach "O'tkazdim" ni bosing.`);
+    await addDealMessage(
+      Number(dealId),
+      0,
+      `Tizim: Sotuvchi ${channelId} egaligini hozir ${ESCROW_HOLDER_USERNAME} ga o'tkazing. O'tkazgach "O'tkazdim" ni bosing.`,
+    );
     try {
-      await notify.adminDecisionToParty(Number(sellerTelegramId), dealLike({ id: Number(dealId), amount: String(deal.amount ?? ''), asset: String(deal.asset ?? 'TON'), terms: deal.terms }), `Kanal ${channelId} ni ${ESCROW_HOLDER_USERNAME} ga o'tkazing`);
+      await notify.adminDecisionToParty(
+        Number(sellerTelegramId),
+        dealLike({
+          id: Number(dealId),
+          amount: String(deal.amount ?? ''),
+          asset: String(deal.asset ?? 'TON'),
+          terms: deal.terms,
+        }),
+        `Kanal ${channelId} ni ${ESCROW_HOLDER_USERNAME} ga o'tkazing`,
+      );
     } catch {}
-    return { ok:true, message:'transfer_requested' };
-  } catch (e:any) { return { ok:false, error: String(e?.message||e)}; }
-}
-
-export async function confirmTransferToEscrow(sellerTelegramId: number, dealId: number | string): Promise<{ ok:boolean; verified?:boolean; message?:string; error?:string }> {
-  const res = await checkEscrowHolderOwnership(dealId);
-  if (!res.ok) return { ok:false, error: res.error };
-  if (!res.isEscrowOwner) return { ok:false, verified:false, error:`not_yet_transferred: current creator ${res.currentCreatorId} != escrow ${ESCROW_HOLDER_ID}` };
-  return { ok:true, verified:true, message:'escrow_received' };
-}
-
-export async function payoutSellerForChannel(dealId: number | string, sellerTelegramId?: number | null): Promise<{ success:boolean; message?:string; error?:string }> {
-  const deal:any = await getDealById(dealId);
-  if (!deal) return { success:false, error:'deal_not_found' };
-  if (!isChannelDeal(deal)) return { success:false, error:'not_channel_deal' };
-  if (!deal.transfer_to_escrow_at) return { success:false, error:'escrow_not_yet_received' };
-  if (String(deal.status) === DEAL_STATUS.RELEASED || String(deal.status) === DEAL_STATUS.REFUNDED) return { success:false, error:`already_${String(deal.status).toLowerCase()}` };
-  try {
-    await guardedTransition(Number(dealId), DEAL_STATUS.RELEASED, { amount: deal.amount, asset: deal.asset, terms: deal.terms });
-    try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `Tizim: Sotuvchiga to'lov yuborildi (${deal.channel_username}) — ${deal.amount} ${deal.asset} (komissiya chegirilgan).`);} catch {}
-    return { success:true, message:'payout_sent' };
-  } catch (e:any) {
-    return { success:false, error: String(e?.message||e) };
+    return { ok: true, message: 'transfer_requested' };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message || e) };
   }
 }
 
-export async function transferChannelToBuyer(dealId: number | string, newOwnerUsername: string, callerTelegramId?: number | null): Promise<{ ok:boolean; error?:string; detail?:string }> {
-  const deal:any = await getDealById(dealId);
-  if (!deal) return { ok:false, error:'deal_not_found' };
-  if (!isChannelDeal(deal)) return { ok:false, error:'not_channel_deal' };
-  if (String(deal.status) !== DEAL_STATUS.RELEASED) return { ok:false, error:`invalid_status ${deal.status} need RELEASED (seller already paid)` };
+export async function confirmTransferToEscrow(
+  _sellerTelegramId: number,
+  dealId: number | string,
+): Promise<{ ok: boolean; verified?: boolean; message?: string; error?: string }> {
+  const res = await checkEscrowHolderOwnership(dealId);
+  if (!res.ok) return { ok: false, error: res.error };
+  if (!res.isEscrowOwner)
+    return {
+      ok: false,
+      verified: false,
+      error: `not_yet_transferred: current creator ${res.currentCreatorId} != escrow ${ESCROW_HOLDER_ID}`,
+    };
+  return { ok: true, verified: true, message: 'escrow_received' };
+}
+
+export async function payoutSellerForChannel(
+  dealId: number | string,
+  _sellerTelegramId?: number | null,
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  const deal: any = await getDealById(dealId);
+  if (!deal) return { success: false, error: 'deal_not_found' };
+  if (!isChannelDeal(deal)) return { success: false, error: 'not_channel_deal' };
+  if (!deal.transfer_to_escrow_at) return { success: false, error: 'escrow_not_yet_received' };
+  if (String(deal.status) === DEAL_STATUS.RELEASED || String(deal.status) === DEAL_STATUS.REFUNDED)
+    return { success: false, error: `already_${String(deal.status).toLowerCase()}` };
+  try {
+    await guardedTransition(Number(dealId), DEAL_STATUS.RELEASED, {
+      amount: deal.amount,
+      asset: deal.asset,
+      terms: deal.terms,
+    });
+    try {
+      const { addDealMessage } = await import('./dealService');
+      await addDealMessage(
+        Number(dealId),
+        0,
+        `Tizim: Sotuvchiga to'lov yuborildi (${deal.channel_username}) — ${deal.amount} ${deal.asset} (komissiya chegirilgan).`,
+      );
+    } catch {}
+    return { success: true, message: 'payout_sent' };
+  } catch (e: any) {
+    return { success: false, error: String(e?.message || e) };
+  }
+}
+
+export async function transferChannelToBuyer(
+  dealId: number | string,
+  newOwnerUsername: string,
+  _callerTelegramId?: number | null,
+): Promise<{ ok: boolean; error?: string; detail?: string }> {
+  const deal: any = await getDealById(dealId);
+  if (!deal) return { ok: false, error: 'deal_not_found' };
+  if (!isChannelDeal(deal)) return { ok: false, error: 'not_channel_deal' };
+  if (String(deal.status) !== DEAL_STATUS.RELEASED)
+    return { ok: false, error: `invalid_status ${deal.status} need RELEASED (seller already paid)` };
   const channelId = deal.channel_username || deal.channel_id;
-  if (!channelId) return { ok:false, error:'channel_username_required' };
+  if (!channelId) return { ok: false, error: 'channel_username_required' };
   const raw = String(newOwnerUsername).trim().replace(/^@/, '');
-  if (!raw || !/^([A-Za-z0-9_]{4,32})$/.test(raw)) return { ok:false, error:'invalid_username' };
+  if (!raw || !/^([A-Za-z0-9_]{4,32})$/.test(raw)) return { ok: false, error: 'invalid_username' };
   const target = '@' + raw;
-  try { await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/invite`, { method:'POST', body: JSON.stringify({ userId: target })}); } catch {} // best-effort: invite is courtesy; takeover below enforces membership with an explicit user_not_participant error.
-  await new Promise(r=> setTimeout(r, 1200));
+  try {
+    await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/invite`, {
+      method: 'POST',
+      body: JSON.stringify({ userId: target }),
+    });
+  } catch {} // best-effort: invite is courtesy; takeover below enforces membership with an explicit user_not_participant error.
+  await new Promise((r) => setTimeout(r, 1200));
   try {
     const idemp = `channel-deal-${dealId}-${target}`;
-    const res: any = await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/takeover`, { method:'POST', body: JSON.stringify({ newOwnerId: target }), headers:{ 'x-idempotency-key': idemp }});
+    await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/takeover`, {
+      method: 'POST',
+      body: JSON.stringify({ newOwnerId: target }),
+      headers: { 'x-idempotency-key': idemp },
+    });
     const { setTransferToBuyer } = await import('./dealService');
     await setTransferToBuyer(Number(dealId), target);
-    try { const { addDealMessage } = await import('./dealService'); await addDealMessage(Number(dealId), 0, `Tizim: Kanal ${channelId} yangi ega ${target} ga o'tkazildi.`);} catch {}
-    return { ok:true };
-  } catch (e:any) {
-    const msg = String(e?.message||e);
-    if (msg.includes('USER_NOT_PARTICIPANT')) return { ok:false, error:'user_not_participant_try_invite', detail: msg };
-    if (msg.includes('FRESH_CHANGE_ADMINS_FORBIDDEN') || msg.includes('86400')) return { ok:false, error:'fresh_forbidden_wait_24h', detail: msg };
-    if (msg.includes('CHANNELS_TOO_MUCH')) return { ok:false, error:'channels_too_much', detail: msg };
-    if (msg.includes('not_admin') || msg.includes('CHAT_ADMIN_REQUIRED')) return { ok:false, error:'not_admin', detail: msg };
-    if (String(deal.deal_type).toUpperCase()==='GROUP') {
+    try {
+      const { addDealMessage } = await import('./dealService');
+      await addDealMessage(Number(dealId), 0, `Tizim: Kanal ${channelId} yangi ega ${target} ga o'tkazildi.`);
+    } catch {}
+    return { ok: true };
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    if (msg.includes('USER_NOT_PARTICIPANT'))
+      return { ok: false, error: 'user_not_participant_try_invite', detail: msg };
+    if (msg.includes('FRESH_CHANGE_ADMINS_FORBIDDEN') || msg.includes('86400'))
+      return { ok: false, error: 'fresh_forbidden_wait_24h', detail: msg };
+    if (msg.includes('CHANNELS_TOO_MUCH')) return { ok: false, error: 'channels_too_much', detail: msg };
+    if (msg.includes('not_admin') || msg.includes('CHAT_ADMIN_REQUIRED'))
+      return { ok: false, error: 'not_admin', detail: msg };
+    if (String(deal.deal_type).toUpperCase() === 'GROUP') {
       try {
         const idemp = `group-deal-${dealId}-${target}`;
-        await ubotFetch(`/group/${encodeURIComponent(String(channelId))}/takeover`, { method:'POST', body: JSON.stringify({ newOwnerId: target }), headers:{ 'x-idempotency-key': idemp }});
+        await ubotFetch(`/group/${encodeURIComponent(String(channelId))}/takeover`, {
+          method: 'POST',
+          body: JSON.stringify({ newOwnerId: target }),
+          headers: { 'x-idempotency-key': idemp },
+        });
         const { setTransferToBuyer } = await import('./dealService');
         await setTransferToBuyer(Number(dealId), target);
-        return { ok:true };
-      } catch (e2:any) { return { ok:false, error: String(e2?.message||e2) } }
+        return { ok: true };
+      } catch (e2: any) {
+        return { ok: false, error: String(e2?.message || e2) };
+      }
     }
-    return { ok:false, error: msg };
+    return { ok: false, error: msg };
   }
 }

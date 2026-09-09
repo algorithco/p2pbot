@@ -141,17 +141,17 @@ Minimum for off-chain: `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL` (backen
 
 ## Status & roadmap
 
-| Status | Item |
-|--------|------|
-| ✅ | Bot commands and admin flows |
-| ✅ | Deal lifecycle tracked off-chain (create → deposit → confirm → release/refund) |
-| ✅ | Telegram Mini App UI |
-| ✅ | One-time join links + per-deal chat |
-| ✅ | W5 signer microservice (`signer/`) — isolated `SIGNER_MNEMONIC` (24 words) |
-| ⚠️ | Compile the Tact contract and deploy it (see [contracts/README.md](contracts/README.md)) |
-| ⚠️ | Set `REQUIRE_ONCHAIN=true` once deployed to enforce on-chain mode |
-| ⚠️ | Fund the W5 deployer wallet (`SIGNER_MNEMONIC` in `signer/.env`, V5R1) with TON for gas |
-| ❌ | Jetton master verification pending (`USDT_JETTON_ADDRESS` not yet validated on-chain) |
+| Status | Item                                                                                     |
+| ------ | ---------------------------------------------------------------------------------------- |
+| ✅     | Bot commands and admin flows                                                             |
+| ✅     | Deal lifecycle tracked off-chain (create → deposit → confirm → release/refund)           |
+| ✅     | Telegram Mini App UI                                                                     |
+| ✅     | One-time join links + per-deal chat                                                      |
+| ✅     | W5 signer microservice (`signer/`) — isolated `SIGNER_MNEMONIC` (24 words)               |
+| ⚠️     | Compile the Tact contract and deploy it (see [contracts/README.md](contracts/README.md)) |
+| ⚠️     | Set `REQUIRE_ONCHAIN=true` once deployed to enforce on-chain mode                        |
+| ⚠️     | Fund the W5 deployer wallet (`SIGNER_MNEMONIC` in `signer/.env`, V5R1) with TON for gas  |
+| ❌     | Jetton master verification pending (`USDT_JETTON_ADDRESS` not yet validated on-chain)    |
 
 ## Security notes
 
@@ -175,4 +175,4 @@ Minimum for off-chain: `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL` (backen
 
 This is the strictest official OSI-approved license. It ensures anyone who runs a modified version over a network (e.g., as a Telegram bot / Mini App backend) must make the complete Corresponding Source available to all remote users via a network server at no charge (Section 13). Includes strong copyleft and explicit patent grant. Commercial use without source disclosure is not permitted — use the network clause to preserve user freedom for SaaS.
 
-*Other strict official alternatives:* `GPL-3.0` (copyleft without network clause) and `Apache-2.0` (permissive, patent grant, commercial-friendly). This project uses `AGPL-3.0` for maximum strictness.
+_Other strict official alternatives:_ `GPL-3.0` (copyleft without network clause) and `Apache-2.0` (permissive, patent grant, commercial-friendly). This project uses `AGPL-3.0` for maximum strictness.

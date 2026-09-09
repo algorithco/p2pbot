@@ -101,7 +101,10 @@ export const invalidateCache = invalidate;
  * Cached wrapper for client.getEntity.
  * Checks cache first; on miss uses withFloodWait(client.getEntity) then caches.
  */
-export async function cachedGetEntity(client: { getEntity: (id: string) => Promise<unknown> }, idString: string): Promise<unknown> {
+export async function cachedGetEntity(
+  client: { getEntity: (id: string) => Promise<unknown> },
+  idString: string,
+): Promise<unknown> {
   const key = `entity:${String(idString)}`;
   const cached = entityCache.get(key);
   if (cached !== undefined) {
@@ -123,7 +126,7 @@ export const getCachedEntity = cachedGetEntity;
  */
 export async function cachedGetInputEntity(
   client: { getInputEntity?: (id: string) => Promise<unknown>; getEntity: (id: string) => Promise<unknown> },
-  idString: string
+  idString: string,
 ): Promise<unknown> {
   const key = `inputEntity:${String(idString)}`;
   const cached = entityCache.get(key);
@@ -155,7 +158,9 @@ export async function cachedGetPassword(client: { invoke: (req: unknown) => Prom
   // Dynamic import to avoid hard dep on teleproto Api shape at top-level
   const { Api } = await import('teleproto');
   const res = await withFloodWait(() =>
-    client.invoke(new (Api as unknown as { account: { GetPassword: new () => unknown } }).account.GetPassword() as unknown as never)
+    client.invoke(
+      new (Api as unknown as { account: { GetPassword: new () => unknown } }).account.GetPassword() as unknown as never,
+    ),
   );
   passwordCache.set(key, res);
   return res;

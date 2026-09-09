@@ -8,7 +8,7 @@
  * Deployment body: the Deployable trait expects Deploy{queryId}, i.e.
  * op = 0x00000000 (u32) followed by queryId (u64).
  */
-import { Address, Cell, toNano } from '@ton/core';
+import { Address, Cell } from '@ton/core';
 import { config } from '../config';
 import { ESCROW_CODE_HEX, deployBody, Escrow } from '../contracts/wrappers/Escrow';
 import { computeJettonWalletAddress } from './jettonUtils';
@@ -29,7 +29,6 @@ export function parseDealAmount(amount: string | number, assetType: number): big
  * only the contract's own jetton wallet (release transfers the full jetton
  * amount to the seller; fee split is handled off-chain).
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deployEscrowContract(
   dealId: bigint,
   buyer: Address,
@@ -37,11 +36,13 @@ export async function deployEscrowContract(
   assetType: number,
   amount: bigint,
   deadline: number,
-  sellerJettonWallet?: Address,
-  feeJettonWallet?: Address,
+  _sellerJettonWallet?: Address,
+  _feeJettonWallet?: Address,
 ): Promise<string> {
   if (!config.signerUrl) {
-    throw new Error('deploy_not_configured: SIGNER_URL missing — set SIGNER_URL (e.g. http://signer:3001) and SIGNER_MNEMONIC in signer/.env');
+    throw new Error(
+      'deploy_not_configured: SIGNER_URL missing — set SIGNER_URL (e.g. http://signer:3001) and SIGNER_MNEMONIC in signer/.env',
+    );
   }
   const codeHex = config.escrowContractCodeHex || ESCROW_CODE_HEX;
   if (!codeHex) {
@@ -67,7 +68,9 @@ export async function deployEscrowContract(
   try {
     signerAddr = Address.parse(await getSignerAddress());
   } catch (e) {
-    throw new Error(`deploy_not_configured: signer unavailable (${String(e)}) — check signer service and SIGNER_API_KEY`);
+    throw new Error(
+      `deploy_not_configured: signer unavailable (${String(e)}) — check signer service and SIGNER_API_KEY`,
+    );
   }
 
   if (assetType === 1) {

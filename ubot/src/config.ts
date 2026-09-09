@@ -5,7 +5,7 @@ dotenv.config();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let zod: any = null;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   zod = require('zod');
 } catch {
   zod = null;
@@ -43,28 +43,21 @@ export const config = {
     24,
   ),
   globalRateMs: num(process.env.GLOBAL_RATE_MS as string | undefined, 1300),
-  cacheTtlSeconds: num(
-    (process.env.CACHE_TTL_S ?? process.env.CACHE_TTL_SECONDS) as string | undefined,
-    300,
-  ),
+  cacheTtlSeconds: num((process.env.CACHE_TTL_S ?? process.env.CACHE_TTL_SECONDS) as string | undefined, 300),
   deviceModel: str(process.env.DEVICE_MODEL, 'Pixel 7'),
   systemVersion: str(process.env.SYSTEM_VERSION, '14'),
   appVersion: str(process.env.APP_VERSION, '10.2.1'),
-  humanDelayMinMs: num(
-    (process.env.HUMAN_DELAY_MIN ?? process.env.HUMAN_DELAY_MIN_MS) as string | undefined,
-    800,
-  ),
-  humanDelayMaxMs: num(
-    (process.env.HUMAN_DELAY_MAX ?? process.env.HUMAN_DELAY_MAX_MS) as string | undefined,
-    2500,
-  ),
+  humanDelayMinMs: num((process.env.HUMAN_DELAY_MIN ?? process.env.HUMAN_DELAY_MIN_MS) as string | undefined, 800),
+  humanDelayMaxMs: num((process.env.HUMAN_DELAY_MAX ?? process.env.HUMAN_DELAY_MAX_MS) as string | undefined, 2500),
   floodThreshold: num(process.env.FLOOD_THRESHOLD as string | undefined, 60),
   maxPromotePerMin: num(process.env.MAX_PROMOTE_PER_MIN as string | undefined, 10),
   maxTransferPerMin: num(process.env.MAX_TRANSFER_PER_MIN as string | undefined, 2),
   proxyUrl: str(
-    (process.env.PROXY_URL ?? process.env.HTTP_PROXY ?? process.env.HTTPS_PROXY ?? process.env.http_proxy ?? process.env.https_proxy) as
-      | string
-      | undefined,
+    (process.env.PROXY_URL ??
+      process.env.HTTP_PROXY ??
+      process.env.HTTPS_PROXY ??
+      process.env.http_proxy ??
+      process.env.https_proxy) as string | undefined,
     '',
   ),
   warmupEnabled: str(process.env.WARMUP, 'true').toLowerCase() !== 'false',
@@ -150,7 +143,11 @@ export function validateConfig(): string[] {
     if (!Number.isInteger(config.port) || config.port < 1024 || config.port > 65535) {
       errs.push('PORT must be 1024-65535');
     }
-    if (!Number.isFinite(config.takeoverCooldownHours) || config.takeoverCooldownHours < 0 || config.takeoverCooldownHours > 720) {
+    if (
+      !Number.isFinite(config.takeoverCooldownHours) ||
+      config.takeoverCooldownHours < 0 ||
+      config.takeoverCooldownHours > 720
+    ) {
       errs.push('TAKEOVER_COOLDOWN_H must be 0-720 hours');
     }
     if (!Number.isFinite(config.globalRateMs) || config.globalRateMs < 100 || config.globalRateMs > 30000) {

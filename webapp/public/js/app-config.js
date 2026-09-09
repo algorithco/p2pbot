@@ -11,11 +11,12 @@
  * When you "deploy fully" (custom domain + HTTPS), switch this back to "" to use local manifest
  * served via https://your-domain/tonconnect-manifest.json
  */
-window.TONCONNECT_MANIFEST_URL = "https://raw.githubusercontent.com/Hamroqulovv/raw-ton-m/main/tonconnect-manifest.json";
+window.TONCONNECT_MANIFEST_URL =
+  'https://raw.githubusercontent.com/Hamroqulovv/raw-ton-m/main/tonconnect-manifest.json';
 // Alternative CDN (jsDelivr) — also works, better CORS/caching:
 // window.TONCONNECT_MANIFEST_URL = "https://cdn.jsdelivr.net/gh/Hamroqulovv/raw-ton-m@main/tonconnect-manifest.json";
 
 // TWA return URL — where wallet should return after approving in Telegram
 // For local dev, leave as undefined (SDK uses 'back'). For prod Mini App, set to https://t.me/<bot_username>/<app_shortname>
 // Known bot: @uzsavdochibot — adjust app shortname if different (check @BotFather -> /myapps)
-window.TONCONNECT_TWA_RETURN_URL = "https://t.me/uzsavdochibot/app";
+window.TONCONNECT_TWA_RETURN_URL = 'https://t.me/uzsavdochibot/app';

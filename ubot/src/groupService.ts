@@ -3,8 +3,6 @@ import { ensureClient, withFloodWait } from './client';
 import logger, { sanitizeLogValue } from './logger';
 import {
   promoteToAdmin,
-  demoteAdmin,
-  transferChannelOwnership,
   promoteToAdminWithEntities,
   transferChannelOwnershipWithEntities,
   demoteAdminWithEntities,
@@ -22,7 +20,10 @@ const migrating = new Map<string, Promise<Api.Channel>>();
 
 export async function isBasicGroup(groupId: string | number): Promise<boolean> {
   const client = await ensureClient();
-  const entity = (await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, String(groupId)) as unknown as { className: string });
+  const entity = (await cachedGetEntity(
+    client as unknown as { getEntity: (id: string) => Promise<unknown> },
+    String(groupId),
+  )) as unknown as { className: string };
   return entity.className === 'Chat';
 }
 
@@ -36,22 +37,28 @@ export async function migrateToSupergroup(groupId: string | number): Promise<Api
   const promise = (async (): Promise<Api.Channel> => {
     try {
       const client = await ensureClient();
-      const entity = (await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, String(groupId)) as unknown as Api.Chat & { id: unknown } & { className: string });
+      const entity = (await cachedGetEntity(
+        client as unknown as { getEntity: (id: string) => Promise<unknown> },
+        String(groupId),
+      )) as unknown as Api.Chat & { id: unknown } & { className: string };
       if ((entity as unknown as { className: string }).className !== 'Chat') {
         // Already migrated (Channel megagroup)
         return entity as unknown as Api.Channel;
       }
-      // @ts-ignore — teleproto MigrateChat chatId expects BigInteger, runtime accepts number
+      // teleproto MigrateChat chatId expects BigInteger; runtime accepts number.
       const res = (await withFloodWait(() =>
         client.invoke(
           new Api.messages.MigrateChat({
             chatId: (entity as unknown as { id: number }).id as unknown as any,
-          })
-        )
+          }),
+        ),
       )) as unknown as { updates: { chats: Api.Channel[] } };
       const migrated = res?.updates?.chats?.[0];
-      if (!migrated) throw new Error('migrate_failed: Telegram did not return migrated channel (already migrated or not admin)');
-      logger.info(`Migrated group ${sanitizeLogValue(groupId)} to supergroup ${sanitizeLogValue((migrated as unknown as { id: unknown }).id)}`);
+      if (!migrated)
+        throw new Error('migrate_failed: Telegram did not return migrated channel (already migrated or not admin)');
+      logger.info(
+        `Migrated group ${sanitizeLogValue(groupId)} to supergroup ${sanitizeLogValue((migrated as unknown as { id: unknown }).id)}`,
+      );
       // Invalidate old Chat cache and cache new supergroup under same key for future ensureSupergroup fast path
       entityCache.delete(`entity:${key}`);
       // Also cache migrated channel by its new id if available
@@ -64,11 +71,18 @@ export async function migrateToSupergroup(groupId: string | number): Promise<Api
       return migrated;
     } catch (e) {
       const msg = String((e as Error).message || e);
-      if (msg.includes('CHAT_NOT_MODIFIED') || msg.includes('already a supergroup') || msg.includes('CHAT_ADMIN_REQUIRED')) {
+      if (
+        msg.includes('CHAT_NOT_MODIFIED') ||
+        msg.includes('already a supergroup') ||
+        msg.includes('CHAT_ADMIN_REQUIRED')
+      ) {
         // Fetch again — it is already a supergroup (invalidate cache to force fresh fetch)
         entityCache.delete(`entity:${key}`);
         const client = await ensureClient();
-        const ent = (await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, String(groupId)) as unknown as Api.Channel);
+        const ent = (await cachedGetEntity(
+          client as unknown as { getEntity: (id: string) => Promise<unknown> },
+          String(groupId),
+        )) as unknown as Api.Channel;
         return ent;
       }
       if (msg.includes('CHANNELS_TOO_MUCH')) {
@@ -111,17 +125,18 @@ async function ensureSupergroup(groupId: string | number): Promise<Api.Channel> 
     const promise = (async (): Promise<Api.Channel> => {
       try {
         const c = await ensureClient();
-        // @ts-ignore
         const res = (await withFloodWait(() =>
           c.invoke(
             new Api.messages.MigrateChat({
               chatId: (chatEntity as unknown as { id: number }).id as unknown as any,
-            })
-          )
+            }),
+          ),
         )) as unknown as { updates: { chats: Api.Channel[] } };
         const migrated = res?.updates?.chats?.[0];
         if (!migrated) throw new Error('migrate_failed: Telegram did not return migrated channel');
-        logger.info(`Migrated group ${sanitizeLogValue(groupId)} to supergroup ${sanitizeLogValue((migrated as unknown as { id: unknown }).id)}`);
+        logger.info(
+          `Migrated group ${sanitizeLogValue(groupId)} to supergroup ${sanitizeLogValue((migrated as unknown as { id: unknown }).id)}`,
+        );
         entityCache.delete(`entity:${key}`);
         entityCache.set(`entity:${key}`, migrated);
         try {
@@ -131,10 +146,17 @@ async function ensureSupergroup(groupId: string | number): Promise<Api.Channel> 
         return migrated;
       } catch (e) {
         const msg = String((e as Error).message || e);
-        if (msg.includes('CHAT_NOT_MODIFIED') || msg.includes('already a supergroup') || msg.includes('CHAT_ADMIN_REQUIRED')) {
+        if (
+          msg.includes('CHAT_NOT_MODIFIED') ||
+          msg.includes('already a supergroup') ||
+          msg.includes('CHAT_ADMIN_REQUIRED')
+        ) {
           entityCache.delete(`entity:${key}`);
           const cl = await ensureClient();
-          const ent = (await cachedGetEntity(cl as unknown as { getEntity: (id: string) => Promise<unknown> }, key) as unknown as Api.Channel);
+          const ent = (await cachedGetEntity(
+            cl as unknown as { getEntity: (id: string) => Promise<unknown> },
+            key,
+          )) as unknown as Api.Channel;
           return ent;
         }
         if (msg.includes('CHANNELS_TOO_MUCH')) {
@@ -157,14 +179,17 @@ export async function promoteGroupAdmin(
   groupId: string | number,
   userId: string | number,
   rights: Parameters<typeof promoteToAdmin>[2] = {},
-  rank = 'Admin'
+  rank = 'Admin',
 ): Promise<void> {
   if (!userId) throw new Error('userId required');
   const supergroup = await ensureSupergroup(groupId);
   const client = await ensureClient();
   let userEntity: unknown;
   try {
-    userEntity = await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, String(userId));
+    userEntity = await cachedGetEntity(
+      client as unknown as { getEntity: (id: string) => Promise<unknown> },
+      String(userId),
+    );
   } catch (e) {
     const msg = String((e as Error).message || e);
     if (msg.includes('Could not find') || msg.includes('No entity') || msg.includes('USER_ID_INVALID')) {
@@ -179,14 +204,17 @@ export async function promoteGroupAdmin(
 export async function transferGroupOwnership(
   groupId: string | number,
   newOwnerId: string | number,
-  password?: string
+  password?: string,
 ): Promise<void> {
   if (!newOwnerId) throw new Error('newOwnerId required');
   const supergroup = await ensureSupergroup(groupId);
   const client = await ensureClient();
   let newOwnerEntity: unknown;
   try {
-    newOwnerEntity = await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, String(newOwnerId));
+    newOwnerEntity = await cachedGetEntity(
+      client as unknown as { getEntity: (id: string) => Promise<unknown> },
+      String(newOwnerId),
+    );
   } catch (e) {
     throw new Error(`new_owner_not_found: ${newOwnerId} — ${(e as Error).message}`);
   }
@@ -199,7 +227,10 @@ export async function demoteGroupAdmin(groupId: string | number, userId: string 
   const client = await ensureClient();
   let userEntity: unknown;
   try {
-    userEntity = await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, String(userId));
+    userEntity = await cachedGetEntity(
+      client as unknown as { getEntity: (id: string) => Promise<unknown> },
+      String(userId),
+    );
   } catch (e) {
     throw new Error(`user_not_found: ${userId} — ${(e as Error).message}`);
   }
@@ -224,8 +255,8 @@ export async function addGroupMember(groupId: string | number, userId: string | 
         new Api.channels.InviteToChannel({
           channel: group as unknown as Api.InputChannel,
           users: [user as unknown as Api.InputUser],
-        })
-      )
+        }),
+      ),
     );
   } catch (e) {
     const msg = String((e as Error).message || e);
@@ -233,10 +264,13 @@ export async function addGroupMember(groupId: string | number, userId: string | 
       logger.info(`User ${sanitizeLogValue(userId)} already participant in ${sanitizeLogValue(groupId)}`);
       return;
     }
-    if (msg.includes('USER_NOT_MUTUAL_CONTACT')) throw new Error(`user_not_mutual: ${userId} — not mutual contact or privacy restricted`);
-    if (msg.includes('USER_PRIVACY_RESTRICTED')) throw new Error(`privacy_restricted: ${userId} — privacy settings block invite`);
+    if (msg.includes('USER_NOT_MUTUAL_CONTACT'))
+      throw new Error(`user_not_mutual: ${userId} — not mutual contact or privacy restricted`);
+    if (msg.includes('USER_PRIVACY_RESTRICTED'))
+      throw new Error(`privacy_restricted: ${userId} — privacy settings block invite`);
     if (msg.includes('USERS_TOO_MUCH')) throw new Error('group_full: too many participants');
-    if (msg.includes('INVITE_REQUEST_SENT')) throw new Error('invite_request_sent: join request already pending (group requires approval)');
+    if (msg.includes('INVITE_REQUEST_SENT'))
+      throw new Error('invite_request_sent: join request already pending (group requires approval)');
     throw e;
   }
   logger.info(`Invited ${sanitizeLogValue(userId)} to group ${sanitizeLogValue(groupId)}`);

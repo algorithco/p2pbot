@@ -3,7 +3,11 @@
 // Every helper no-ops gracefully under prefers-reduced-motion.
 
 export function prefersReducedMotion(): boolean {
-  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
 }
 
 const EASE_OUT: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -11,12 +15,19 @@ const EASE_OUT: [number, number, number, number] = [0.16, 1, 0.3, 1];
 /** Fade + rise-in a single element. */
 export function fadeUp(el: HTMLElement, opts: { dur?: number; delay?: number; y?: number } = {}) {
   if (prefersReducedMotion() || !el) return;
-  import('motion/mini').then(({ animate }) => {
-    animate(el,
-      { opacity: [0, 1], transform: [`translateY(${opts.y ?? 12}px)`, 'translateY(0px)'] },
-      { duration: opts.dur ?? 0.32, delay: opts.delay ?? 0, ease: EASE_OUT },
-    );
-  }).catch(() => { try { el.style.opacity = '1'; } catch {} });
+  import('motion/mini')
+    .then(({ animate }) => {
+      animate(
+        el,
+        { opacity: [0, 1], transform: [`translateY(${opts.y ?? 12}px)`, 'translateY(0px)'] },
+        { duration: opts.dur ?? 0.32, delay: opts.delay ?? 0, ease: EASE_OUT },
+      );
+    })
+    .catch(() => {
+      try {
+        el.style.opacity = '1';
+      } catch {}
+    });
 }
 
 /** Stagger a list of elements in (deals, requests, trades…). */
@@ -26,17 +37,30 @@ export function staggerIn(
 ) {
   const list = Array.from(els as ArrayLike<HTMLElement>).filter(Boolean);
   if (prefersReducedMotion() || !list.length) return;
-  import('motion/mini').then(({ animate }) => {
-    const gap = (opts.gap ?? 0.05) * 1000; // ms between items
-    list.forEach((el, i) => {
-      try {
-        animate(el,
-          { opacity: [0, 1], transform: [`translateY(${opts.y ?? 14}px)`, 'translateY(0px)'] },
-          { duration: opts.dur ?? 0.34, delay: (i * gap) / 1000, ease: EASE_OUT },
-        );
-      } catch { try { el.style.opacity = '1'; } catch {} }
+  import('motion/mini')
+    .then(({ animate }) => {
+      const gap = (opts.gap ?? 0.05) * 1000; // ms between items
+      list.forEach((el, i) => {
+        try {
+          animate(
+            el,
+            { opacity: [0, 1], transform: [`translateY(${opts.y ?? 14}px)`, 'translateY(0px)'] },
+            { duration: opts.dur ?? 0.34, delay: (i * gap) / 1000, ease: EASE_OUT },
+          );
+        } catch {
+          try {
+            el.style.opacity = '1';
+          } catch {}
+        }
+      });
+    })
+    .catch(() => {
+      list.forEach((el) => {
+        try {
+          el.style.opacity = '1';
+        } catch {}
+      });
     });
-  }).catch(() => { list.forEach(el => { try { el.style.opacity = '1'; } catch {} }); });
 }
 
 /** Animated number count-up (stats, balances, amounts). */
@@ -52,7 +76,10 @@ export function countUp(
     return (opts.prefix || '') + s + (opts.suffix || '');
   };
   const target = Number(to) || 0;
-  if (prefersReducedMotion()) { el.textContent = fmt(target); return; }
+  if (prefersReducedMotion()) {
+    el.textContent = fmt(target);
+    return;
+  }
   const dur = (opts.dur ?? 0.7) * 1000;
   const t0 = performance.now();
   function tick(now: number) {
@@ -71,24 +98,31 @@ export function shake(el: HTMLElement) {
   // restart animation
   void (el as any).offsetWidth;
   el.classList.add('shake');
-  const off = () => { el.classList.remove('shake'); el.removeEventListener('animationend', off); };
+  const off = () => {
+    el.classList.remove('shake');
+    el.removeEventListener('animationend', off);
+  };
   el.addEventListener('animationend', off);
 }
 
 /** Success confetti burst (lazy-loads canvas-confetti). */
 export function confetti(opts: { particleCount?: number; spread?: number; origin?: { x?: number; y?: number } } = {}) {
   if (prefersReducedMotion()) return;
-  import('canvas-confetti').then(({ default: confettiFn }) => {
-    confettiFn({
-      particleCount: opts.particleCount ?? 90,
-      spread: opts.spread ?? 72,
-      startVelocity: 38,
-      origin: opts.origin ?? { y: 0.68 },
-      colors: ['#3b82f6', '#34d399', '#fbbf24', '#8b5cf6', '#ffffff'],
-      disableForReducedMotion: true,
-      zIndex: 300,
+  import('canvas-confetti')
+    .then(({ default: confettiFn }) => {
+      confettiFn({
+        particleCount: opts.particleCount ?? 90,
+        spread: opts.spread ?? 72,
+        startVelocity: 38,
+        origin: opts.origin ?? { y: 0.68 },
+        colors: ['#3b82f6', '#34d399', '#fbbf24', '#8b5cf6', '#ffffff'],
+        disableForReducedMotion: true,
+        zIndex: 300,
+      });
+    })
+    .catch(() => {
+      /* cosmetic only */
     });
-  }).catch(() => { /* cosmetic only */ });
 }
 
 /** FLIP helper: animate `fromEl` rect → `toEl` rect (shared-element feel). */
@@ -100,15 +134,24 @@ export function flip(fromEl: HTMLElement, toEl: HTMLElement, opts: { dur?: numbe
   const dy = a.top - b.top;
   const s = Math.max(0.5, Math.min(1.4, a.width / Math.max(1, b.width)));
   if (!isFinite(dx) || !isFinite(dy)) return;
-  import('motion/mini').then(({ animate }) => {
-    animate(toEl,
-      { transform: [`translate(${dx}px, ${dy}px) scale(${s})`, 'translate(0px, 0px) scale(1)'] },
-      { duration: opts.dur ?? 0.4, ease: EASE_OUT },
-    );
-  }).catch(() => {});
+  import('motion/mini')
+    .then(({ animate }) => {
+      animate(
+        toEl,
+        { transform: [`translate(${dx}px, ${dy}px) scale(${s})`, 'translate(0px, 0px) scale(1)'] },
+        { duration: opts.dur ?? 0.4, ease: EASE_OUT },
+      );
+    })
+    .catch(() => {});
 }
 
 export const FX = {
-  prefersReducedMotion, fadeUp, staggerIn, countUp, shake, confetti, flip,
+  prefersReducedMotion,
+  fadeUp,
+  staggerIn,
+  countUp,
+  shake,
+  confetti,
+  flip,
 };
 export default FX;

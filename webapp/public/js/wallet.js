@@ -7,7 +7,12 @@
 
   function getTonConnectClass() {
     // SDK v2.4.4 UMD exposes TON_CONNECT_UI.TonConnectUI, some builds also TonConnectUI
-    return window.TonConnectUI || (window.TON_CONNECT_UI && window.TON_CONNECT_UI.TonConnectUI) || window.TON_CONNECT_UI || null;
+    return (
+      window.TonConnectUI ||
+      (window.TON_CONNECT_UI && window.TON_CONNECT_UI.TonConnectUI) ||
+      window.TON_CONNECT_UI ||
+      null
+    );
   }
 
   var fallbackInjected = false;
@@ -18,11 +23,17 @@
       var s = document.createElement('script');
       s.src = 'https://cdn.jsdelivr.net/npm/@tonconnect/ui@2/dist/tonconnect-ui.min.js';
       s.async = false;
-      s.onload = function () { console.log('[Wallet] fallback CDN loaded'); };
-      s.onerror = function () { console.warn('[Wallet] fallback CDN failed'); };
+      s.onload = function () {
+        console.log('[Wallet] fallback CDN loaded');
+      };
+      s.onerror = function () {
+        console.warn('[Wallet] fallback CDN failed');
+      };
       document.head.appendChild(s);
       console.log('[Wallet] injected fallback CDN');
-    } catch (e) { console.warn('[Wallet] fallback inject error', e); }
+    } catch (e) {
+      console.warn('[Wallet] fallback inject error', e);
+    }
     // Second fallback: unpkg
     setTimeout(function () {
       if (!getTonConnectClass()) {
@@ -43,7 +54,9 @@
       if (cls) return resolve(cls);
       var started = Date.now();
       var timeout = timeoutMs || 15000;
-      setTimeout(function () { if (!getTonConnectClass()) injectFallbackSdk(); }, 1500);
+      setTimeout(function () {
+        if (!getTonConnectClass()) injectFallbackSdk();
+      }, 1500);
       (function poll() {
         var c = getTonConnectClass();
         if (c) {
@@ -51,7 +64,14 @@
           return resolve(c);
         }
         if (Date.now() - started > timeout) {
-          console.error('[Wallet] SDK not loaded after ' + timeout + 'ms. window.TonConnectUI=' + !!window.TonConnectUI + ' window.TON_CONNECT_UI=' + !!window.TON_CONNECT_UI);
+          console.error(
+            '[Wallet] SDK not loaded after ' +
+              timeout +
+              'ms. window.TonConnectUI=' +
+              !!window.TonConnectUI +
+              ' window.TON_CONNECT_UI=' +
+              !!window.TON_CONNECT_UI,
+          );
           return reject(new Error('wallet_sdk_unavailable'));
         }
         setTimeout(poll, 150);
@@ -60,8 +80,8 @@
   }
 
   function getManifestUrl() {
-    var cfg = window.TONCONNECT_MANIFEST_URL || (window.APP_CONFIG && window.APP_CONFIG.manifestUrl) || "";
-    if (typeof cfg === "string" && cfg.trim() && cfg.indexOf("YOUR_USERNAME") === -1) {
+    var cfg = window.TONCONNECT_MANIFEST_URL || (window.APP_CONFIG && window.APP_CONFIG.manifestUrl) || '';
+    if (typeof cfg === 'string' && cfg.trim() && cfg.indexOf('YOUR_USERNAME') === -1) {
       return cfg.trim();
     }
     return location.origin + '/tonconnect-manifest.json';
@@ -69,14 +89,14 @@
 
   function getTwaReturnUrl() {
     // 1) Explicit from app-config.js
-    var cfg = window.TONCONNECT_TWA_RETURN_URL || (window.APP_CONFIG && window.APP_CONFIG.twaReturnUrl) || "";
-    if (typeof cfg === "string" && cfg.trim() && cfg.indexOf("YOUR_") === -1) return cfg.trim();
+    var cfg = window.TONCONNECT_TWA_RETURN_URL || (window.APP_CONFIG && window.APP_CONFIG.twaReturnUrl) || '';
+    if (typeof cfg === 'string' && cfg.trim() && cfg.indexOf('YOUR_') === -1) return cfg.trim();
     // 2) Try to derive from Telegram WebApp
     try {
       if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
         // Use bot username if known, else current origin
         // For uzsavdochibot, the Mini App short name is likely 'app' — fallback to t.me link
-        var bot = (window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) ? null : null;
+        var bot = window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user ? null : null;
         // Default to t.me link for this bot (known from logs: @uzsavdochibot)
         return 'https://t.me/uzsavdochibot/app';
       }
@@ -97,30 +117,41 @@
 
   function ensure() {
     if (restorePromise) return restorePromise;
-    restorePromise = loadSdk().then(function (TC) {
-      if (!tc) {
-        var opts = { manifestUrl: getManifestUrl() };
-        var twa = getTwaReturnUrl();
-        if (twa) opts.twaReturnUrl = twa;
-        // Optional: set returnStrategy to back for better UX
-        // opts.actionsConfiguration = { twaReturnUrl: twa }
-        try {
-          tc = new TC(opts);
-          console.log('[Wallet] TonConnectUI created with manifest:', opts.manifestUrl, 'twaReturnUrl:', twa || '(default)');
-          // Eager restore — some wallets need explicit restore
-          if (tc.restoreConnection) {
-            try { tc.restoreConnection(); } catch (e) { console.warn('[Wallet] restoreConnection failed', e); }
+    restorePromise = loadSdk()
+      .then(function (TC) {
+        if (!tc) {
+          var opts = { manifestUrl: getManifestUrl() };
+          var twa = getTwaReturnUrl();
+          if (twa) opts.twaReturnUrl = twa;
+          // Optional: set returnStrategy to back for better UX
+          // opts.actionsConfiguration = { twaReturnUrl: twa }
+          try {
+            tc = new TC(opts);
+            console.log(
+              '[Wallet] TonConnectUI created with manifest:',
+              opts.manifestUrl,
+              'twaReturnUrl:',
+              twa || '(default)',
+            );
+            // Eager restore — some wallets need explicit restore
+            if (tc.restoreConnection) {
+              try {
+                tc.restoreConnection();
+              } catch (e) {
+                console.warn('[Wallet] restoreConnection failed', e);
+              }
+            }
+          } catch (e) {
+            console.error('[Wallet] TonConnectUI creation failed', e);
+            throw e;
           }
-        } catch (e) {
-          console.error('[Wallet] TonConnectUI creation failed', e);
-          throw e;
         }
-      }
-      return tc;
-    }).catch(function (e) {
-      console.error('[Wallet] ensure failed', e);
-      throw e;
-    });
+        return tc;
+      })
+      .catch(function (e) {
+        console.error('[Wallet] ensure failed', e);
+        throw e;
+      });
     return restorePromise;
   }
 
@@ -131,12 +162,18 @@
       ensure().catch(function () {});
     } else {
       // Wait for SDK to load, then ensure
-      loadSdk(8000).then(function () { return ensure(); }).catch(function () {});
+      loadSdk(8000)
+        .then(function () {
+          return ensure();
+        })
+        .catch(function () {});
     }
   }, 300);
 
   window.Wallet = {
-    available: function () { return !!getTonConnectClass(); },
+    available: function () {
+      return !!getTonConnectClass();
+    },
 
     whenReady: ensure,
 
@@ -171,12 +208,18 @@
       return acc && acc.chain != null ? acc.chain : null;
     },
 
-    walletName: function () { return (tc && tc.wallet) ? (tc.wallet.name || tc.wallet.appName || '') : ''; },
+    walletName: function () {
+      return tc && tc.wallet ? tc.wallet.name || tc.wallet.appName || '' : '';
+    },
 
-    walletInfo: function () { return tc ? tc.wallet : null; },
+    walletInfo: function () {
+      return tc ? tc.wallet : null;
+    },
 
     connect: function () {
-      return ensure().then(function (w) { return w.connectWallet(); });
+      return ensure().then(function (w) {
+        return w.connectWallet();
+      });
     },
 
     disconnect: function () {
@@ -193,30 +236,40 @@
       return ensure().then(function (w) {
         return w.sendTransaction({
           validUntil: Math.floor(Date.now() / 1000) + 600,
-          messages: messages
+          messages: messages,
         });
       });
     },
 
     onStatus: function (cb) {
-      ensure().then(function (w) {
-        // Fire immediately with current state
-        try {
-          var cur = getAccount();
-          cb(cur);
-        } catch (e) { console.warn('[Wallet] onStatus immediate cb failed', e); }
-        var unsub = w.onStatusChange(function (wallet) {
-          var acc = wallet && wallet.account ? wallet.account : (wallet && wallet.account ? wallet.account : null);
-          // wallet param is the new wallet object; also check tc.account
-          var effective = acc || getAccount();
-          try { cb(effective); } catch (e) { console.warn('[Wallet] onStatus cb failed', e); }
+      ensure()
+        .then(function (w) {
+          // Fire immediately with current state
+          try {
+            var cur = getAccount();
+            cb(cur);
+          } catch (e) {
+            console.warn('[Wallet] onStatus immediate cb failed', e);
+          }
+          var unsub = w.onStatusChange(function (wallet) {
+            var acc = wallet && wallet.account ? wallet.account : wallet && wallet.account ? wallet.account : null;
+            // wallet param is the new wallet object; also check tc.account
+            var effective = acc || getAccount();
+            try {
+              cb(effective);
+            } catch (e) {
+              console.warn('[Wallet] onStatus cb failed', e);
+            }
+          });
+          // Allow caller to unsubscribe if needed — not used currently but return for completeness
+          return unsub;
+        })
+        .catch(function (e) {
+          console.warn('[Wallet] onStatus ensure failed', e);
+          try {
+            cb(null);
+          } catch (e2) {}
         });
-        // Allow caller to unsubscribe if needed — not used currently but return for completeness
-        return unsub;
-      }).catch(function (e) {
-        console.warn('[Wallet] onStatus ensure failed', e);
-        try { cb(null); } catch (e2) {}
-      });
     },
 
     // Fetch TON balance via backend proxy /api/balance/:address
@@ -233,8 +286,11 @@
       }
       // Fallback direct fetch
       var url = '/api/balance/' + encodeURIComponent(qAddr);
-      return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function (r) {
-        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || 'balance_fetch_failed'); });
+      return fetch(url, { headers: { Accept: 'application/json' } }).then(function (r) {
+        if (!r.ok)
+          return r.json().then(function (j) {
+            throw new Error(j.error || 'balance_fetch_failed');
+          });
         return r.json();
       });
     },
@@ -257,18 +313,21 @@
       if (c.length > 120) return Promise.reject(new Error('memo_too_long'));
       // Try backend encoder first (uses @ton/core exactly)
       var url = '/api/ton/payload?comment=' + encodeURIComponent(c);
-      return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function (r) {
-        if (!r.ok) throw new Error('payload_encode_failed');
-        return r.json();
-      }).then(function (j) {
-        if (j && j.payload) return j.payload;
-        throw new Error('payload_encode_failed');
-      }).catch(function (e) {
-        console.warn('[Wallet] backend payload failed, fallback to local encode', e);
-        // Fallback: local minimal encoding (op 0 + string) via TextEncoder + base64 of raw bits is NOT valid BOC
-        // So we reject—caller must handle
-        throw e;
-      });
+      return fetch(url, { headers: { Accept: 'application/json' } })
+        .then(function (r) {
+          if (!r.ok) throw new Error('payload_encode_failed');
+          return r.json();
+        })
+        .then(function (j) {
+          if (j && j.payload) return j.payload;
+          throw new Error('payload_encode_failed');
+        })
+        .catch(function (e) {
+          console.warn('[Wallet] backend payload failed, fallback to local encode', e);
+          // Fallback: local minimal encoding (op 0 + string) via TextEncoder + base64 of raw bits is NOT valid BOC
+          // So we reject—caller must handle
+          throw e;
+        });
     },
 
     /** Send `amountTon` native TON to `to` with mandatory memo. Resolves {boc} after in-wallet approval. */
@@ -277,14 +336,13 @@
       return ensure().then(function (w) {
         var amt = Number(amountTon);
         if (!isFinite(amt) || amt <= 0) return Promise.reject(new Error('invalid_amount'));
-        if (!comment || !String(comment).trim()) return Promise.reject(new Error('memo_required: comment escrow# mandatory'));
+        if (!comment || !String(comment).trim())
+          return Promise.reject(new Error('memo_required: comment escrow# mandatory'));
         var nano = String(Math.round(amt * 1e9));
         return self.commentPayload(comment).then(function (payload) {
           return w.sendTransaction({
             validUntil: Math.floor(Date.now() / 1000) + 600,
-            messages: [
-              { address: to, amount: nano, payload: payload }
-            ]
+            messages: [{ address: to, amount: nano, payload: payload }],
           });
         });
       });
@@ -302,26 +360,32 @@
         var q = '/api/ton/payload?comment=' + encodeURIComponent(opts.forwardComment);
         // The generic payload is just comment; for Jetton the full transfer is built backend-side if needed
         // For now, request deal-specific payload which includes jettonPayload
-        return fetch(q, { headers: { 'Accept': 'application/json' } }).then(function (r) {
-          if (!r.ok) throw new Error('jetton_payload_failed');
-          return r.json();
-        }).then(function (j) {
-          // Caller should have fetched deal payload that contains jettonPayload; if not, use comment payload as forward
-          // Here we just send TON with comment as fallback—real Jetton flow should use jetton wallet address
-          // To keep memo, we send via TON with comment; proper jetton path requires wallet's jetton wallet
-          return w.sendTransaction({
-            validUntil: Math.floor(Date.now() / 1000) + 600,
-            messages: [
-              { address: opts.to, amount: String(Math.round(Number(opts.amount) * 1e6)), payload: j.payload }
-            ]
+        return fetch(q, { headers: { Accept: 'application/json' } })
+          .then(function (r) {
+            if (!r.ok) throw new Error('jetton_payload_failed');
+            return r.json();
+          })
+          .then(function (j) {
+            // Caller should have fetched deal payload that contains jettonPayload; if not, use comment payload as forward
+            // Here we just send TON with comment as fallback—real Jetton flow should use jetton wallet address
+            // To keep memo, we send via TON with comment; proper jetton path requires wallet's jetton wallet
+            return w.sendTransaction({
+              validUntil: Math.floor(Date.now() / 1000) + 600,
+              messages: [
+                { address: opts.to, amount: String(Math.round(Number(opts.amount) * 1e6)), payload: j.payload },
+              ],
+            });
           });
-        });
       });
-    }
+    },
   };
 
   // Internal balance cache for UI polling
   var _balanceCache = null;
-  window.Wallet._getBalanceCache = function () { return _balanceCache; };
-  window.Wallet._setBalanceCache = function (v) { _balanceCache = v; };
+  window.Wallet._getBalanceCache = function () {
+    return _balanceCache;
+  };
+  window.Wallet._setBalanceCache = function (v) {
+    _balanceCache = v;
+  };
 })();

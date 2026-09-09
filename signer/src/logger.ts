@@ -3,12 +3,16 @@ import winston from 'winston';
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
-  transports: [new winston.transports.Console({ format: winston.format.combine(winston.format.colorize(), winston.format.simple()) })],
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(winston.format.colorize(), winston.format.simple()),
+    }),
+  ],
 });
 
-// Redact mnemonic from any log meta
-const origLog = logger.log.bind(logger);
-function redact(obj: unknown): unknown {
+// Redact mnemonic / secret keys from log meta. NOTE: winston does not call this
+// automatically — pass meta through `redact()` at sensitive call sites.
+export function redact(obj: unknown): unknown {
   if (typeof obj === 'string' && obj.split(' ').length === 24) return '[REDACTED_MNEMONIC]';
   if (obj && typeof obj === 'object') {
     const copy: Record<string, unknown> = { ...(obj as Record<string, unknown>) };
@@ -32,8 +36,14 @@ export function sanitizeLogValue(v: unknown, max = 200): string {
   if (typeof v === 'string') s = v;
   else if (v === null || v === undefined) s = '';
   else {
-    try { s = JSON.stringify(v); } catch { s = String(v); }
+    try {
+      s = JSON.stringify(v);
+    } catch {
+      s = String(v);
+    }
   }
+  // Control-char class is intentional here: this IS the log-injection sanitizer.
+  // eslint-disable-next-line no-control-regex
   const escaped = s.replace(/[\x00-\x1F\x7F]/g, (c) => {
     if (c === '\n') return '\\n';
     if (c === '\r') return '\\r';

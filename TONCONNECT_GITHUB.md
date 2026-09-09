@@ -23,6 +23,7 @@ Local manifest is **kept** (`backend/src/index.ts` + `webapp/public/tonconnect-m
 Open these 2 files and replace `YOUR_USERNAME` / `YOUR_REPO`:
 
 1. `tonconnect-manifest.json` (repo root):
+
 ```json
 {
   "url": "https://github.com/YOUR_USERNAME/YOUR_REPO",
@@ -32,11 +33,14 @@ Open these 2 files and replace `YOUR_USERNAME` / `YOUR_REPO`:
   "privacyPolicyUrl": "https://github.com/YOUR_USERNAME/YOUR_REPO#privacy"
 }
 ```
+
 Use your real GitHub username and repo name. For `iconUrl` you can also use `icon.svg`.
 
 2. `webapp/public/js/app-config.js`:
+
 ```js
-window.TONCONNECT_MANIFEST_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/tonconnect-manifest.json";
+window.TONCONNECT_MANIFEST_URL =
+  'https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/tonconnect-manifest.json';
 // or CDN: "https://cdn.jsdelivr.net/gh/YOUR_USERNAME/YOUR_REPO@main/tonconnect-manifest.json"
 ```
 
@@ -69,9 +73,11 @@ https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/tonconnect-manife
 Test in browser — must return JSON with 200 and `Access-Control-Allow-Origin: *`.
 
 **Alternative CDN (recommended for wallets):**
+
 ```
 https://cdn.jsdelivr.net/gh/YOUR_USERNAME/YOUR_REPO@main/tonconnect-manifest.json
 ```
+
 jsDelivr has proper `application/json` and CORS — same file, just different URL. Put this URL in `app-config.js` if you prefer.
 
 ---
@@ -125,4 +131,3 @@ curl https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/tonconnect-m
 ```
 
 If both return JSON, you are good.
-

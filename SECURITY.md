@@ -16,14 +16,14 @@ You can expect:
 
 ## Scope
 
-| Component | Description |
-| --- | --- |
-| `backend` | Telegram bot + REST API + off-chain deal ledger |
-| `signer` | Isolated W5 wallet service (signs all fund movements) |
-| `contracts` | Tact `Escrow` smart contract (TON) |
-| `ubot` | Telegram userbot — channel/group takeover |
-| `utradebot` | Telegram account-sale escrow bot |
-| `webapp` | Telegram Mini App |
+| Component   | Description                                           |
+| ----------- | ----------------------------------------------------- |
+| `backend`   | Telegram bot + REST API + off-chain deal ledger       |
+| `signer`    | Isolated W5 wallet service (signs all fund movements) |
+| `contracts` | Tact `Escrow` smart contract (TON)                    |
+| `ubot`      | Telegram userbot — channel/group takeover             |
+| `utradebot` | Telegram account-sale escrow bot                      |
+| `webapp`    | Telegram Mini App                                     |
 
 Out of scope: upstream dependencies (report to their maintainers), social
 engineering of platform staff, and denial-of-service by volume.

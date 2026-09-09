@@ -21,13 +21,15 @@ export function createClientFromSession(sessionEncryptedOrPlain: string): Telegr
   });
 }
 
-export async function validateSession(sessionEnc: string): Promise<{ ok: boolean; phone?: string; username?: string; error?: string }> {
+export async function validateSession(
+  sessionEnc: string,
+): Promise<{ ok: boolean; phone?: string; username?: string; error?: string }> {
   const client = createClientFromSession(sessionEnc);
   try {
     await client.connect();
     const authorized = await client.checkAuthorization();
     if (!authorized) return { ok: false, error: 'session_not_authorized' };
-    const me = await client.getMe() as unknown as { phone?: string; username?: string; id: unknown };
+    const me = (await client.getMe()) as unknown as { phone?: string; username?: string; id: unknown };
     // Check if account looks "empty" — allow but warn if has many dialogs
     // We consider empty if < 20 dialogs (heuristic)
     try {
@@ -55,7 +57,7 @@ export async function kickOtherSessions(sessionEnc: string): Promise<{ kicked: n
   const client = createClientFromSession(sessionEnc);
   try {
     await client.connect();
-    const auths = await client.invoke(new Api.account.GetAuthorizations()) as unknown as {
+    const auths = (await client.invoke(new Api.account.GetAuthorizations())) as unknown as {
       authorizations: Array<{ hash: string | number; current: boolean }>;
     };
     const current = auths.authorizations.find((a) => a.current);
@@ -71,7 +73,11 @@ export async function kickOtherSessions(sessionEnc: string): Promise<{ kicked: n
       } catch {
         // Fallback per-hash
         try {
-          await client.invoke(new Api.account.ResetAuthorization({ hash: a.hash as unknown as any }) as unknown as Api.account.GetAuthorizations);
+          await client.invoke(
+            new Api.account.ResetAuthorization({
+              hash: a.hash as unknown as any,
+            }) as unknown as Api.account.GetAuthorizations,
+          );
           kicked++;
         } catch (e) {
           logger.warn(`kickOtherSessions: failed to reset hash ${String(a.hash)}`, e);
@@ -83,7 +89,11 @@ export async function kickOtherSessions(sessionEnc: string): Promise<{ kicked: n
       for (const a of auths.authorizations) {
         if (a.current) continue;
         try {
-          await client.invoke(new Api.account.ResetAuthorization({ hash: a.hash as unknown as any }) as unknown as Api.account.GetAuthorizations);
+          await client.invoke(
+            new Api.account.ResetAuthorization({
+              hash: a.hash as unknown as any,
+            }) as unknown as Api.account.GetAuthorizations,
+          );
           kicked++;
         } catch {}
       }
@@ -137,14 +147,14 @@ export async function attemptBuyerLogin(params: {
     // GramJS high-level helper: client.start with phoneCode, but we do manual:
     let codeHash = params.phoneCodeHash;
     if (!codeHash) {
-      const sent = await client.invoke(
+      const sent = (await client.invoke(
         new Api.auth.SendCode({
           phoneNumber: params.phone,
           apiId: config.apiId,
           apiHash: config.apiHash,
           settings: new Api.CodeSettings({}),
-        })
-      ) as unknown as { phoneCodeHash: string };
+        }),
+      )) as unknown as { phoneCodeHash: string };
       codeHash = sent.phoneCodeHash;
     }
 
@@ -154,7 +164,7 @@ export async function attemptBuyerLogin(params: {
           phoneNumber: params.phone,
           phoneCodeHash: codeHash,
           phoneCode: params.phoneCode,
-        })
+        }),
       );
     } catch (e) {
       const msg = String((e as Error).message || e);
@@ -163,12 +173,14 @@ export async function attemptBuyerLogin(params: {
         // Need to get password and check
         const pwdInfo = await client.invoke(new Api.account.GetPassword());
         const { computeCheck } = await import('teleproto/Password');
-        // @ts-ignore
-        const check = await (computeCheck as unknown as (pwd: unknown, pw: string) => Promise<unknown>)(pwdInfo, params.password);
+        const check = await (computeCheck as unknown as (pwd: unknown, pw: string) => Promise<unknown>)(
+          pwdInfo,
+          params.password,
+        );
         await client.invoke(
           new Api.auth.CheckPassword({
             password: check as unknown as Api.InputCheckPasswordSRP,
-          })
+          }),
         );
       } else {
         throw e;
@@ -196,14 +208,14 @@ export async function sendCodeToPhone(phone: string): Promise<{ phoneCodeHash: s
   });
   try {
     await client.connect();
-    const res = await client.invoke(
+    const res = (await client.invoke(
       new Api.auth.SendCode({
         phoneNumber: phone,
         apiId: config.apiId,
         apiHash: config.apiHash,
         settings: new Api.CodeSettings({}),
-      })
-    ) as unknown as { phoneCodeHash: string };
+      }),
+    )) as unknown as { phoneCodeHash: string };
     return { phoneCodeHash: res.phoneCodeHash };
   } finally {
     try {

@@ -10,6 +10,7 @@ assignees: ''
 A clear and concise description of the problem.
 
 **Affected component**
+
 - [ ] backend
 - [ ] signer
 - [ ] ubot
@@ -25,6 +26,7 @@ Steps to reproduce the behavior (deal IDs, commands, logs — redact secrets).
 What you expected to happen.
 
 **Environment**
+
 - Network (mainnet/testnet):
 - Deployment (docker-compose / local dev):
 - Commit SHA:

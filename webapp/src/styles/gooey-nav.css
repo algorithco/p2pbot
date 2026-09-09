@@ -321,7 +321,10 @@
   color: var(--nav-fg);
   position: relative;
   z-index: 2;
-  transition: background-color 0.22s ease, color 0.22s ease, transform 0.18s ease;
+  transition:
+    background-color 0.22s ease,
+    color 0.22s ease,
+    transform 0.18s ease;
 }
 
 /* Pure-CSS active circle: dark icon on white, driven by the SAME .active
@@ -334,9 +337,15 @@
 }
 
 @keyframes circlePop {
-  0% { transform: scale(0.65); }
-  60% { transform: scale(1.12); }
-  100% { transform: scale(1); }
+  0% {
+    transform: scale(0.65);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .gooey-nav-container.float-nav .float-circle svg {

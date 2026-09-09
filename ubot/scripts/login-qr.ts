@@ -20,7 +20,12 @@ import { encryptSession, saveEncryptedSession } from '../src/sessionManager';
 
 function ask(q: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((res) => rl.question(q, (a) => { rl.close(); res(a.trim()); }));
+  return new Promise((res) =>
+    rl.question(q, (a) => {
+      rl.close();
+      res(a.trim());
+    }),
+  );
 }
 
 function syncEnvFile(enc: string): void {
@@ -47,7 +52,11 @@ function syncEnvFile(enc: string): void {
       console.log(`Add manually: UBOT_SESSION_STRING=${enc}`);
     }
   } finally {
-    if (fd !== null) { try { fs.closeSync(fd); } catch {} }
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+    }
   }
 }
 
@@ -60,9 +69,12 @@ function printQrUrl(token: Buffer) {
   console.log('   (Sozlamalar → Qurilmalar → Ish stolini ulash → QR skan)');
   console.log('2) URL (if terminal QR not visible, paste into https://api.qrserver.com/v1/create-qr-code/?data=):');
   console.log(url);
-  console.log('3) Or generate QR image: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(url));
+  console.log(
+    '3) Or generate QR image: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(url),
+  );
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // Lazy require: qrcode-terminal is an optional nicety for inline QR.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const qr = require('qrcode-terminal');
     qr.generate(url, { small: true });
   } catch {
@@ -87,24 +99,30 @@ async function main() {
     useWSS: false,
   });
   await client.connect();
-  console.log(`API_ID=${config.apiId} device=${config.deviceModel}/${config.systemVersion} — starting QR login (no phone needed)...`);
+  console.log(
+    `API_ID=${config.apiId} device=${config.deviceModel}/${config.systemVersion} — starting QR login (no phone needed)...`,
+  );
   console.log('Eslatma: 42777 emas, aynan Telegram → Sozlamalar → Qurilmalar → Link Desktop Device dan skan qiling.\n');
 
   try {
-    console.log('\nℹ Agar "Incomplete login attempt" (to\'liq bo\'lmagan kirish) deb qolsa, demak 2FA parol kiritilmagan yoki xato.');
-    console.log('  Telegram sizga 42777 emas, aynan QR skan qilingan device da 2FA hint ko\'rsatadi.\n');
-    const user = await (client as unknown as {
-      signInUserWithQrCode: (creds: { apiId: number; apiHash: string }, params: unknown) => Promise<unknown>;
-    }).signInUserWithQrCode(
+    console.log(
+      '\nℹ Agar "Incomplete login attempt" (to\'liq bo\'lmagan kirish) deb qolsa, demak 2FA parol kiritilmagan yoki xato.',
+    );
+    console.log("  Telegram sizga 42777 emas, aynan QR skan qilingan device da 2FA hint ko'rsatadi.\n");
+    const user = await (
+      client as unknown as {
+        signInUserWithQrCode: (creds: { apiId: number; apiHash: string }, params: unknown) => Promise<unknown>;
+      }
+    ).signInUserWithQrCode(
       { apiId: config.apiId, apiHash: config.apiHash },
       {
         qrCode: async (qr: { token: Buffer; expires: number }) => {
           printQrUrl(qr.token);
         },
         password: async (hint?: string) => {
-          console.log(`\n🔐 2FA Cloud Password so'raldi${hint ? ` (hint: "${hint}")` : ' (hint yo\'q)'}`);
+          console.log(`\n🔐 2FA Cloud Password so'raldi${hint ? ` (hint: "${hint}")` : " (hint yo'q)"}`);
           if (hint) console.log(`   Hint: ${hint} — shu so'zga mos parolni kiriting!`);
-          console.log(`   .env TWO_FA_PASSWORD=${config.twoFaPassword ? '(set)' : '(bo\'sh)'}`);
+          console.log(`   .env TWO_FA_PASSWORD=${config.twoFaPassword ? '(set)' : "(bo'sh)"}`);
           let pwd = config.twoFaPassword;
           if (pwd) {
             console.log(`   → Avtomatik .env dagi TWO_FA_PASSWORD ishlatilmoqda...`);
@@ -114,7 +132,7 @@ async function main() {
             pwd = await ask('2FA password (Telegram → Settings → Privacy → Two-Step Verification → password): ');
           }
           if (!pwd) {
-            console.warn('   ⚠ Parol bo\'sh — Incomplete bo\'lib qoladi! Qayta urinib ko\'ring.');
+            console.warn("   ⚠ Parol bo'sh — Incomplete bo'lib qoladi! Qayta urinib ko'ring.");
           }
           return pwd;
         },
@@ -126,22 +144,26 @@ async function main() {
             console.error(`→ FloodWait ${sec || ''}s — ${sec ? sec + 's kuting' : 'kuting'}`);
             return true; // stop polling, let outer catch handle
           }
-          if (msg.includes('AUTH_TOKEN_EXPIRED') || msg.includes('AUTH_TOKEN_INVALID') || msg.includes('AUTH_TOKEN_ALREADY_ACCEPTED')) {
+          if (
+            msg.includes('AUTH_TOKEN_EXPIRED') ||
+            msg.includes('AUTH_TOKEN_INVALID') ||
+            msg.includes('AUTH_TOKEN_ALREADY_ACCEPTED')
+          ) {
             console.log('→ Token expired/invalid — yangi QR generatsiya qilinmoqda...');
             return false; // retry
           }
           if (msg.includes('SESSION_PASSWORD_NEEDED') || msg.includes('2FA') || msg.includes('PASSWORD_HASH_INVALID')) {
-            console.error('→ 2FA xatosi — parol noto\'g\'ri yoki kiritilmagan. Incomplete sababi shu!');
+            console.error("→ 2FA xatosi — parol noto'g'ri yoki kiritilmagan. Incomplete sababi shu!");
             console.error('   → Telegram → Settings → Devices → Incomplete login attempts → Terminate, keyin qayta QR');
             return true;
           }
           if (msg.toLowerCase().includes('incomplete')) {
-            console.error('→ Incomplete login — 2FA/email tasdiqlanmagan. Password/email ni to\'liq kiriting.');
+            console.error("→ Incomplete login — 2FA/email tasdiqlanmagan. Password/email ni to'liq kiriting.");
             return true;
           }
           return false;
         },
-      }
+      },
     );
 
     console.log('\n✔ QR login success! User:', (user as unknown as { username?: string })?.username || user);
@@ -149,13 +171,19 @@ async function main() {
     let verified = false;
     try {
       const me = await client.getMe();
-      console.log(`  verified as: ${(me as unknown as { username?: string })?.username || (me as unknown as { firstName?: string })?.firstName || 'unknown'}`);
+      console.log(
+        `  verified as: ${(me as unknown as { username?: string })?.username || (me as unknown as { firstName?: string })?.firstName || 'unknown'}`,
+      );
       const isAuth = await client.checkAuthorization();
       console.log(`  checkAuthorization: ${isAuth} (true bo'lishi kerak, false → Incomplete)`);
       if (!isAuth) {
         console.error('\n❌ INCOMPLETE: Telegram sessiyani tasdiqlamadi (password_pending).');
-        console.error('   → Sabab: 2FA parol xato yoki kiritilmadi. Telegram 42777 da "Incomplete login attempt" xabari keladi.');
-        console.error('   → Yechim: Settings → Devices → Incomplete login attempts → Terminate → qayta npm run login:qr → 2FA ni to\'g\'ri kiriting.');
+        console.error(
+          '   → Sabab: 2FA parol xato yoki kiritilmadi. Telegram 42777 da "Incomplete login attempt" xabari keladi.',
+        );
+        console.error(
+          "   → Yechim: Settings → Devices → Incomplete login attempts → Terminate → qayta npm run login:qr → 2FA ni to'g'ri kiriting.",
+        );
         throw new Error('INCOMPLETE: checkAuthorization false — 2FA password missing/invalid');
       }
       verified = true;
@@ -165,7 +193,9 @@ async function main() {
     }
     // warmup to ensure Active Sessions propagation only if verified
     try {
-      const iter = (client as unknown as { iterDialogs: (p: unknown) => AsyncIterable<unknown> }).iterDialogs({ limit: 5 });
+      const iter = (client as unknown as { iterDialogs: (p: unknown) => AsyncIterable<unknown> }).iterDialogs({
+        limit: 5,
+      });
       let c = 0;
       for await (const _ of iter) {
         c++;
@@ -177,11 +207,21 @@ async function main() {
       try {
         const { Api } = await import('teleproto');
         const auths = (await client.invoke(new Api.account.GetAuthorizations())) as unknown as {
-          authorizations: Array<{ hash: unknown; deviceModel: string; appName: string; passwordPending?: boolean; unconfirmed?: boolean }>;
+          authorizations: Array<{
+            hash: unknown;
+            deviceModel: string;
+            appName: string;
+            passwordPending?: boolean;
+            unconfirmed?: boolean;
+          }>;
         };
-        const pending = auths.authorizations.filter((a) => (a as unknown as { passwordPending?: boolean }).passwordPending);
+        const pending = auths.authorizations.filter(
+          (a) => (a as unknown as { passwordPending?: boolean }).passwordPending,
+        );
         if (pending.length) {
-          console.warn(`  ⚠ Hali ${pending.length} ta Incomplete sessiya bor (password_pending). Ularni terminate qiling.`);
+          console.warn(
+            `  ⚠ Hali ${pending.length} ta Incomplete sessiya bor (password_pending). Ularni terminate qiling.`,
+          );
         } else {
           console.log(`  ✓ Active Sessions da ${auths.authorizations.length} ta sessiya, hammasi tasdiqlangan.`);
         }
@@ -206,9 +246,12 @@ async function main() {
   } catch (e) {
     console.error('\nQR login failed:', (e as Error).message || e);
     const m = String((e as Error).message || '');
-    if (m.includes('EMAIL')) console.error('→ Email verify xatosi — pochta inbox/Spam ni tekshiring, emailAddress/emailCode kiriting');
+    if (m.includes('EMAIL'))
+      console.error('→ Email verify xatosi — pochta inbox/Spam ni tekshiring, emailAddress/emailCode kiriting');
     console.error('Try again: npm run login:qr');
-    try { await client.disconnect(); } catch {}
+    try {
+      await client.disconnect();
+    } catch {}
     process.exit(1);
   }
 }

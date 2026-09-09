@@ -31,7 +31,7 @@ export function payloadB64ToDecryptedComment(b64: string): string | null {
     // If decryptField returned same and raw looks like encrypted base64 (iv+tag), but dec is still base64, keep raw
     // Otherwise if dec looks like escrow# pattern, use dec
     if (dec !== raw && dec.includes('escrow#')) return dec;
-    if (dec !== raw && dec.startsWith('For ') || dec.startsWith('Refund:')) return dec;
+    if ((dec !== raw && dec.startsWith('For ')) || dec.startsWith('Refund:')) return dec;
     // If encrypted and decrypt succeeded, dec will be original text; if not encrypted, decryptField returns raw
     return dec;
   } catch {

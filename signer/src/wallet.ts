@@ -41,7 +41,9 @@ export class W5Signer {
           publicKey: kp.publicKey,
           workchain: config.workchain,
         });
-        logger.info(`W5 wallet initialized: ${sanitizeLogValue(this.wallet.address.toString({ urlSafe: true, bounceable: false }))} (workchain ${sanitizeLogValue(config.workchain)})`);
+        logger.info(
+          `W5 wallet initialized: ${sanitizeLogValue(this.wallet.address.toString({ urlSafe: true, bounceable: false }))} (workchain ${sanitizeLogValue(config.workchain)})`,
+        );
       } catch (e) {
         logger.error('Failed to init W5 wallet', e);
         throw e;
@@ -113,7 +115,7 @@ export class W5Signer {
     // W5 deploy needs enough for self-transfer + fees (~0.02 TON)
     if (balance < needed + toNano('0.02')) {
       throw new Error(
-        `insufficient_balance: have ${balance} nano, need ${needed + toNano('0.02')} (send TON to ${wallet.address.toString({ urlSafe: true, bounceable: false })})`
+        `insufficient_balance: have ${balance} nano, need ${needed + toNano('0.02')} (send TON to ${wallet.address.toString({ urlSafe: true, bounceable: false })})`,
       );
     }
     const provider = this.client.provider(wallet.address, null);
@@ -121,38 +123,39 @@ export class W5Signer {
     // Try simple deploy via empty transfer with sendMode; many W5 implementations deploy via seqno tx even with no messages.
     // Fallback is self-transfer if seqno didn't advance.
     const { internal } = await import('@ton/ton');
-    try {
-      await wallet.sendTransfer(provider, {
-        seqno,
-        secretKey: keyPair.secretKey,
-        sendMode: SendMode.PAY_GAS_SEPARATELY,
-        messages: [
-          internal({
-            to: wallet.address,
-            value: toNano(value),
-            bounce: false,
-            body: beginCell().endCell(),
-          }),
-        ],
-      });
-    } catch (e) {
-      // If custom deploy fails, propagate
-      throw e;
-    }
+    await wallet.sendTransfer(provider, {
+      seqno,
+      secretKey: keyPair.secretKey,
+      sendMode: SendMode.PAY_GAS_SEPARATELY,
+      messages: [
+        internal({
+          to: wallet.address,
+          value: toNano(value),
+          bounce: false,
+          body: beginCell().endCell(),
+        }),
+      ],
+    });
     return { seqno };
   }
 
-  async send(req: { to: string; value: string; body?: string | null; bounce?: boolean; comment?: string }): Promise<{ seqno: number }> {
+  async send(req: {
+    to: string;
+    value: string;
+    body?: string | null;
+    bounce?: boolean;
+    comment?: string;
+  }): Promise<{ seqno: number }> {
     const { wallet, keyPair } = this.assertConfigured();
     const toAddr = Address.parse(req.to);
     const value = toNano(req.value);
     if (value <= 0n) throw new Error('value must be > 0');
 
-    if (!req.comment || !String(req.comment).trim()) throw new Error('memo_required: comment memo is mandatory for every TON send');
+    if (!req.comment || !String(req.comment).trim())
+      throw new Error('memo_required: comment memo is mandatory for every TON send');
     if (String(req.comment).length > 120) throw new Error('memo_too_long');
-    let body: Cell | undefined;
     // Comment is mandatory — always encode as op 0 + stringTail; ignore raw body for /send to enforce memo
-    body = beginCell().storeUint(0, 32).storeStringTail(String(req.comment)).endCell();
+    const body: Cell = beginCell().storeUint(0, 32).storeStringTail(String(req.comment)).endCell();
     // If caller also supplied body BOC, we still use comment as memo (body override deprecated)
     void req.body;
 
@@ -177,7 +180,9 @@ export class W5Signer {
     return { seqno };
   }
 
-  async sendBatch(requests: Array<{ to: string; value: string; comment?: string }>): Promise<{ seqno: number; count: number }> {
+  async sendBatch(
+    requests: Array<{ to: string; value: string; comment?: string }>,
+  ): Promise<{ seqno: number; count: number }> {
     const { wallet, keyPair } = this.assertConfigured();
     if (requests.length === 0) throw new Error('empty batch');
     if (requests.length > 255) throw new Error('batch too large (max 255)');
@@ -187,7 +192,8 @@ export class W5Signer {
     const messages = requests.map((r) => {
       const addr = Address.parse(r.to);
       const val = toNano(r.value);
-      if (!r.comment || !String(r.comment).trim()) throw new Error('memo_required: every batch TON send must include comment memo');
+      if (!r.comment || !String(r.comment).trim())
+        throw new Error('memo_required: every batch TON send must include comment memo');
       if (String(r.comment).length > 120) throw new Error('memo_too_long');
       const body = beginCell().storeUint(0, 32).storeStringTail(String(r.comment)).endCell();
       return internal({
@@ -281,7 +287,9 @@ export class W5Signer {
         }),
       ],
     });
-    logger.info(`Jetton send ${sanitizeLogValue(req.amount)} from ${sanitizeLogValue(jettonWalletAddr.toString())} to ${sanitizeLogValue(dest.toString())} with memo "${sanitizeLogValue(req.forwardComment || '')}"`);
+    logger.info(
+      `Jetton send ${sanitizeLogValue(req.amount)} from ${sanitizeLogValue(jettonWalletAddr.toString())} to ${sanitizeLogValue(dest.toString())} with memo "${sanitizeLogValue(req.forwardComment || '')}"`,
+    );
     return { seqno };
   }
 

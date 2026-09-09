@@ -35,7 +35,9 @@ export const client = new TonClient({
  * is kept for backward-compat error messages.
  */
 export async function getWallet(): Promise<never> {
-  throw new Error('wallet_not_configured: MNEMONIC removed — use signer microservice (SIGNER_URL). Set SIGNER_MNEMONIC in signer/.env');
+  throw new Error(
+    'wallet_not_configured: MNEMONIC removed — use signer microservice (SIGNER_URL). Set SIGNER_MNEMONIC in signer/.env',
+  );
 }
 
 export async function getWalletAddress(): Promise<string> {

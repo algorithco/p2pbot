@@ -16,7 +16,7 @@ export type TradeStatus =
 export async function createTradeWithSession(
   sellerTelegramId: number,
   sessionPlainOrEnc: string,
-  phone?: string | null
+  phone?: string | null,
 ): Promise<number> {
   // Ensure session is encrypted before storage
   // If input looks already encrypted (base64 with iv+tag), keep it; else encrypt

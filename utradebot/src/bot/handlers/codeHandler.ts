@@ -3,7 +3,6 @@ import * as db from '../../db/queries';
 import * as accountService from '../../services/accountService';
 import * as tradeService from '../../services/tradeService';
 import logger from '../../logger';
-import { decryptSession } from '../../services/sessionCrypto';
 
 // Tracks buyer code input: tradeId -> awaiting code state
 const awaitingCode = new Map<number, { buyerId: number; phone: string; phoneCodeHash?: string }>();
@@ -21,7 +20,13 @@ export function registerCodeHandler(bot: Bot) {
 
     // Check if this user is awaiting code for any trade
     // Find active trade where user is buyer and status is AWAITING_CODE
-    const active = (await db.getActiveTradeForUser(from)) as unknown as { id: number; status: string; phone?: string; buyer_telegram_id?: number; session_encrypted: string } | null;
+    const active = (await db.getActiveTradeForUser(from)) as unknown as {
+      id: number;
+      status: string;
+      phone?: string;
+      buyer_telegram_id?: number;
+      session_encrypted: string;
+    } | null;
     if (!active) return next();
     if (!['AWAITING_CODE', 'PHONE_SHARED', 'AWAITING_BUYER_LOGIN'].includes(String(active.status))) return next();
 
@@ -54,14 +59,22 @@ export function registerCodeHandler(bot: Bot) {
 
     if (!result.success) {
       if (result.error === 'invalid_code') {
-        await ctx.reply('❌ Invalid or expired code. Please resend a fresh code (request new code from Telegram and send it here).');
+        await ctx.reply(
+          '❌ Invalid or expired code. Please resend a fresh code (request new code from Telegram and send it here).',
+        );
       } else if (result.error === '2fa_required') {
-        await ctx.reply('This account has 2FA enabled. Please send the 2FA password as next message (format: `2fa:yourpassword`).');
+        await ctx.reply(
+          'This account has 2FA enabled. Please send the 2FA password as next message (format: `2fa:yourpassword`).',
+        );
         // Store that next message should be 2FA
         // We handle via separate handler below
         awaitingCode.set(tradeId, { buyerId: from, phone, phoneCodeHash: undefined });
         // Also store code for retry with password
-        (awaitingCode as unknown as Map<number, { pendingCode: string }>).set(tradeId, { buyerId: from, phone, pendingCode: codeCandidate } as unknown as never);
+        (awaitingCode as unknown as Map<number, { pendingCode: string }>).set(tradeId, {
+          buyerId: from,
+          phone,
+          pendingCode: codeCandidate,
+        } as unknown as never);
       } else {
         await ctx.reply(`❌ Login failed: ${result.error}`);
         await tradeService.failTrade(tradeId, result.error || 'buyer_login_failed', from);
@@ -73,7 +86,9 @@ export function registerCodeHandler(bot: Bot) {
     await ctx.reply('✅ Code verified! Logging out tradebot session…');
 
     try {
-      await accountService.logoutSession(String((active as unknown as { session_encrypted: string }).session_encrypted));
+      await accountService.logoutSession(
+        String((active as unknown as { session_encrypted: string }).session_encrypted),
+      );
     } catch (e) {
       logger.warn('logoutSession after buyer login failed', e);
     }
@@ -85,7 +100,11 @@ export function registerCodeHandler(bot: Bot) {
     // We send it as one-time with burn warning
     if (result.session) {
       try {
-        await ctx.api.sendMessage(from, `Buyer session (keep secret, valid for API): \`${result.session.slice(0, 60)}****\`` , { parse_mode: 'Markdown' });
+        await ctx.api.sendMessage(
+          from,
+          `Buyer session (keep secret, valid for API): \`${result.session.slice(0, 60)}****\``,
+          { parse_mode: 'Markdown' },
+        );
       } catch {}
     }
 
@@ -93,7 +112,10 @@ export function registerCodeHandler(bot: Bot) {
     // Notify seller
     const sellerId = Number((active as unknown as { seller_telegram_id: number }).seller_telegram_id);
     try {
-      await ctx.api.sendMessage(sellerId, `✅ Buyer has logged into your traded account for trade #${tradeId}. Your session was logged out. Trade completed.`);
+      await ctx.api.sendMessage(
+        sellerId,
+        `✅ Buyer has logged into your traded account for trade #${tradeId}. Your session was logged out. Trade completed.`,
+      );
     } catch {}
 
     awaitingCode.delete(tradeId);
@@ -105,7 +127,11 @@ export function registerCodeHandler(bot: Bot) {
     if (!text.startsWith('2fa:')) return next();
     const from = ctx.from?.id;
     if (!from) return next();
-    const active = (await db.getActiveTradeForUser(from)) as unknown as { id: number; status: string; phone?: string } | null;
+    const active = (await db.getActiveTradeForUser(from)) as unknown as {
+      id: number;
+      status: string;
+      phone?: string;
+    } | null;
     if (!active) return;
     const phone = String(active.phone || '');
     const pending = awaitingCode.get(Number(active.id)) as unknown as { pendingCode?: string };
@@ -126,7 +152,9 @@ export function registerCodeHandler(bot: Bot) {
     }
     const tradeId = Number(active.id);
     try {
-      await accountService.logoutSession(String((active as unknown as { session_encrypted: string }).session_encrypted));
+      await accountService.logoutSession(
+        String((active as unknown as { session_encrypted: string }).session_encrypted),
+      );
     } catch {}
     await tradeService.completeTrade(tradeId, from);
     await ctx.reply(`🎉 Trade #${tradeId} completed with 2FA! Tradebot logged out.`);

@@ -32,7 +32,9 @@ function getKey(): Buffer | null {
     }
     if (!warnedInvalidKey) {
       warnedInvalidKey = true;
-      logger.warn(`ENCRYPTION_KEY invalid length ${buf.length} bytes (expected 32 for 64 hex or 64 for 128 hex), encryption disabled`);
+      logger.warn(
+        `ENCRYPTION_KEY invalid length ${buf.length} bytes (expected 32 for 64 hex or 64 for 128 hex), encryption disabled`,
+      );
     }
     cachedKey = null;
     return null;
@@ -91,7 +93,9 @@ export function encryptSession(plain: string): string {
   if (!key) {
     // Fail-closed in production: never silently persist a plaintext session.
     if (process.env.NODE_ENV === 'production' || process.env.STRICT_ENCRYPTION === 'true') {
-      throw new Error('encryption_not_configured: ENCRYPTION_KEY missing or invalid — refusing to store plaintext session in production');
+      throw new Error(
+        'encryption_not_configured: ENCRYPTION_KEY missing or invalid — refusing to store plaintext session in production',
+      );
     }
     if (!warnedInvalidKey) logger.warn('encryptSession: ENCRYPTION_KEY not set, storing plaintext (insecure)');
     return plain;
@@ -135,7 +139,9 @@ export function decryptSession(encB64: string): string {
       const msg = String((e as Error).message || '');
       if (msg.includes('session_decrypt_failed')) throw e;
       if (msg.includes('Unsupported state') || msg.includes('unable to authenticate') || msg.includes('Invalid')) {
-        throw new Error(`session_decrypt_failed: GCM auth failed — ENCRYPTION_KEY mismatch or corrupted session (try regenerating via npm run login:qr) — ${msg}`);
+        throw new Error(
+          `session_decrypt_failed: GCM auth failed — ENCRYPTION_KEY mismatch or corrupted session (try regenerating via npm run login:qr) — ${msg}`,
+        );
       }
       throw new Error(`session_decrypt_failed: cannot decrypt prefixed session — ${msg}`);
     }
@@ -168,7 +174,9 @@ export function decryptSession(encB64: string): string {
       if (res.length > 50 && res.startsWith('1')) return res;
       // If we successfully decrypted but result invalid, throw
       if (buf.length > 50) {
-        throw new Error('session_decrypt_failed: cannot decrypt session — ENCRYPTION_KEY mismatch or session is plaintext but invalid');
+        throw new Error(
+          'session_decrypt_failed: cannot decrypt session — ENCRYPTION_KEY mismatch or session is plaintext but invalid',
+        );
       }
     }
   } catch (e) {
@@ -179,7 +187,9 @@ export function decryptSession(encB64: string): string {
       if (trimmed.length > 80 && /^[A-Za-z0-9+/=_-]+$/.test(trimmed) && !isPlainStringSession(trimmed)) {
         // Check if it's likely encrypted: not starting with '1' or length suggests encrypted
         // But also handle 1.5% collision where encrypted starts with '1' — we already tried decrypt and it failed auth, so it's encrypted with wrong key
-        throw new Error(`session_decrypt_failed: GCM auth failed — ENCRYPTION_KEY mismatch or corrupted session (try regenerating via npm run login:qr) — ${msg}`);
+        throw new Error(
+          `session_decrypt_failed: GCM auth failed — ENCRYPTION_KEY mismatch or corrupted session (try regenerating via npm run login:qr) — ${msg}`,
+        );
       }
     }
     // Otherwise it's probably plaintext garbage — fall through
@@ -237,7 +247,9 @@ export function loadEncryptedSession(): string | null {
         if (isValidStringSession(dec) && isPlainStringSession(dec)) return dec;
         logger.warn('UBOT_SESSION_STRING in env is present but not a valid StringSession after decrypt; trying file');
       } catch (e) {
-        logger.error(`UBOT_SESSION_STRING decrypt failed: ${String((e as Error).message)} — check ENCRYPTION_KEY matches the one used to encrypt; falling back to file`);
+        logger.error(
+          `UBOT_SESSION_STRING decrypt failed: ${String((e as Error).message)} — check ENCRYPTION_KEY matches the one used to encrypt; falling back to file`,
+        );
       }
     }
   }

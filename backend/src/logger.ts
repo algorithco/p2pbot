@@ -6,14 +6,11 @@ const logger = winston.createLogger({
   format: winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.errors({ stack: true }),
-    winston.format.json()
+    winston.format.json(),
   ),
   transports: [
     new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      ),
+      format: winston.format.combine(winston.format.colorize(), winston.format.simple()),
     }),
     // You can add file transports if needed
   ],
@@ -29,8 +26,14 @@ export function sanitizeLogValue(v: unknown, max = 200): string {
   if (typeof v === 'string') s = v;
   else if (v === null || v === undefined) s = '';
   else {
-    try { s = JSON.stringify(v); } catch { s = String(v); }
+    try {
+      s = JSON.stringify(v);
+    } catch {
+      s = String(v);
+    }
   }
+  // Control-char class is intentional here: this IS the log-injection sanitizer.
+  // eslint-disable-next-line no-control-regex
   const escaped = s.replace(/[\x00-\x1F\x7F]/g, (c) => {
     if (c === '\n') return '\\n';
     if (c === '\r') return '\\r';

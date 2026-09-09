@@ -19,8 +19,11 @@ export const config = {
 };
 
 export function validateMnemonic(mnemonic: string[]): { valid: boolean; reason?: string } {
-  if (mnemonic.length === 0) return { valid: false, reason: 'SIGNER_MNEMONIC is empty — signer will run in read-only/no-wallet mode' };
-  if (mnemonic.length !== 24) return { valid: false, reason: `SIGNER_MNEMONIC must be 24 words, got ${mnemonic.length}` };
-  if (!mnemonic.every((w) => /^[a-z]+$/.test(w))) return { valid: false, reason: 'SIGNER_MNEMONIC words must be lowercase a-z only' };
+  if (mnemonic.length === 0)
+    return { valid: false, reason: 'SIGNER_MNEMONIC is empty — signer will run in read-only/no-wallet mode' };
+  if (mnemonic.length !== 24)
+    return { valid: false, reason: `SIGNER_MNEMONIC must be 24 words, got ${mnemonic.length}` };
+  if (!mnemonic.every((w) => /^[a-z]+$/.test(w)))
+    return { valid: false, reason: 'SIGNER_MNEMONIC words must be lowercase a-z only' };
   return { valid: true };
 }

@@ -1,5 +1,5 @@
 // src/auth/guard.ts
-import type { NextFunction, Request, RequestHandler, Response } from 'express';
+import type { Request, RequestHandler } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import expressRateLimit from 'express-rate-limit';
 import { config } from '../config';
@@ -92,7 +92,9 @@ export const identityAuth: RequestHandler = (req, _res, next) => {
     // No dev fallback — remain anonymous; requireIdentity will 401. Log once.
     if (!devWarned) {
       devWarned = true;
-      logger.warn('AUTH: BOT_TOKEN and API_KEY unset and ALLOW_DEV_AUTH != true — dev header ignored (requests will be 401)');
+      logger.warn(
+        'AUTH: BOT_TOKEN and API_KEY unset and ALLOW_DEV_AUTH != true — dev header ignored (requests will be 401)',
+      );
     }
   }
 

@@ -47,17 +47,25 @@ export function registerCommands(bot: Bot) {
           // Mini App resolves the query/start_param fallback to the join page).
           const joinUrl = `${base}/?startapp=${encodeURIComponent(`join_${dealId}_${token}`)}#/deal/${dealId}/join/${token}`;
           const kb = webAppButton(joinUrl, "➕ Bitimga qo'shilish");
-          await ctx.reply(`🤝 Sizni Bitim #${dealId} ga taklif qilishdi.\nQo'shilish uchun pastdagi tugmani bosing — yaratuvchi bitim chatida tasdiqlaydi.`, { reply_markup: kb });
+          await ctx.reply(
+            `🤝 Sizni Bitim #${dealId} ga taklif qilishdi.\nQo'shilish uchun pastdagi tugmani bosing — yaratuvchi bitim chatida tasdiqlaydi.`,
+            { reply_markup: kb },
+          );
           handled = true;
         } else if (dealId && token) {
           // WEBAPP_URL not configured — fall back to the bot's Mini App link.
           // Needs the Mini App attached in BotFather; the startapp value arrives
           // in the app as start_param and the app routes it to the join page.
           // Definitive fix: set WEBAPP_URL=https://<public-frontend> in backend/.env.
-          logger.warn(`Bot /start join_${dealId}_… without button-url: WEBAPP_URL empty, using t.me/${username}/app fallback`);
+          logger.warn(
+            `Bot /start join_${dealId}_… without button-url: WEBAPP_URL empty, using t.me/${username}/app fallback`,
+          );
           const appLink = `https://t.me/${username}/app?startapp=${encodeURIComponent(`join_${dealId}_${token}`)}`;
           const kb = new InlineKeyboard().url("➕ Bitimga qo'shilish", appLink);
-          await ctx.reply(`🤝 Sizni Bitim #${dealId} ga taklif qilishdi.\nQo'shilish uchun pastdagi tugmani bosing — yaratuvchi bitim chatida tasdiqlaydi.`, { reply_markup: kb });
+          await ctx.reply(
+            `🤝 Sizni Bitim #${dealId} ga taklif qilishdi.\nQo'shilish uchun pastdagi tugmani bosing — yaratuvchi bitim chatida tasdiqlaydi.`,
+            { reply_markup: kb },
+          );
           handled = true;
         } else {
           await ctx.reply(`Taklif havolasi buzilgan — yangisini so'rang.`);
@@ -128,9 +136,14 @@ function ratingName(r: { telegram_id: number; username: string | null }): string
   return r.username ? '@' + r.username : 'ID ' + r.telegram_id;
 }
 
-function ratingBlock(title: string, rows: { telegram_id: number; username: string | null; volume: string; deals: number }[]): string {
+function ratingBlock(
+  title: string,
+  rows: { telegram_id: number; username: string | null; volume: string; deals: number }[],
+): string {
   if (!rows.length) return `${title}\n— hali bitim yo‘q`;
-  const lines = rows.map((r, i) => `${MEDALS[i] || `#${i + 1}`} ${ratingName(r)} — <b>${fmtVol(r.volume)}</b> (${r.deals} bitim)`);
+  const lines = rows.map(
+    (r, i) => `${MEDALS[i] || `#${i + 1}`} ${ratingName(r)} — <b>${fmtVol(r.volume)}</b> (${r.deals} bitim)`,
+  );
   return `${title}\n${lines.join('\n')}`;
 }
 

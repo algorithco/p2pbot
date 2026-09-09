@@ -52,7 +52,13 @@ export async function createTrade(params: {
   const res = await pool.query(
     `INSERT INTO utrade_trades (seller_telegram_id, buyer_telegram_id, phone, session_encrypted, status, expires_at, meta)
      VALUES ($1,$2,$3,$4,$5, now() + interval '24 hours', '{}'::jsonb) RETURNING id, status`,
-    [params.sellerTelegramId, params.buyerTelegramId || null, params.phone || null, params.sessionEncrypted, params.status || 'SELLER_REMOVED']
+    [
+      params.sellerTelegramId,
+      params.buyerTelegramId || null,
+      params.phone || null,
+      params.sessionEncrypted,
+      params.status || 'SELLER_REMOVED',
+    ],
   );
   return res.rows[0];
 }
@@ -79,12 +85,16 @@ export async function getActiveTradeForUser(telegramId: number): Promise<Record<
   const res = await pool.query(
     `SELECT * FROM utrade_trades WHERE (seller_telegram_id = $1 OR buyer_telegram_id = $1)
      AND status NOT IN ('COMPLETED','FAILED','CANCELLED') ORDER BY id DESC LIMIT 1`,
-    [telegramId]
+    [telegramId],
   );
   return res.rows[0] || null;
 }
 
-export async function updateTradeStatus(id: number, status: string, extra: Record<string, unknown> = {}): Promise<void> {
+export async function updateTradeStatus(
+  id: number,
+  status: string,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
   const sets: string[] = ['status = $1', 'updated_at = now()'];
   const params: unknown[] = [status];
   let idx = 2;
@@ -105,7 +115,12 @@ export async function setPhone(id: number, phone: string): Promise<void> {
   await pool.query('UPDATE utrade_trades SET phone = $1, updated_at = now() WHERE id = $2', [phone, id]);
 }
 
-export async function appendEvent(tradeId: number, actorId: number | null, event: string, meta: Record<string, unknown> = {}): Promise<void> {
+export async function appendEvent(
+  tradeId: number,
+  actorId: number | null,
+  event: string,
+  meta: Record<string, unknown> = {},
+): Promise<void> {
   await pool.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [
     tradeId,
     actorId,
@@ -115,6 +130,9 @@ export async function appendEvent(tradeId: number, actorId: number | null, event
 }
 
 export async function listTradesForSeller(sellerId: number, limit = 20): Promise<Record<string, unknown>[]> {
-  const res = await pool.query('SELECT * FROM utrade_trades WHERE seller_telegram_id = $1 ORDER BY id DESC LIMIT $2', [sellerId, limit]);
+  const res = await pool.query('SELECT * FROM utrade_trades WHERE seller_telegram_id = $1 ORDER BY id DESC LIMIT $2', [
+    sellerId,
+    limit,
+  ]);
   return res.rows;
 }

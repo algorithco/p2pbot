@@ -6,7 +6,9 @@
   try {
     BASE = window.localStorage.getItem('tonescrow:apiBase') || '';
     if (BASE && BASE.charAt(BASE.length - 1) === '/') BASE = BASE.slice(0, -1);
-  } catch (e) { /* storage unavailable */ }
+  } catch (e) {
+    /* storage unavailable */
+  }
 
   function ApiError(status, message, payload) {
     this.name = 'ApiError';
@@ -22,36 +24,48 @@
       if (window.TG && TG.initData()) h['x-init-data'] = TG.initData();
       // Use real Telegram user when available, fallback to preview id only for public reads
       var uid = 0;
-      try { uid = (window.TG && TG.realUser && TG.realUser() ? TG.realUser().id : (TG.user().id || 0)); } catch (e) { uid = 0; }
+      try {
+        uid = window.TG && TG.realUser && TG.realUser() ? TG.realUser().id : TG.user().id || 0;
+      } catch (e) {
+        uid = 0;
+      }
       h['x-telegram-user-id'] = String(uid || (window.TG ? TG.user().id : 0) || 0);
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
     return h;
   }
 
   function request(method, path, body, opts) {
     opts = opts || {};
     var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, opts.timeoutMs || 15000);
+    var timer = setTimeout(function () {
+      if (ctrl) ctrl.abort();
+    }, opts.timeoutMs || 15000);
 
     return fetch(BASE + path, {
       method: method,
       headers: Object.assign(
-        { 'Accept': 'application/json' },
+        { Accept: 'application/json' },
         body ? { 'Content-Type': 'application/json' } : {},
-        authHeaders()
+        authHeaders(),
       ),
       body: body ? JSON.stringify(body) : undefined,
-      signal: ctrl ? ctrl.signal : undefined
+      signal: ctrl ? ctrl.signal : undefined,
     })
       .then(function (res) {
         clearTimeout(timer);
         return res.text().then(function (txt) {
           var data = null;
           if (txt) {
-            try { data = JSON.parse(txt); } catch (e) { data = txt; }
+            try {
+              data = JSON.parse(txt);
+            } catch (e) {
+              data = txt;
+            }
           }
           if (!res.ok) {
-            var msg = (data && data.error) ? String(data.error) : ('HTTP ' + res.status);
+            var msg = data && data.error ? String(data.error) : 'HTTP ' + res.status;
             throw new ApiError(res.status, msg, data);
           }
           return data;
@@ -72,24 +86,28 @@
       return request('GET', '/api/info').then(function (d) {
         return {
           adminTelegramIds: (d && d.adminTelegramIds) || [],
-          feeBps: (d && d.feeBps != null) ? Number(d.feeBps) : 100,
+          feeBps: d && d.feeBps != null ? Number(d.feeBps) : 100,
           paymentAddress: (d && d.paymentAddress) || '',
-          network: (d && d.network) || ''
+          network: (d && d.network) || '',
         };
       });
     },
 
     /** GET /api/deals -> deal[] (private: only own deals, admin sees all) */
     deals: function () {
-      return request('GET', '/api/deals').then(function (d) {
-        return Array.isArray(d) ? d : [];
-      }).catch(function (err) {
-        // Fallback to /api/deals/mine for old servers
-        if (err && err.status === 404) {
-          return request('GET', '/api/deals/mine').then(function (d) { return Array.isArray(d) ? d : []; });
-        }
-        throw err;
-      });
+      return request('GET', '/api/deals')
+        .then(function (d) {
+          return Array.isArray(d) ? d : [];
+        })
+        .catch(function (err) {
+          // Fallback to /api/deals/mine for old servers
+          if (err && err.status === 404) {
+            return request('GET', '/api/deals/mine').then(function (d) {
+              return Array.isArray(d) ? d : [];
+            });
+          }
+          throw err;
+        });
     },
 
     /** GET /api/deals/:id -> deal | null (party-only, token preview allowed) */
@@ -112,7 +130,7 @@
           link: d.botLink || d.link || d.webappLink || '',
           botLink: d.botLink || d.link || '',
           webappLink: d.webappLink || d.link || '',
-          encryption: d.encryption || ''
+          encryption: d.encryption || '',
         };
       });
     },
@@ -140,7 +158,7 @@
     sendChatEncrypted: function (dealId, senderTelegramId, ciphertext) {
       return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/chat', {
         senderTelegramId: senderTelegramId,
-        ciphertext: ciphertext
+        ciphertext: ciphertext,
       });
     },
 
@@ -148,7 +166,7 @@
     sendChat: function (dealId, senderTelegramId, content) {
       return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/chat', {
         senderTelegramId: senderTelegramId,
-        content: content
+        content: content,
       });
     },
 
@@ -188,8 +206,8 @@
 
     /** POST /api/deals/:id/confirm — deprecated alias to approveDeal (buyer-only) */
     confirmDeal: function (id) {
-      return request('POST', '/api/deals/' + encodeURIComponent(id) + '/approve', {}).catch(function(e){
-        if(e && e.status===404) return request('POST','/api/deals/'+encodeURIComponent(id)+'/confirm',{});
+      return request('POST', '/api/deals/' + encodeURIComponent(id) + '/approve', {}).catch(function (e) {
+        if (e && e.status === 404) return request('POST', '/api/deals/' + encodeURIComponent(id) + '/confirm', {});
         throw e;
       });
     },
@@ -220,10 +238,18 @@
 
     /** POST approve / reject join request */
     approveJoin: function (dealId, requestId) {
-      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/join-requests/' + encodeURIComponent(requestId) + '/approve', {});
+      return request(
+        'POST',
+        '/api/deals/' + encodeURIComponent(dealId) + '/join-requests/' + encodeURIComponent(requestId) + '/approve',
+        {},
+      );
     },
     rejectJoin: function (dealId, requestId) {
-      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/join-requests/' + encodeURIComponent(requestId) + '/reject', {});
+      return request(
+        'POST',
+        '/api/deals/' + encodeURIComponent(dealId) + '/join-requests/' + encodeURIComponent(requestId) + '/reject',
+        {},
+      );
     },
 
     /** GET /api/inbox -> pending join requests across caller deals */
@@ -240,12 +266,16 @@
 
     /** POST /api/deals/:id/payout-address {tonAddress} — per-deal override */
     setPayoutAddress: function (dealId, tonAddress) {
-      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/payout-address', { tonAddress: tonAddress });
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/payout-address', {
+        tonAddress: tonAddress,
+      });
     },
 
     /** Alias used by webapp bar (src Api.payoutAddress) */
     payoutAddress: function (dealId, tonAddress) {
-      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/payout-address', { tonAddress: tonAddress });
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/payout-address', {
+        tonAddress: tonAddress,
+      });
     },
 
     /** Alias used by webapp bar (src Api.setTonAddress) */
@@ -266,11 +296,33 @@
     },
 
     // CHANNEL/GROUP escrow via @gramchioka (additive)
-    channelVerify: function (dealId) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/verify', {}); },
-    channelRequestEscrow: function (dealId) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/request-escrow', {}); },
-    channelConfirmEscrow: function (dealId) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/confirm-escrow', {}); },
-    channelPayout: function (dealId, tonAddress) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/payout', tonAddress ? { tonAddress: tonAddress } : {}); },
-    channelSetNewOwner: function (dealId, newOwner) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/set-new-owner', { newOwner: newOwner }); },
-    channelTransferToBuyer: function (dealId, newOwner) { return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/transfer-to-buyer', newOwner ? { newOwner: newOwner } : {}); }
+    channelVerify: function (dealId) {
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/verify', {});
+    },
+    channelRequestEscrow: function (dealId) {
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/request-escrow', {});
+    },
+    channelConfirmEscrow: function (dealId) {
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/confirm-escrow', {});
+    },
+    channelPayout: function (dealId, tonAddress) {
+      return request(
+        'POST',
+        '/api/deals/' + encodeURIComponent(dealId) + '/channel/payout',
+        tonAddress ? { tonAddress: tonAddress } : {},
+      );
+    },
+    channelSetNewOwner: function (dealId, newOwner) {
+      return request('POST', '/api/deals/' + encodeURIComponent(dealId) + '/channel/set-new-owner', {
+        newOwner: newOwner,
+      });
+    },
+    channelTransferToBuyer: function (dealId, newOwner) {
+      return request(
+        'POST',
+        '/api/deals/' + encodeURIComponent(dealId) + '/channel/transfer-to-buyer',
+        newOwner ? { newOwner: newOwner } : {},
+      );
+    },
   };
 })();

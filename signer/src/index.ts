@@ -53,7 +53,10 @@ function idemKeyFrom(req: Request): string | null {
 }
 
 function paramsHashOf(obj: unknown): string {
-  return crypto.createHash('sha256').update(JSON.stringify(obj ?? null)).digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(obj ?? null))
+    .digest('hex');
 }
 
 /** Returns {seqno} on replay hit, {conflict:true} on key-reuse-with-new-params, null on miss. */
@@ -125,7 +128,8 @@ app.post('/send', authMiddleware, async (req, res) => {
   try {
     const { to, value, body, bounce, comment } = req.body || {};
     if (!to || !value) return res.status(400).json({ error: 'to and value required' });
-    if (!comment) return res.status(400).json({ error: 'memo_required: TON send must include comment memo (e.g. escrow#123)' });
+    if (!comment)
+      return res.status(400).json({ error: 'memo_required: TON send must include comment memo (e.g. escrow#123)' });
     if (String(comment).length > 120) return res.status(400).json({ error: 'memo_too_long', max: 120 });
     // Basic address validation
     try {
@@ -138,9 +142,12 @@ app.post('/send', authMiddleware, async (req, res) => {
     const phash = paramsHashOf({ to, value: String(value), bounce, comment });
     if (idemKey) {
       const hit = idemCheck(idemKey, phash);
-      if (hit && 'conflict' in hit) return res.status(409).json({ error: 'idempotency_conflict: key already used with different transfer params' });
+      if (hit && 'conflict' in hit)
+        return res.status(409).json({ error: 'idempotency_conflict: key already used with different transfer params' });
       if (hit) {
-        logger.warn(`POST /send idempotency replay key=${sanitizeLogValue(idemKey)} seqno=${sanitizeLogValue(hit.seqno)} — NOT re-sending`);
+        logger.warn(
+          `POST /send idempotency replay key=${sanitizeLogValue(idemKey)} seqno=${sanitizeLogValue(hit.seqno)} — NOT re-sending`,
+        );
         return res.json({ ok: true, seqno: hit.seqno, duplicate: true });
       }
     }
@@ -159,7 +166,8 @@ app.post('/send', authMiddleware, async (req, res) => {
 app.post('/send-batch', authMiddleware, async (req, res) => {
   try {
     const { requests } = req.body || {};
-    if (!Array.isArray(requests) || requests.length === 0) return res.status(400).json({ error: 'requests array required' });
+    if (!Array.isArray(requests) || requests.length === 0)
+      return res.status(400).json({ error: 'requests array required' });
     const result = await signer.sendBatch(requests);
     res.json({ ok: true, ...result });
   } catch (err) {
@@ -173,7 +181,8 @@ app.post('/send-batch', authMiddleware, async (req, res) => {
 app.post('/send-jetton', authMiddleware, async (req, res) => {
   try {
     const { jettonMasterAddress, to, amount, forwardComment, forwardTonAmount } = req.body || {};
-    if (!jettonMasterAddress || !to || !amount) return res.status(400).json({ error: 'jettonMasterAddress, to and amount required' });
+    if (!jettonMasterAddress || !to || !amount)
+      return res.status(400).json({ error: 'jettonMasterAddress, to and amount required' });
     try {
       const { Address } = await import('@ton/core');
       Address.parse(jettonMasterAddress);
@@ -181,18 +190,30 @@ app.post('/send-jetton', authMiddleware, async (req, res) => {
     } catch {
       return res.status(400).json({ error: 'invalid address' });
     }
-    if (!forwardComment) return res.status(400).json({ error: 'forwardComment (memo) required — every Jetton tx must carry escrow# memo' });
+    if (!forwardComment)
+      return res
+        .status(400)
+        .json({ error: 'forwardComment (memo) required — every Jetton tx must carry escrow# memo' });
     const idemKey = idemKeyFrom(req);
     const phash = paramsHashOf({ jettonMasterAddress, to, amount: String(amount), forwardComment, forwardTonAmount });
     if (idemKey) {
       const hit = idemCheck(idemKey, phash);
-      if (hit && 'conflict' in hit) return res.status(409).json({ error: 'idempotency_conflict: key already used with different transfer params' });
+      if (hit && 'conflict' in hit)
+        return res.status(409).json({ error: 'idempotency_conflict: key already used with different transfer params' });
       if (hit) {
-        logger.warn(`POST /send-jetton idempotency replay key=${sanitizeLogValue(idemKey)} seqno=${sanitizeLogValue(hit.seqno)} — NOT re-sending`);
+        logger.warn(
+          `POST /send-jetton idempotency replay key=${sanitizeLogValue(idemKey)} seqno=${sanitizeLogValue(hit.seqno)} — NOT re-sending`,
+        );
         return res.json({ ok: true, seqno: hit.seqno, duplicate: true });
       }
     }
-    const result = await signer.sendJetton({ jettonMasterAddress, to, amount: String(amount), forwardComment, forwardTonAmount });
+    const result = await signer.sendJetton({
+      jettonMasterAddress,
+      to,
+      amount: String(amount),
+      forwardComment,
+      forwardTonAmount,
+    });
     if (idemKey) idemStore(idemKey, result.seqno, phash);
     res.json({ ok: true, ...result });
   } catch (err) {
@@ -207,7 +228,9 @@ app.post('/deploy-escrow', authMiddleware, async (req, res) => {
   try {
     const { escrowAddress, escrowStateInit, value, bodyBoc } = req.body || {};
     if (!escrowAddress || !escrowStateInit?.codeBoc || !escrowStateInit?.dataBoc) {
-      return res.status(400).json({ error: 'escrowAddress and escrowStateInit {codeBoc, dataBoc} required (base64 BOCs)' });
+      return res
+        .status(400)
+        .json({ error: 'escrowAddress and escrowStateInit {codeBoc, dataBoc} required (base64 BOCs)' });
     }
     const result = await signer.sendEscrowDeploy({ escrowAddress, escrowStateInit, value, bodyBoc });
     res.json({ ok: true, ...result });
@@ -238,7 +261,9 @@ async function start() {
     logger.error('Signer init failed — continuing in degraded mode', e);
   }
   app.listen(port, () => {
-    logger.info(`Signer listening on http://localhost:${port} (network=${config.network}, configured=${signer.isConfigured()})`);
+    logger.info(
+      `Signer listening on http://localhost:${port} (network=${config.network}, configured=${signer.isConfigured()})`,
+    );
     if (config.apiKey) logger.info('SIGNER_API_KEY auth enabled');
     else logger.warn('SIGNER_API_KEY not set — signer is OPEN (dev only!)');
   });

@@ -29,7 +29,7 @@ export const DEAL_ACTIONS = {
   EXPIRE: 'EXPIRE',
 } as const;
 
-export type DealAction = typeof DEAL_ACTIONS[keyof typeof DEAL_ACTIONS];
+export type DealAction = (typeof DEAL_ACTIONS)[keyof typeof DEAL_ACTIONS];
 
 /**
  * Allowed transitions. Each action maps to the set of statuses it may LEAVE.
@@ -62,7 +62,7 @@ export const NEXT_STATUS: Record<DealAction, string> = {
 /** Pure guard: is `action` legal from `currentStatus`? Returns the next status or an error. */
 export function assertTransition(
   currentStatus: string | null | undefined,
-  action: DealAction
+  action: DealAction,
 ): { ok: true; next: string } | { ok: false; error: string; from: string } {
   const from = String(currentStatus || '');
   const allowed = TRANSITION_TABLE[action];
@@ -87,7 +87,7 @@ export function guardedStatusUpdate(
   fromStatus: string,
   nextStatus: string,
   extraSets?: string[],
-  extraParams?: unknown[]
+  extraParams?: unknown[],
 ): Promise<number> {
   const sets: string[] = ['status = $1', 'updated_at = now()'];
   const params: unknown[] = [nextStatus];
@@ -99,6 +99,9 @@ export function guardedStatusUpdate(
   if (extraParams) params.push(...extraParams);
   params.push(dealId, fromStatus);
   return client
-    .query(`UPDATE deals SET ${sets.join(', ')} WHERE id = $${params.length - 1} AND status = $${params.length}`, params)
+    .query(
+      `UPDATE deals SET ${sets.join(', ')} WHERE id = $${params.length - 1} AND status = $${params.length}`,
+      params,
+    )
     .then((r) => r.rowCount);
 }

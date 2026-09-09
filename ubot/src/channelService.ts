@@ -2,8 +2,8 @@ import { Api } from 'teleproto';
 import { ensureClient, withFloodWait, isChannelBlocked } from './client';
 import logger, { sanitizeLogValue } from './logger';
 import { config } from './config';
-import { humanDelay, sleep, jitteredDelay } from './humanDelay';
-import { cachedGetEntity, cachedGetPassword, entityCache } from './entityCache';
+import { humanDelay } from './humanDelay';
+import { cachedGetEntity, cachedGetPassword } from './entityCache';
 
 // --- Patch for missing channels.EditCreator in teleproto 1.229 (removed from TL) ---
 // Telegram still supports channels.editCreator (0x8f38cd1f) but generated TL dropped it.
@@ -20,9 +20,36 @@ try {
       name: 'EditCreator',
       constructorId: 2402864415,
       argsConfig: {
-        channel: { isVector: false, isFlag: false, skipConstructorId: false, flagName: null, flagIndex: -1, flagIndicator: false, type: 'InputChannel', useVectorId: null },
-        userId: { isVector: false, isFlag: false, skipConstructorId: false, flagName: null, flagIndex: -1, flagIndicator: false, type: 'InputUser', useVectorId: null },
-        password: { isVector: false, isFlag: false, skipConstructorId: false, flagName: null, flagIndex: -1, flagIndicator: false, type: 'InputCheckPasswordSRP', useVectorId: null },
+        channel: {
+          isVector: false,
+          isFlag: false,
+          skipConstructorId: false,
+          flagName: null,
+          flagIndex: -1,
+          flagIndicator: false,
+          type: 'InputChannel',
+          useVectorId: null,
+        },
+        userId: {
+          isVector: false,
+          isFlag: false,
+          skipConstructorId: false,
+          flagName: null,
+          flagIndex: -1,
+          flagIndicator: false,
+          type: 'InputUser',
+          useVectorId: null,
+        },
+        password: {
+          isVector: false,
+          isFlag: false,
+          skipConstructorId: false,
+          flagName: null,
+          flagIndex: -1,
+          flagIndicator: false,
+          type: 'InputCheckPasswordSRP',
+          useVectorId: null,
+        },
       },
       subclassOfId: 2331323052,
       result: 'Updates',
@@ -70,7 +97,9 @@ export interface AdminRights {
 function buildAdminRights(r: AdminRights = {}): Api.ChatAdminRights {
   const hasExplicit = Object.keys(r).length > 0;
   if (!hasExplicit) {
-    logger.warn('buildAdminRights called with empty rights — using minimal defaults (ban/invite/pin only). Pass explicit rights to avoid unintended privilege level.');
+    logger.warn(
+      'buildAdminRights called with empty rights — using minimal defaults (ban/invite/pin only). Pass explicit rights to avoid unintended privilege level.',
+    );
   }
   return new Api.ChatAdminRights({
     changeInfo: r.changeInfo ?? false,
@@ -106,27 +135,31 @@ function mapChannelError(e: unknown, channel: string | number): never {
     throw new Error(`write_forbidden: ${channel} — ${msg}`);
   }
   if (msg.includes('CHANNELS_TOO_MUCH')) {
-    throw new Error('CHANNELS_TOO_MUCH: bot has joined too many channels/supergroups — leave some or use another account');
+    throw new Error(
+      'CHANNELS_TOO_MUCH: bot has joined too many channels/supergroups — leave some or use another account',
+    );
   }
   if (msg.includes('FRESH_CHANGE_ADMINS_FORBIDDEN')) {
     throw new Error('admin_change_forbidden: recent admin changes, wait 24h before transferring ownership');
   }
   if (msg.includes('PEER_FLOOD')) {
-    throw new Error(`peer_flood: ${channel} — Telegram anti-spam PEER_FLOOD throttled (too many peer actions) — ${msg}`);
+    throw new Error(
+      `peer_flood: ${channel} — Telegram anti-spam PEER_FLOOD throttled (too many peer actions) — ${msg}`,
+    );
   }
   if (msg.includes('SLOWMODE_WAIT')) {
     const m = msg.match(/SLOWMODE_WAIT_(\d+)|(\d+)\s*seconds/i);
-    const secs = m ? (m[1] || m[2] || '60') : '60';
+    const secs = m ? m[1] || m[2] || '60' : '60';
     throw new Error(`slowmode_wait: ${channel} — Telegram slowmode wait ${secs}s — ${msg}`);
   }
   if (msg.includes('TAKEOUT_INIT_DELAY')) {
     const m = msg.match(/TAKEOUT_INIT_DELAY_(\d+)|(\d+)\s*seconds/i);
-    const secs = m ? (m[1] || m[2] || '30') : '30';
+    const secs = m ? m[1] || m[2] || '30' : '30';
     throw new Error(`takeout_delay: ${channel} — takeout init delay ${secs}s — ${msg}`);
   }
   if (msg.includes('FLOOD_WAIT') || msg.includes('FloodWait')) {
     const m = msg.match(/FLOOD_WAIT_(\d+)|FLOOD_PREMIUM_WAIT_(\d+)|wait of (\d+) seconds|(\d+)\s*seconds/i);
-    const secs = m ? (m[1] || m[2] || m[3] || m[4] || '30') : '30';
+    const secs = m ? m[1] || m[2] || m[3] || m[4] || '30' : '30';
     throw new Error(`flood_wait: ${channel} — Telegram FLOOD_WAIT ${secs}s — ${msg}`);
   }
   if (msg.includes('USER_BANNED_IN_CHANNEL') || msg.includes('USER_BANNED')) {
@@ -142,7 +175,9 @@ function mapChannelError(e: unknown, channel: string | number): never {
 async function resolveChannel(channel: string | number): Promise<Api.Channel | Api.Chat> {
   // Check global FRESH breaker before hitting Telegram (anti-abuse 24h)
   if (isChannelBlocked('FRESH_CHANGE_ADMINS_FORBIDDEN')) {
-    throw new Error('admin_change_forbidden: FRESH_CHANGE_ADMINS_FORBIDDEN breaker active — recent admin changes, wait 24h before admin operations');
+    throw new Error(
+      'admin_change_forbidden: FRESH_CHANGE_ADMINS_FORBIDDEN breaker active — recent admin changes, wait 24h before admin operations',
+    );
   }
   if (isChannelBlocked('PEER_FLOOD')) {
     throw new Error('peer_flood: PEER_FLOOD breaker active — anti-spam throttled, wait before retry');
@@ -150,7 +185,10 @@ async function resolveChannel(channel: string | number): Promise<Api.Channel | A
   const client = await ensureClient();
   try {
     // Use entity cache for getEntity to avoid repeated DC hits
-    const entity = (await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, String(channel))) as Api.Channel | Api.Chat;
+    const entity = (await cachedGetEntity(
+      client as unknown as { getEntity: (id: string) => Promise<unknown> },
+      String(channel),
+    )) as Api.Channel | Api.Chat;
     // Human-like delay after resolve to avoid hammering
     await humanDelay(600, 1400);
     return entity;
@@ -202,8 +240,16 @@ function toSafeId(raw: unknown): number | string {
   return Number.isFinite(n) ? n : String(raw);
 }
 
-export async function getChannelInfo(channel: string | number): Promise<{ id: number | string; title: string; username?: string; isChannel: boolean }> {
-  const ent = (await resolveChannel(channel)) as unknown as { id: unknown; title: string; username?: string; broadcast?: boolean; megagroup?: boolean };
+export async function getChannelInfo(
+  channel: string | number,
+): Promise<{ id: number | string; title: string; username?: string; isChannel: boolean }> {
+  const ent = (await resolveChannel(channel)) as unknown as {
+    id: unknown;
+    title: string;
+    username?: string;
+    broadcast?: boolean;
+    megagroup?: boolean;
+  };
   const id = toSafeId(ent.id);
   return {
     id,
@@ -219,7 +265,7 @@ export async function promoteToAdminWithEntities(
   channelEntity: Api.Channel | Api.Chat,
   userEntity: unknown,
   rights: AdminRights = {},
-  rank: string = 'Admin'
+  rank: string = 'Admin',
 ): Promise<void> {
   if (!userEntity) throw new Error('userEntity required');
   if (rank && rank.length > 32) throw new Error('rank too long (max 32)');
@@ -240,8 +286,8 @@ export async function promoteToAdminWithEntities(
           userId: userEntity as unknown as Api.InputUser,
           adminRights: buildAdminRights(rights),
           rank,
-        })
-      )
+        }),
+      ),
     );
   } catch (e) {
     const msg = String((e as Error).message || e);
@@ -258,7 +304,9 @@ export async function promoteToAdminWithEntities(
     }
     mapChannelError(e, 'channelEntity');
   }
-  const uidLog = (userEntity as { id?: unknown })?.id ? String((userEntity as { id: unknown }).toString()).slice(0, 20) : 'user';
+  const uidLog = (userEntity as { id?: unknown })?.id
+    ? String((userEntity as { id: unknown }).toString()).slice(0, 20)
+    : 'user';
   logger.info(`Promoted ${sanitizeLogValue(uidLog)} to admin (via entities)`);
 }
 
@@ -271,7 +319,7 @@ export async function promoteToAdmin(
   channel: string | number,
   userId: string | number,
   rights: AdminRights = {},
-  rank: string = 'Admin'
+  rank: string = 'Admin',
 ): Promise<void> {
   if (!userId || String(userId).trim() === '') throw new Error('userId required');
   if (rank && rank.length > 32) throw new Error('rank too long (max 32)');
@@ -285,11 +333,16 @@ export async function promoteToAdmin(
   const channelEntity = await resolveChannel(channel);
   let userEntity: unknown;
   try {
-    userEntity = await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, String(userId));
+    userEntity = await cachedGetEntity(
+      client as unknown as { getEntity: (id: string) => Promise<unknown> },
+      String(userId),
+    );
   } catch (e) {
     const msg = String((e as Error).message || e);
     if (msg.includes('Could not find') || msg.includes('No entity') || msg.includes('USER_ID_INVALID')) {
-      throw new Error(`user_not_found: ${userId} — user must have interacted with bot or be in contacts; try inviting first`);
+      throw new Error(
+        `user_not_found: ${userId} — user must have interacted with bot or be in contacts; try inviting first`,
+      );
     }
     mapChannelError(e, channel);
   }
@@ -305,13 +358,15 @@ export async function promoteToAdmin(
           userId: userEntity as unknown as Api.InputUser,
           adminRights: buildAdminRights(rights),
           rank,
-        })
-      )
+        }),
+      ),
     );
   } catch (e) {
     const msg = String((e as Error).message || e);
     if (msg.includes('USER_NOT_PARTICIPANT')) {
-      throw new Error(`user_not_participant: ${userId} is not in ${channel} — invite first via channels.InviteToChannel`);
+      throw new Error(
+        `user_not_participant: ${userId} is not in ${channel} — invite first via channels.InviteToChannel`,
+      );
     }
     if (msg.includes('CHAT_NOT_MODIFIED')) {
       // Already admin with same rights — treat as success
@@ -330,7 +385,7 @@ export async function promoteToAdmin(
 export async function transferChannelOwnershipWithEntities(
   channelEntity: Api.Channel | Api.Chat,
   newOwnerEntity: unknown,
-  password?: string
+  password?: string,
 ): Promise<void> {
   const pwd = password || config.twoFaPassword;
   if (!pwd) throw new Error('2FA password required for ownership transfer (TWO_FA_PASSWORD or per-request password)');
@@ -340,7 +395,9 @@ export async function transferChannelOwnershipWithEntities(
   }
   const client = await ensureClient();
   try {
-    const passwordInfo = (await cachedGetPassword(client as unknown as { invoke: (req: unknown) => Promise<unknown> })) as unknown as { hasPassword: boolean };
+    const passwordInfo = (await cachedGetPassword(
+      client as unknown as { invoke: (req: unknown) => Promise<unknown> },
+    )) as unknown as { hasPassword: boolean };
     let check: unknown = null;
     try {
       const { computeCheck } = await import('teleproto/Password');
@@ -357,29 +414,35 @@ export async function transferChannelOwnershipWithEntities(
     await humanDelay(1500, 2500);
     const inputUser = newOwnerEntity as unknown as Api.InputUser;
     if (check) {
-      await withFloodWait(() =>
-        client.invoke(
-          new (Api.channels as unknown as { EditCreator: new (p: unknown) => unknown }).EditCreator({
-            channel: channelEntity as unknown as Api.InputChannel,
-            userId: inputUser as unknown as Api.InputUser,
-            password: check as unknown as Api.InputCheckPasswordSRP,
-          } as never) as unknown as any
-        ) as Promise<unknown>
+      await withFloodWait(
+        () =>
+          client.invoke(
+            new (Api.channels as unknown as { EditCreator: new (p: unknown) => unknown }).EditCreator({
+              channel: channelEntity as unknown as Api.InputChannel,
+              userId: inputUser as unknown as Api.InputUser,
+              password: check as unknown as Api.InputCheckPasswordSRP,
+            } as never) as unknown as any,
+          ) as Promise<unknown>,
       );
     } else {
-      await withFloodWait(() =>
-        client.invoke(
-          new (Api.channels as unknown as { EditCreator: new (p: unknown) => unknown }).EditCreator({
-            channel: channelEntity as unknown as Api.InputChannel,
-            userId: inputUser as unknown as Api.InputUser,
-            // @ts-ignore — older typings expect InputCheckPasswordSRP
-            password: pwd as unknown as Api.InputCheckPasswordSRP,
-          } as never) as unknown as any
-        ) as Promise<unknown>
+      await withFloodWait(
+        () =>
+          client.invoke(
+            new (Api.channels as unknown as { EditCreator: new (p: unknown) => unknown }).EditCreator({
+              channel: channelEntity as unknown as Api.InputChannel,
+              userId: inputUser as unknown as Api.InputUser,
+              // Older typings expect InputCheckPasswordSRP; runtime accepts the computed check.
+              password: pwd as unknown as Api.InputCheckPasswordSRP,
+            } as never) as unknown as any,
+          ) as Promise<unknown>,
       );
     }
-    const chanId = (channelEntity as unknown as { id?: unknown })?.id ? String((channelEntity as unknown as { id: unknown }).toString()) : 'channel';
-    const ownerId = (newOwnerEntity as { id?: unknown })?.id ? String((newOwnerEntity as { id: unknown }).toString()) : 'owner';
+    const chanId = (channelEntity as unknown as { id?: unknown })?.id
+      ? String((channelEntity as unknown as { id: unknown }).toString())
+      : 'channel';
+    const ownerId = (newOwnerEntity as { id?: unknown })?.id
+      ? String((newOwnerEntity as { id: unknown }).toString())
+      : 'owner';
     logger.info(`Transferred ownership of ${sanitizeLogValue(chanId)} to ${sanitizeLogValue(ownerId)} (via entities)`);
   } catch (e) {
     const msg = String((e as Error).message || e);
@@ -393,7 +456,9 @@ export async function transferChannelOwnershipWithEntities(
       throw new Error(`Not admin/creator of channel: ${msg}`);
     }
     if (msg.includes('FRESH_CHANGE_ADMINS_FORBIDDEN')) {
-      throw new Error('Ownership transfer forbidden — account too new or recent admin changes (Telegram anti-abuse, wait 24h)');
+      throw new Error(
+        'Ownership transfer forbidden — account too new or recent admin changes (Telegram anti-abuse, wait 24h)',
+      );
     }
     if (msg.includes('USER_NOT_MUTUAL_CONTACT') || msg.includes('USER_ID_INVALID')) {
       throw new Error(`new_owner_invalid — ${msg}`);
@@ -415,7 +480,7 @@ export const transferChannelOwnershipWithChannelEntity = transferChannelOwnershi
 export async function transferChannelOwnership(
   channel: string | number,
   newOwnerUserId: string | number,
-  password?: string
+  password?: string,
 ): Promise<void> {
   const pwd = password || config.twoFaPassword;
   if (!pwd) throw new Error('2FA password required for ownership transfer (TWO_FA_PASSWORD or per-request password)');
@@ -428,13 +493,18 @@ export async function transferChannelOwnership(
   const channelEntity = await resolveChannel(channel);
   let newOwnerEntity: unknown;
   try {
-    newOwnerEntity = await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, String(newOwnerUserId));
+    newOwnerEntity = await cachedGetEntity(
+      client as unknown as { getEntity: (id: string) => Promise<unknown> },
+      String(newOwnerUserId),
+    );
   } catch (e) {
     throw new Error(`new_owner_not_found: ${newOwnerUserId} — ${(e as Error).message}`);
   }
 
   try {
-    const passwordInfo = (await cachedGetPassword(client as unknown as { invoke: (req: unknown) => Promise<unknown> })) as unknown as { hasPassword: boolean };
+    const passwordInfo = (await cachedGetPassword(
+      client as unknown as { invoke: (req: unknown) => Promise<unknown> },
+    )) as unknown as { hasPassword: boolean };
     // If account has no password, we still need to handle
     let check: unknown = null;
     try {
@@ -455,25 +525,27 @@ export async function transferChannelOwnership(
 
     const inputUser = newOwnerEntity as unknown as Api.InputUser;
     if (check) {
-      await withFloodWait(() =>
-        client.invoke(
-          new (Api.channels as unknown as { EditCreator: new (p: unknown) => unknown }).EditCreator({
-            channel: channelEntity as unknown as Api.InputChannel,
-            userId: inputUser as unknown as Api.InputUser,
-            password: check as unknown as Api.InputCheckPasswordSRP,
-          } as never) as unknown as any
-        ) as Promise<unknown>
+      await withFloodWait(
+        () =>
+          client.invoke(
+            new (Api.channels as unknown as { EditCreator: new (p: unknown) => unknown }).EditCreator({
+              channel: channelEntity as unknown as Api.InputChannel,
+              userId: inputUser as unknown as Api.InputUser,
+              password: check as unknown as Api.InputCheckPasswordSRP,
+            } as never) as unknown as any,
+          ) as Promise<unknown>,
       );
     } else {
-      await withFloodWait(() =>
-        client.invoke(
-          new (Api.channels as unknown as { EditCreator: new (p: unknown) => unknown }).EditCreator({
-            channel: channelEntity as unknown as Api.InputChannel,
-            userId: inputUser as unknown as Api.InputUser,
-            // @ts-ignore — older typings expect InputCheckPasswordSRP
-            password: pwd as unknown as Api.InputCheckPasswordSRP,
-          } as never) as unknown as any
-        ) as Promise<unknown>
+      await withFloodWait(
+        () =>
+          client.invoke(
+            new (Api.channels as unknown as { EditCreator: new (p: unknown) => unknown }).EditCreator({
+              channel: channelEntity as unknown as Api.InputChannel,
+              userId: inputUser as unknown as Api.InputUser,
+              // Older typings expect InputCheckPasswordSRP; runtime accepts the computed check.
+              password: pwd as unknown as Api.InputCheckPasswordSRP,
+            } as never) as unknown as any,
+          ) as Promise<unknown>,
       );
     }
     logger.info(`Transferred ownership of ${sanitizeLogValue(channel)} to ${sanitizeLogValue(newOwnerUserId)}`);
@@ -489,7 +561,9 @@ export async function transferChannelOwnership(
       throw new Error(`Not admin/creator of channel ${channel}: ${msg}`);
     }
     if (msg.includes('FRESH_CHANGE_ADMINS_FORBIDDEN')) {
-      throw new Error('Ownership transfer forbidden — account too new or recent admin changes (Telegram anti-abuse, wait 24h)');
+      throw new Error(
+        'Ownership transfer forbidden — account too new or recent admin changes (Telegram anti-abuse, wait 24h)',
+      );
     }
     if (msg.includes('USER_NOT_MUTUAL_CONTACT') || msg.includes('USER_ID_INVALID')) {
       throw new Error(`new_owner_invalid: ${newOwnerUserId} — ${msg}`);
@@ -503,7 +577,7 @@ export async function transferChannelOwnership(
 
 export async function demoteAdminWithEntities(
   channelEntity: Api.Channel | Api.Chat,
-  userEntity: unknown
+  userEntity: unknown,
 ): Promise<void> {
   if (!userEntity) throw new Error('userEntity required');
   if (isChannelBlocked('FRESH_CHANGE_ADMINS_FORBIDDEN')) {
@@ -531,8 +605,8 @@ export async function demoteAdminWithEntities(
           manageTopics: false,
         }),
         rank: '',
-      })
-    )
+      }),
+    ),
   );
   logger.info(`Demoted user via entities`);
 }
@@ -549,7 +623,10 @@ export async function demoteAdmin(channel: string | number, userId: string | num
   const channelEntity = await resolveChannel(channel);
   let userEntity: unknown;
   try {
-    userEntity = await cachedGetEntity(client as unknown as { getEntity: (id: string) => Promise<unknown> }, String(userId));
+    userEntity = await cachedGetEntity(
+      client as unknown as { getEntity: (id: string) => Promise<unknown> },
+      String(userId),
+    );
   } catch (e) {
     throw new Error(`user_not_found: ${userId} — ${(e as Error).message}`);
   }
@@ -574,18 +651,20 @@ export async function demoteAdmin(channel: string | number, userId: string | num
           manageTopics: false,
         }),
         rank: '',
-      })
-    )
+      }),
+    ),
   );
   logger.info(`Demoted ${sanitizeLogValue(userId)} in ${sanitizeLogValue(channel)}`);
 }
 
-export async function listChannelAdmins(channel: string | number): Promise<Array<{ id: number | string; isCreator: boolean }>> {
+export async function listChannelAdmins(
+  channel: string | number,
+): Promise<Array<{ id: number | string; isCreator: boolean }>> {
   const client = await ensureClient();
   const channelEntity = await resolveChannel(channel);
   // Human delay before listing admins
   await humanDelay(800, 1500);
-  // @ts-ignore — teleproto expects BigInteger for hash, JS BigInt is compatible at runtime
+  // teleproto expects BigInteger for hash; JS BigInt is compatible at runtime.
   const res = (await withFloodWait(() =>
     client.invoke(
       new Api.channels.GetParticipants({
@@ -594,8 +673,8 @@ export async function listChannelAdmins(channel: string | number): Promise<Array
         offset: 0,
         limit: 100,
         hash: 0 as unknown as any,
-      })
-    )
+      }),
+    ),
   )) as unknown as {
     participants: Array<{
       className?: string;
@@ -610,11 +689,15 @@ export async function listChannelAdmins(channel: string | number): Promise<Array
   return (res.participants || []).map((p) => {
     const cls = p.className || p.participant?.className || '';
     // For Banned/Left the id is in peer.userId
-    const raw = ((p as { userId?: unknown }).userId ?? (p as { peer?: { userId?: unknown } }).peer?.userId) as unknown as {
+    const raw = ((p as { userId?: unknown }).userId ??
+      (p as { peer?: { userId?: unknown } }).peer?.userId) as unknown as {
       toJSNumber?: () => number;
       toString?: () => string;
     };
-    const id = raw !== undefined && raw !== null ? toSafeId(raw) : toSafeId((p as unknown as { toString: () => string }).toString?.() || '0');
+    const id =
+      raw !== undefined && raw !== null
+        ? toSafeId(raw)
+        : toSafeId((p as unknown as { toString: () => string }).toString?.() || '0');
     return {
       id,
       isCreator: cls === 'ChannelParticipantCreator',
