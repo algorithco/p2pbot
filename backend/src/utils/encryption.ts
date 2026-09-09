@@ -152,9 +152,24 @@ export function decryptWithDealKey(b64: string, dealKeyB64: string): string {
   return dec.toString('utf8');
 }
 
-/** Timing-safe token comparison (hashes first). */
+/**
+ * Timing-safe token comparison — raw bytes via timingSafeEqual, no fast hash
+ * (fixes CodeQL js/insufficient-password-hash pattern).
+ */
 export function safeTokenEqual(a: string, b: string): boolean {
-  const ha = crypto.createHash('sha256').update(String(a)).digest();
-  const hb = crypto.createHash('sha256').update(String(b)).digest();
-  return crypto.timingSafeEqual(ha, hb);
+  const ba = Buffer.from(String(a), 'utf8');
+  const bb = Buffer.from(String(b), 'utf8');
+  if (ba.length !== bb.length) {
+    try {
+      crypto.timingSafeEqual(ba, ba);
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+  try {
+    return crypto.timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
 }

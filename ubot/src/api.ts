@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
+import { timingSafeEqual, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { config } from './config';
@@ -25,11 +25,26 @@ try {
   cors = null;
 }
 
-const TIMING_PEPPER = 'ubot::timing-safe-compare::v1';
+/**
+ * Timing-safe string comparison for API keys — raw bytes via timingSafeEqual,
+ * no fast hash (fixes CodeQL js/insufficient-password-hash).
+ */
 function timingSafeStringEqual(a: string, b: string): boolean {
-  const ha = createHmac('sha256', TIMING_PEPPER).update(String(a)).digest();
-  const hb = createHmac('sha256', TIMING_PEPPER).update(String(b)).digest();
-  return timingSafeEqual(ha, hb);
+  const ba = Buffer.from(String(a), 'utf8');
+  const bb = Buffer.from(String(b), 'utf8');
+  if (ba.length !== bb.length) {
+    try {
+      timingSafeEqual(ba, ba);
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+  try {
+    return timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
 }
 
 function isValidId(v: unknown): boolean {
@@ -143,12 +158,13 @@ function rateLimit(opts: { windowMs: number; max: number; name: string }) {
       }
     }
     const ip = req.ip || (req.socket?.remoteAddress as string) || 'unknown';
+    // Bucket by auth status only — never hash/store raw API keys (avoids
+    // CodeQL js/insufficient-password-hash and secret retention in memory).
     let apiKeyPart = 'anon';
     if (config.apiKey) {
       const rawKey = (req.headers['x-api-key'] as string) || (req.headers['x-ubot-key'] as string) || '';
       if (rawKey) {
-        // HMAC (keyed) to avoid storing raw secrets in map keys — not a bare hash
-        apiKeyPart = createHmac('sha256', TIMING_PEPPER).update(String(rawKey)).digest('hex').slice(0, 12);
+        apiKeyPart = timingSafeStringEqual(rawKey, config.apiKey) ? 'valid-key' : 'invalid-key';
       } else {
         apiKeyPart = 'no-key';
       }
@@ -484,7 +500,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      if (mapped.status >= 500) logger.error('getChannelInfo error', redactSecrets({ channel: req.params.id, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      if (mapped.status >= 500) logger.error('getChannelInfo error', redactSecrets({ channel: sanitizeLogValue(req.params.id), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -499,7 +515,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      if (mapped.status >= 500) logger.error('listChannelAdmins error', redactSecrets({ channel: req.params.id, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      if (mapped.status >= 500) logger.error('listChannelAdmins error', redactSecrets({ channel: sanitizeLogValue(req.params.id), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -517,7 +533,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      logger.error('promote error', redactSecrets({ channel: req.params.id, userId, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      logger.error('promote error', redactSecrets({ channel: sanitizeLogValue(req.params.id), userId: sanitizeLogValue(userId), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -534,7 +550,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      logger.error('channel invite error', redactSecrets({ channel: req.params.id, userId, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      logger.error('channel invite error', redactSecrets({ channel: sanitizeLogValue(req.params.id), userId: sanitizeLogValue(userId), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -552,7 +568,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      logger.error('transfer error', redactSecrets({ channel: req.params.id, newOwnerId, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      logger.error('transfer error', redactSecrets({ channel: sanitizeLogValue(req.params.id), newOwnerId: sanitizeLogValue(newOwnerId), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -579,7 +595,7 @@ export function createApi() {
       } catch (pe) {
         const m = String((pe as Error).message || pe);
         if (!m.includes('CHAT_NOT_MODIFIED') && !m.includes('already admin')) {
-          logger.warn('takeover promote failed (may already be admin)', redactSecrets({ channel: req.params.id, newOwnerId, error: m, reqId: (req as unknown as Record<string, unknown>).reqId }));
+          logger.warn('takeover promote failed (may already be admin)', redactSecrets({ channel: sanitizeLogValue(req.params.id), newOwnerId: sanitizeLogValue(newOwnerId), error: sanitizeLogValue(m), reqId: (req as unknown as Record<string, unknown>).reqId }));
         }
       }
       // human delay between promote and transfer to avoid ban (2500 + rand*2500)
@@ -592,7 +608,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      logger.error('takeover error', redactSecrets({ channel: req.params.id, newOwnerId, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      logger.error('takeover error', redactSecrets({ channel: sanitizeLogValue(req.params.id), newOwnerId: sanitizeLogValue(newOwnerId), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -609,7 +625,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      logger.error('group promote error', redactSecrets({ group: req.params.id, userId, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      logger.error('group promote error', redactSecrets({ group: sanitizeLogValue(req.params.id), userId: sanitizeLogValue(userId), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -626,7 +642,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      logger.error('group invite error', redactSecrets({ group: req.params.id, userId, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      logger.error('group invite error', redactSecrets({ group: sanitizeLogValue(req.params.id), userId: sanitizeLogValue(userId), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -642,7 +658,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      logger.error('group transfer error', redactSecrets({ group: req.params.id, newOwnerId, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      logger.error('group transfer error', redactSecrets({ group: sanitizeLogValue(req.params.id), newOwnerId: sanitizeLogValue(newOwnerId), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -665,7 +681,7 @@ export function createApi() {
       try {
         await promoteGroupAdmin(String(req.params.id), newOwnerId, rights, rank || 'Owner');
       } catch (pe) {
-        logger.warn('group takeover promote failed', redactSecrets({ group: req.params.id, newOwnerId, error: String((pe as Error).message || pe), reqId: (req as unknown as Record<string, unknown>).reqId }));
+        logger.warn('group takeover promote failed', redactSecrets({ group: sanitizeLogValue(req.params.id), newOwnerId: sanitizeLogValue(newOwnerId), error: sanitizeLogValue(String((pe as Error).message || pe)), reqId: (req as unknown as Record<string, unknown>).reqId }));
       }
       await sleep(2500 + Math.random() * 2500);
       await transferGroupOwnership(String(req.params.id), newOwnerId, password);
@@ -676,7 +692,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      logger.error('group takeover error', redactSecrets({ group: req.params.id, newOwnerId, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      logger.error('group takeover error', redactSecrets({ group: sanitizeLogValue(req.params.id), newOwnerId: sanitizeLogValue(newOwnerId), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -709,7 +725,7 @@ export function createApi() {
       const mapped = mapTelegramError(e);
       if (mapped.status === 429) res.setHeader('Retry-After', String(mapped.retryAfter ?? 30));
       else if (mapped.retryAfter) res.setHeader('Retry-After', String(mapped.retryAfter));
-      logger.error('migrate error', redactSecrets({ group: req.params.id, error: mapped.error, reqId: (req as unknown as Record<string, unknown>).reqId }));
+      logger.error('migrate error', redactSecrets({ group: sanitizeLogValue(req.params.id), error: sanitizeLogValue(mapped.error), reqId: (req as unknown as Record<string, unknown>).reqId }));
       res.status(mapped.status).json({ error: mapped.error, ...(mapped.retryAfter ? { retryAfter: mapped.retryAfter } : {}) });
     }
   });
@@ -726,12 +742,12 @@ export function createApi() {
     logger.error(
       'Unhandled',
       redactSecrets({
-        error: mapped.error,
+        error: sanitizeLogValue(mapped.error),
         status: mapped.status,
         retryAfter: mapped.retryAfter,
         reqId: (req as unknown as Record<string, unknown>).reqId,
-        path: req.originalUrl,
-        stack: (err as Error).stack?.slice(0, 800),
+        path: sanitizeLogValue(req.originalUrl),
+        stack: sanitizeLogValue((err as Error).stack?.slice(0, 800)),
       } as Record<string, unknown>)
     );
     if (!res.headersSent) {
