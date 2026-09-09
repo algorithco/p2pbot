@@ -1,44 +1,47 @@
-/* Dark + Blue design tokens — forced dark palette, Telegram sync fallback */
+/* Mockup design tokens — exact spec from approved mockup.html
+   bg #0B0E14 · card #1A1F2E · accent #3B82F6 → #6366F1 · soft semantics */
 :root {
-  /* Base — forced dark */
-  --bg: #0b1220;
-  --surface: #101a2e;
-  --surface-2: #16233c;
-  --surface-3: #1c2e52;
-  --text: #eef3fa;
-  --hint: #8494ad;
-  --link: #5aa7ff;
-  --btn: #3390ec;
+  /* Base */
+  --bg: #0b0e14;
+  --surface: #1a1f2e;
+  --surface-2: #20263a;
+  --surface-3: #242c44;
+  --text: #f2f5fa;
+  --hint: rgba(242, 245, 250, 0.62);
+  --hint-2: rgba(242, 245, 250, 0.42);
+  --link: #93c5fd;
+  --btn: #3b82f6;
   --btn-text: #ffffff;
-  --destructive: #ef4666;
+  --destructive: #fb7185;
 
   /* Brand */
-  --accent: #3390ec;
-  --accent-2: #2a72dd;
-  --accent-soft: rgba(51, 144, 236, 0.14);
-  --accent-soft-strong: rgba(51, 144, 236, 0.22);
-  --accent-grad: linear-gradient(135deg, #3d9bff 0%, #2568d9 100%);
-  --accent-grad-2: linear-gradient(135deg, #3d96f2 0%, #2a72dd 100%);
+  --accent: #3b82f6;
+  --accent-2: #6366f1;
+  --accent-soft: rgba(59, 130, 246, 0.14);
+  --accent-soft-strong: rgba(59, 130, 246, 0.24);
+  --accent-grad: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  --accent-grad-2: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
 
-  --success: #2ecc8f;
-  --success-soft: rgba(46, 204, 143, 0.14);
-  --warn: #f5b83d;
-  --warn-soft: rgba(245, 184, 61, 0.15);
-  --purple: #a06bfa;
-  --purple-soft: rgba(160, 107, 250, 0.16);
-  --danger: #ef4666;
-  --danger-soft: rgba(239, 70, 102, 0.14);
+  /* Semantics — soft, readable on dark, not neon */
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.12);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.12);
+  --purple: #8b5cf6;
+  --purple-soft: rgba(139, 92, 246, 0.14);
+  --danger: #fb7185;
+  --danger-soft: rgba(251, 113, 133, 0.1);
 
-  --border: rgba(148, 170, 205, 0.16);
-  --border-strong: rgba(148, 170, 205, 0.26);
-  --shadow-card: 0 6px 24px rgba(2, 8, 20, 0.35);
-  --shadow-card-lg: 0 12px 32px rgba(2, 8, 20, 0.45);
-  --shadow-fab: 0 10px 26px rgba(38, 108, 217, 0.5);
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.11);
+  --shadow-card: 0 12px 28px rgba(0, 0, 0, 0.4);
+  --shadow-card-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --shadow-fab: 0 10px 24px rgba(59, 130, 246, 0.5);
 
   --r-sm: 10px;
   --r-md: 14px;
-  --r-lg: 18px;
-  --r-xl: 24px;
+  --r-lg: 16px;
+  --r-xl: 16px;
   --r-pill: 999px;
 
   --sat: env(safe-area-inset-top, 0px);
@@ -47,4 +50,34 @@
 
   --ease: cubic-bezier(0.25, 0.8, 0.35, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ---- Motion tokens (v2) ---- */
+  --dur-fast: 150ms;
+  --dur-base: 250ms;
+  --dur-slow: 420ms;
+  --dur-slower: 650ms;
+
+  /* ---- Elevation scale (v2) ---- */
+  --elev-1: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --elev-2: 0 12px 28px rgba(0, 0, 0, 0.4);
+  --elev-3: 0 16px 40px rgba(0, 0, 0, 0.5);
+
+  /* ---- Fluid type scale (v2) ---- */
+  --text-xs: 12px;
+  --text-sm: 13.5px;
+  --text-md: 15px;
+  --text-lg: clamp(17px, 4.4vw, 19px);
+  --text-xl: 22px;
+  --text-2xl: clamp(25px, 7vw, 34px);
+
+  /* ---- Spacing scale (v2) ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 28px;
 }
+
