@@ -7,6 +7,9 @@ export default defineConfig({
   server: {
     port: 8080,
     strictPort: true,
+    // Cloudflare quick tunnels (trycloudflare.com) for the Telegram Mini App.
+    // Leading dot = any subdomain, so tunnel URL rotations keep working.
+    allowedHosts: ['.trycloudflare.com'],
     proxy: {
       '/api': {
         target: 'http://localhost:3000',

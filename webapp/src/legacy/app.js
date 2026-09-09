@@ -185,7 +185,7 @@
 
   function dealCard(deal) {
     var am = UI.assetMeta(deal.asset);
-    var sm = UI.statusMeta(deal.status);
+    var sm = UI.statusMeta(deal.status, deal);
     var uid = App.state.meId;
     var iAmBuyer = Number(deal.buyer_telegram_id) === uid;
     var otherRole = iAmBuyer ? 'Sotuvchi' : 'Xaridor';
@@ -801,15 +801,12 @@
 
   /* ================= Create deal wizard ================= */
 
-  var DEADLINE_OPTIONS = [
-    { h: 24, label: '24 soat' },
-    { h: 48, label: '48 soat' },
-    { h: 72, label: '3 kun' },
-    { h: 168, label: '7 kun' }
-  ];
+  // Bitim muddati tanlanmaydi — har doim 10 soat. 10 soat ichida to'lov
+  // bo'lmasa bitim serverda saqlangan holda avtomatik yopiladi.
+  var DEAL_DURATION_H = 10;
 
   function newWizard() {
-    return { step: 1, role: 'buy', asset: 'TON', amount: '', terms: '', deadlineH: 24 };
+    return { step: 1, role: 'buy', asset: 'TON', amount: '', terms: '' };
   }
 
   function viewCreate() {
@@ -856,7 +853,7 @@
         asset: w.asset,
         amount: parseFloat(w.amount),
         terms: w.terms || '',
-        deadline: new Date(Date.now() + w.deadlineH * 3600000).toISOString()
+        deadline: new Date(Date.now() + DEAL_DURATION_H * 3600000).toISOString()
       };
       if (!TG.available) UI.toast('Bitim yaratilmoqda…');
       else TG.main.show('Yaratilmoqda…', function () {}, { progress: true });
@@ -1023,30 +1020,19 @@
         });
         var counter = UI.h('span', { class: 'char-count muted', text: (w.terms || '').length + '/500' });
 
-        var dlRow = UI.h('div', { class: 'chip-row' });
-        DEADLINE_OPTIONS.forEach(function (o) {
-          dlRow.appendChild(UI.h('button', {
-            class: 'chip' + (w.deadlineH === o.h ? ' active' : ''),
-            onclick: function () {
-              TG.haptic.tap();
-              w.deadlineH = o.h;
-              Array.prototype.forEach.call(dlRow.children, function (c) { c.classList.remove('active'); });
-              this.classList.add('active');
-            }
-          }, [o.label]));
-        });
-
         body = [
-          UI.h('h3', { style: 'font-size:18px;margin-bottom:4px', text: 'Shartlar va muddat' }),
+          UI.h('h3', { style: 'font-size:18px;margin-bottom:4px', text: 'Shartlar' }),
           UI.h('p', { class: 'muted small', style: 'margin-bottom:14px', text: "Aniq shartlar kelishmovchilikning oldini oladi. Har ikki tomon qo'shilishdan oldin ko'radi." }),
           UI.h('div', { class: 'field' }, [
             UI.h('label', {}, [document.createTextNode('Shartlar '), counter]),
             ta
           ]),
-          UI.h('div', { class: 'field' }, [
-            UI.h('label', { text: 'Avto-yakunlash muddati' }),
-            dlRow,
-            UI.h('div', { class: 'field-hint', text: "Muddat o'tgach admin tasdiqlarga qarab bitimni yakunlaydi." })
+          UI.h('div', { class: 'card', style: 'padding:12px 14px' }, [
+            UI.h('div', { class: 'rrow' }, [
+              UI.h('span', { class: 'k', text: 'Bitim muddati' }),
+              UI.h('span', { class: 'v', text: '10 soat' })
+            ]),
+            UI.h('div', { class: 'field-hint', style: 'margin-top:6px', text: "10 soat ichida to'lov bo'lmasa bitim avtomatik yopiladi (ma'lumotlar serverda saqlanadi)." })
           ])
         ];
       }
@@ -1061,7 +1047,7 @@
             rrow('Summa', UI.fmtAmount(parseFloat(w.amount)) + ' ' + w.asset),
             rrow('Komissiya (taxm.)', UI.fmtAmount(feeOf(w.amount)) + ' ' + w.asset),
             w.terms ? rrow('Shartlar', w.terms.length > 80 ? UI.truncate(w.terms, 77, 0) : w.terms) : null,
-            rrow('Muddat', DEADLINE_OPTIONS.filter(function (o) { return o.h === w.deadlineH; })[0].label)
+            rrow('Muddat', '10 soat (avtomatik)')
           ].filter(Boolean)),
           UI.h('div', { class: 'total-line' }, [
             UI.h('span', { text: 'Escrow summasi' }),
@@ -1430,11 +1416,13 @@
 
   function viewDeal(id) {
     setTabbar(true);
+    // Back from a deal always goes to the main page (not history — history
+    // would bounce chat <-> deal forever when coming from the chat).
     setTopbar('Bitim #' + id, {
-      back: function () { navBack('#/home'); },
+      back: function () { go('#/home'); },
       action: { icon: ICON_REFRESH, handler: function () { load(); } }
     });
-    TG.showBack(function () { navBack('#/home'); });
+    TG.showBack(function () { go('#/home'); });
 
     var box = UI.h('div', {});
     document.getElementById('view').innerHTML = '';
@@ -1470,7 +1458,7 @@
 
     function render(deal) {
       var am = UI.assetMeta(deal.asset);
-      var sm = UI.statusMeta(deal.status);
+      var sm = UI.statusMeta(deal.status, deal);
       // Fresh uid: Telegram can inject the real user after boot, leaving App.state.meId stale.
       var uid = (function () {
         try {
@@ -1950,91 +1938,6 @@
     document.getElementById('view').appendChild(box);
     box.appendChild(UI.h('div', {}, UI.skeletonDeals(1)));
 
-    function showRejected() {
-      box.innerHTML = '';
-      box.appendChild(UI.h('div', { class: 'success-panel' }, [
-        UI.h('div', { class: 'check-ring', style: 'border-color:var(--danger);color:var(--danger)', html: '<svg viewBox="0 0 34 34" width="44" height="44"><path d="M11 11l12 12M23 11 11 23" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>' }),
-        UI.h('h2', { text: "So'rov rad etildi" }),
-        UI.h('p', { text: "Yaratuvchi so'rovingizni rad etdi. Qayta qo'shilish uchun yangi taklif havolasini so'rang." }),
-        UI.h('div', { class: 'btn-row' }, [
-          UI.h('button', { class: 'btn btn-primary', onclick: function () { go('#/home'); } }, ['Bosh sahifa'])
-        ])
-      ]));
-    }
-
-    function showPending() {
-      box.innerHTML = '';
-      var statusLine = UI.h('p', { class: 'small muted', style: 'text-align:center', text: "Holat tekshirilmoqda…" });
-      box.appendChild(UI.h('div', { class: 'success-panel' }, [
-        UI.h('div', { class: 'check-ring', html: '<svg viewBox="0 0 34 34" width="44" height="44"><path d="M8 18l6 6L26 11"/></svg>' }),
-        UI.h('h2', { text: "So'rov yuborildi" }),
-        UI.h('p', { text: "Yaratuvchi bitim chati ichida tasdiqlaydi — tasdiqlangach avtomatik bitim chatiga o'tasiz." }),
-        statusLine,
-        UI.h('div', { class: 'btn-row' }, [
-          UI.h('button', { class: 'btn btn-primary', onclick: function () { go('#/home'); } }, ['Bosh sahifa']),
-          UI.h('button', { class: 'btn btn-ghost', onclick: function () { checkStatus(true); } }, ['Hozir tekshirish'])
-        ])
-      ]));
-      var stopped = false;
-      App.cleanupFns.push(function () { stopped = true; if (timer) clearInterval(timer); });
-      // Authoritative status from the server (pending/approved/rejected), not
-      // blind deal polling — so a rejection actually surfaces instead of
-      // waiting forever.
-      function checkStatus(manual) {
-        if (typeof Api.joinStatus !== 'function') { checkStatusLegacy(manual); return; }
-        Api.joinStatus(id, token).then(function (st) {
-          if (stopped) return;
-          var s = String((st && st.status) || 'pending');
-          if (s === 'approved' || (st && st.isPartyNow)) {
-            stopped = true;
-            if (timer) clearInterval(timer);
-            TG.haptic.success();
-            UI.toast("Tasdiqlandi — bitim chati ochilmoqda", 'ok');
-            go('#/deal/' + id + '/chat');
-          } else if (s === 'rejected') {
-            stopped = true;
-            if (timer) clearInterval(timer);
-            TG.haptic.error();
-            showRejected();
-          } else if (s === 'none') {
-            statusLine.textContent = "So'rov topilmadi — havola eskirgan bo'lishi mumkin, yangisini so'rang.";
-          } else if (manual) {
-            statusLine.textContent = "Hali tasdiqlanmagan — yaratuvchi bitim chatida ko'radi.";
-          } else {
-            statusLine.textContent = "Yaratuvchi tasdig'i kutilmoqda…";
-          }
-        }).catch(function () {
-          // Offline — keep waiting silently, or fall back to deal polling
-          if (manual) statusLine.textContent = "Hali tasdiqlanmagan — birozdan keyin qayta tekshiring.";
-        });
-      }
-      // Fallback for older cached backends without /join-status.
-      function checkStatusLegacy(manual) {
-        Api.deal(id).then(function (deal) {
-          if (stopped) return;
-          if (!deal) return;
-          var uid = App.state.meId;
-          var iAmParty = Number(deal.buyer_telegram_id) === uid || Number(deal.seller_telegram_id) === uid;
-          if (iAmParty) {
-            stopped = true;
-            if (timer) clearInterval(timer);
-            TG.haptic.success();
-            UI.toast("Tasdiqlandi — bitim chati ochilmoqda", 'ok');
-            go('#/deal/' + id + '/chat');
-          } else if (manual) {
-            statusLine.textContent = "Hali tasdiqlanmagan — yaratuvchi bitim chatida ko'radi.";
-          } else {
-            statusLine.textContent = "Yaratuvchi tasdig'i kutilmoqda…";
-          }
-        }).catch(function () {
-          if (manual) statusLine.textContent = "Hali tasdiqlanmagan — birozdan keyin qayta tekshiring.";
-        });
-      }
-      var timer = setInterval(function () { checkStatus(false); }, 4000);
-      App.cleanupFns.push(function () { if (timer) clearInterval(timer); });
-      checkStatus(false);
-    }
-
     Api.deal(id, token).then(function (deal) {
       box.innerHTML = '';
       if (!deal) {
@@ -2044,7 +1947,7 @@
       var am = UI.assetMeta(deal.asset);
       var content = UI.h('div', {}, [
         UI.h('h3', { text: "Escrow bitimga qo'shilish #" + deal.id }),
-        UI.h('p', { class: 'sub', text: 'Summa ' + UI.fmtAmount(deal.amount) + ' ' + am.symbol + ' · Holat: ' + UI.statusMeta(deal.status).label }),
+        UI.h('p', { class: 'sub', text: 'Summa ' + UI.fmtAmount(deal.amount) + ' ' + am.symbol + ' · Holat: ' + UI.statusMeta(deal.status, deal).label }),
         UI.h('div', { class: 'card review-rows', style: 'padding:6px 14px;margin-bottom:16px' }, [
           UI.h('div', { class: 'rrow' }, [UI.h('span', { class: 'k', text: 'Xaridor' }), UI.h('span', { class: 'v', text: deal.buyer_telegram_id || '—' })]),
           UI.h('div', { class: 'rrow' }, [UI.h('span', { class: 'k', text: 'Sotuvchi' }), UI.h('span', { class: 'v', text: deal.seller_telegram_id || '—' })])
@@ -2067,8 +1970,10 @@
             TG.haptic.success();
             UI.sheetClose();
             if (res && (res.pending || res.requestId)) {
-              UI.toast("So'rov yuborildi — yaratuvchi bitim chatida tasdiqlaydi", 'ok');
-              showPending();
+              // Request sent — back to the main page. The bot DMs the joiner
+              // on approval, then the deal shows up in their list.
+              UI.toast("So'rov yuborildi — tasdiqlangach bot xabar beradi", 'ok');
+              go('#/home');
             } else {
               UI.toast("Bitimga qo'shildingiz", 'ok');
               go('#/deal/' + id);

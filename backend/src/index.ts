@@ -1693,17 +1693,26 @@ function isDisputedDeal(d: any): boolean {
 function startSchedulers() {
   const run = async () => {
     try {
-      // (a) close AWAITING_DEPOSIT older than 24h
+      // (a) close AWAITING_DEPOSIT older than 10h (fixed deal lifetime).
+      // The full deal record (deal, messages, parties) stays in the DB — only
+      // the status flips to REFUNDED + confirmations.autoClosed, so the app
+      // shows "Yopildi" while nothing is deleted from the server.
       try {
         const old = await db.query(
-          `SELECT * FROM deals WHERE status = 'AWAITING_DEPOSIT' AND created_at < now() - interval '24 hours' LIMIT 100`
+          `SELECT * FROM deals WHERE status = 'AWAITING_DEPOSIT' AND created_at < now() - interval '10 hours' LIMIT 100`
         );
         for (const d of old.rows) {
           if (isDisputedDeal(d)) continue;
           if (String(d.status) === 'RELEASED' || String(d.status) === 'REFUNDED') continue;
           try {
             await updateDealStatus(Number(d.id), 'REFUNDED');
-            const msg = `24 soat to'lov bo'lmagani uchun yopildi`;
+            try {
+              await db.query(
+                `UPDATE deals SET confirmations = COALESCE(confirmations,'{}'::jsonb) || '{"autoClosed":true}'::jsonb, updated_at = now() WHERE id = $1`,
+                [d.id]
+              );
+            } catch {}
+            const msg = `10 soat to'lov bo'lmagani uchun yopildi`;
             const like = dealLikeForNotify(d);
             if (d.buyer_telegram_id != null) {
               try {
@@ -1717,11 +1726,11 @@ function startSchedulers() {
             }
             try {
               const { addDealMessage } = await import('./services/dealService');
-              await addDealMessage(Number(d.id), 0, `Tizim: 24 soat to'lov bo'lmagani uchun yopildi (Deal #${d.id}).`);
+              await addDealMessage(Number(d.id), 0, `Tizim: 10 soat to'lov bo'lmagani uchun yopildi (Deal #${d.id}).`);
             } catch {}
             try {
               const { saveAdminAlert } = await import('./db/queries');
-              await saveAdminAlert('auto_close', `Deal #${d.id} 24 soat to'lovsiz yopildi (REFUNDED)`, { dealId: Number(d.id) });
+              await saveAdminAlert('auto_close', `Deal #${d.id} 10 soat to'lovsiz yopildi (REFUNDED+autoClosed)`, { dealId: Number(d.id) });
             } catch {}
           } catch (e) {
             logger.warn(`expiry close failed for deal #${sanitizeLogValue(d.id)}`, e);
@@ -1946,4 +1955,9 @@ async function shutdown(signal: string) {
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
-process.on('unhandledRejection', logger.error);
+process.on('unhandledRejection', (e) => {
+  logger.error('unhandledRejection', e);
+});
+process.on('uncaughtException', (e) => {
+  logger.error('uncaughtException', e);
+});

@@ -41,9 +41,12 @@ export function registerCommands(bot: Bot) {
         const base = (config.webappUrl || '').replace(/\/$/, '');
         const username = (config.botUsername || 'uzsavdochibot').replace(/^@/, '');
         if (dealId && token && base) {
-          const joinUrl = `${base}/#/deal/${dealId}/join/${token}`;
-          const kb = webAppButton(joinUrl, "Ilovani ochish — qo'shilish");
-          await ctx.reply(`🤝 Sherik taklifini qabul qilish ilovada.\nPastdagi tugmani bosing.`, { reply_markup: kb });
+          // Carry the invite twice: hash route (canonical) + ?startapp= query
+          // (some clients drop the URL fragment when opening a web_app — the
+          // Mini App resolves the query/start_param fallback to the join page).
+          const joinUrl = `${base}/?startapp=${encodeURIComponent(`join_${dealId}_${token}`)}#/deal/${dealId}/join/${token}`;
+          const kb = webAppButton(joinUrl, "➕ Bitimga qo'shilish");
+          await ctx.reply(`🤝 Sizni Bitim #${dealId} ga taklif qilishdi.\nQo'shilish uchun pastdagi tugmani bosing — yaratuvchi bitim chatida tasdiqlaydi.`, { reply_markup: kb });
           handled = true;
         } else if (dealId && token) {
           // WEBAPP_URL not configured — fall back to the bot's Mini App link.
@@ -52,8 +55,8 @@ export function registerCommands(bot: Bot) {
           // Definitive fix: set WEBAPP_URL=https://<public-frontend> in backend/.env.
           logger.warn(`Bot /start join_${dealId}_… without button-url: WEBAPP_URL empty, using t.me/${username}/app fallback`);
           const appLink = `https://t.me/${username}/app?startapp=${encodeURIComponent(`join_${dealId}_${token}`)}`;
-          const kb = new InlineKeyboard().url("Ilovani ochish — qo'shilish", appLink);
-          await ctx.reply(`🤝 Sherik taklifini qabul qilish ilovada.\nPastdagi tugmani bosing.`, { reply_markup: kb });
+          const kb = new InlineKeyboard().url("➕ Bitimga qo'shilish", appLink);
+          await ctx.reply(`🤝 Sizni Bitim #${dealId} ga taklif qilishdi.\nQo'shilish uchun pastdagi tugmani bosing — yaratuvchi bitim chatida tasdiqlaydi.`, { reply_markup: kb });
           handled = true;
         } else {
           await ctx.reply(`Taklif havolasi buzilgan — yangisini so'rang.`);

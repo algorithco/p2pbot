@@ -99,8 +99,20 @@ const STATUSES: Record<string, { label: string; cls: string; step: number }> = {
   RELEASED: { label: 'Yakunlandi', cls: 'st-released', step: 3 },
   REFUNDED: { label: 'Qaytarildi', cls: 'st-refunded', step: 3 },
 };
-export function statusMeta(status: string) {
-  const m = STATUSES[String(status || '').toUpperCase()];
+export function statusMeta(status: string, deal?: any) {
+  const u = String(status || '').toUpperCase();
+  // Muddat o'tib avtomatik yopilgan bitim "Yopildi" ko'rinadi (pul hech
+  // qachon qimirlamagan, hamma ma'lumot serverda saqlanib qolgan).
+  try {
+    if (u === 'REFUNDED' && deal) {
+      let conf: any = (deal as any).confirmations;
+      if (typeof conf === 'string' && conf) { try { conf = JSON.parse(conf); } catch { conf = null; } }
+      if (conf && (conf as any).autoClosed === true) {
+        return { label: 'Yopildi', cls: 'st-refunded', step: 3 };
+      }
+    }
+  } catch {}
+  const m = STATUSES[u];
   return m || { label: String(status || "Noma'lum"), cls: 'st-unknown', step: -1 };
 }
 export function isFinalStatus(status: string) {

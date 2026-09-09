@@ -148,43 +148,65 @@ a { color: var(--link); text-decoration: none; }
 .no-tabbar { padding-bottom: calc(var(--sab) + 24px); }
 .view-root.no-tabbar ~ .tabbar { display: none; }
 
-/* ---------------- Tab bar ---------------- */
+/* ---------------- Tab bar: transparent floating circular nav ---------------- */
 .tabbar {
   position: fixed;
   bottom: 0; left: 50%;
   transform: translateX(-50%);
   width: 100%; max-width: 560px;
   display: flex;
-  align-items: stretch;
-  justify-content: space-around;
-  padding-bottom: var(--sab);
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-top: 1px solid var(--border);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 10px 20px calc(var(--sab) + 12px);
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 0;
+  box-shadow: none;
   z-index: 40;
+  pointer-events: none;
 }
+.tabbar > * { pointer-events: auto; }
 .tab-btn {
-  flex: 1;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 8px 0 7px;
-  color: var(--hint);
-  font-size: 11px; font-weight: 600;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 2px 4px 0;
+  color: rgba(238, 243, 250, 0.58);
+  background: transparent;
+  border: 0;
   transition: color .2s;
   position: relative;
 }
-.tab-btn.active { color: var(--accent); }
-.tab-btn:active { opacity: .75; }
-.tab-new .fab-plus {
-  width: 46px; height: 46px; margin-top: -22px;
+.tab-btn .tab-circle {
+  width: 52px; height: 52px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #3d9bff, #2568d9);
-  color: #fff;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 8px 20px rgba(38, 108, 217, .45);
-  transition: transform .18s var(--ease), box-shadow .2s;
+  display: grid; place-items: center;
+  background: transparent;
+  transition: background-color .22s ease, color .22s ease, transform .18s ease;
 }
-.tab-new:active .fab-plus { transform: scale(.9); }
+.tab-btn .tab-circle svg { width: 22px; height: 22px; display: block; }
+.tab-btn .tab-label {
+  font-size: 10px; font-weight: 600; letter-spacing: .04em; line-height: 1.2;
+  white-space: nowrap; max-width: 76px; overflow: hidden; text-overflow: ellipsis;
+}
+.tab-btn.active { color: #fff; }
+.tab-btn.active .tab-circle { background: rgba(255, 255, 255, 0.13); color: #fff; }
+.tab-btn:active .tab-circle { transform: scale(.93); }
+.tab-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.tab-btn.tab-create .tab-circle {
+  background: #f2f5fa;
+  color: #0b1220;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+.tab-btn.tab-create { color: rgba(238, 243, 250, 0.58); }
+.tab-btn.tab-create.active { color: #fff; }
+@media (max-width: 360px) {
+  .tabbar { padding-left: 10px; padding-right: 10px; gap: 2px; }
+  .tab-btn .tab-circle { width: 48px; height: 48px; }
+  .tab-btn .tab-label { font-size: 9px; max-width: 62px; }
+}
 
 /* ---------------- Cards & sections ---------------- */
 .card {

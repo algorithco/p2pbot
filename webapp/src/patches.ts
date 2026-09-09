@@ -4,6 +4,7 @@ import { TG } from './lib/tg';
 import { UI } from './lib/ui';
 import { ChatCrypto } from './lib/crypto';
 import { Wallet } from './lib/wallet';
+import { mountGooeyNav, type GooeyNavHandle } from './lib/gooey-nav';
 
 declare global { interface Window { App?: any; } }
 
@@ -43,8 +44,8 @@ function enhanceApp(App: any) {
     }
   }, true);
 
-    // Also patch tabbar to include new tabs
-  patchTabbar();
+    // Bottom navigation: GooeyNav pill (mounts into the #tabbar shell)
+  mountBottomNav();
 
   // Intercept viewDeal to add Confirm button and enhanced pay
   patchViewDeal();
@@ -160,28 +161,55 @@ function navBack(fallback: string) {
   else go(fallback || '#/home');
 }
 
+const STROKE = 'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"';
+const svgWrap = (inner: string) => `<svg viewBox="0 0 24 24" width="22" height="22" ${STROKE} aria-hidden="true">${inner}</svg>`;
+const svgPlus = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
+
 function patchTabbar() {
+  // Legacy .tab-btn buttons are gone (GooeyNav owns #tabbar now) — kept as a
+  // no-op so older cached bundles calling it don't crash. See mountBottomNav.
+}
+
+function mountBottomNav() {
   const tabbar = document.getElementById('tabbar');
   if (!tabbar) return;
-  // Ensure tab buttons navigate correctly via our patches
-  Array.from(tabbar.querySelectorAll('.tab-btn')).forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.getAttribute('data-tab')!;
+  tabbar.innerHTML = '';
+  const hashFor = (h: string) => h;
+  // Order left → right: + (create) · Bosh sahifa · Savdo · Kanallar · Hisob.
+  // Transparent floating nav: circular buttons, outline icons, circular active.
+  const handle: GooeyNavHandle = mountGooeyNav(tabbar, {
+    items: [
+      { hash: '#/create', label: 'Yangi', icon: svgPlus },
+      { hash: '#/home', label: 'Bosh sahifa', icon: svgWrap('<path d="M4 10.5 12 4l8 6.5"/><path d="M6 9.8V20h12V9.8"/><path d="M10 20v-5.5h4V20"/>') },
+      { hash: '#/trade', label: 'Savdo', icon: svgWrap('<path d="M7 8.5h12.5L16 5"/><path d="M17 15.5H4.5L8 19"/>') },
+      { hash: '#/channels', label: 'Kanallar', icon: svgWrap('<path d="M4 10.5v3a1 1 0 0 0 1 1h2l5 3.5v-11L7 9.5H5a1 1 0 0 0-1 1Z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/>') },
+      { hash: '#/profile', label: 'Hisob', icon: svgWrap('<circle cx="12" cy="8" r="3.8"/><path d="M5 20a7 7 0 0 1 14 0"/>') },
+    ],
+    initialActiveIndex: indexForHash(location.hash || '#/home'),
+    onSelect: (_index, item) => {
       TG.haptic.tap();
-      // update active
-      tabbar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
+      go(hashFor(item.hash));
+    },
   });
-  // Keep active sync on hashchange
+  (window as any).__gooeyTabs = handle;
+  // Silent sync for route changes that don't come from a tab tap
+  // (back button, programmatic go(), deep links).
   window.addEventListener('hashchange', () => {
-    const h = location.hash || '#/home';
-    tabbar.querySelectorAll('.tab-btn').forEach(b => {
-      const t = b.getAttribute('data-tab')!;
-      if (h.startsWith(t)) b.classList.add('active');
-      else b.classList.remove('active');
-    });
+    try {
+      const h = (window as any).__gooeyTabs as GooeyNavHandle | undefined;
+      h?.sync(location.hash || '#/home');
+    } catch {}
   });
+}
+
+function indexForHash(h: string): number {
+  const hash = h || '#/home';
+  if (hash.startsWith('#/create')) return 0;
+  if (hash === '#/home' || hash === '') return 1;
+  if (hash.startsWith('#/trade')) return 2;
+  if (hash.startsWith('#/channels')) return 3;
+  if (hash.startsWith('#/profile')) return 4;
+  return 1;
 }
 
 function patchViewHome() {
@@ -678,15 +706,16 @@ async function pollInboxBadge() {
     }
     (window as any).__inboxPrev = count;
     (window as any).__inboxInit = true;
-    const tab = document.querySelector('.tab-btn[data-tab="#/home"]');
-    // Bitimlar tabida inbox soni nishoni
+    // Bosh sahifa tabida inbox soni nishoni (float-nav home item, legacy .tab-btn fallback)
     let badge = document.getElementById('inbox-badge');
     if (count > 0) {
       if (!badge) {
         badge = UI.h('span', { class: 'badge plain', style: 'background:var(--accent);color:#fff;font-size:10px;padding:2px 6px;margin-left:4px', text: String(count) });
         (badge as any).id = 'inbox-badge';
-        const homeBtn = document.querySelector('[data-tab="#/home"] span:last-child');
-        homeBtn?.parentNode?.appendChild(badge);
+        const homeBtn = document.querySelector('[data-tab="#/home"] span:last-child')
+          || document.querySelector('#tabbar a[href="#/home"] .float-label')
+          || document.querySelector('#tabbar .gooey-nav-container nav ul li a[href="#/home"]');
+        homeBtn?.appendChild(badge);
       } else badge.textContent = String(count);
     } else if (badge) badge.remove();
   } catch {}

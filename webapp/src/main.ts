@@ -1,5 +1,6 @@
 import './styles/app.css';
 import './styles/tokens.css';
+import './styles/gooey-nav.css';
 
 import { TG } from './lib/tg';
 import { Api } from './lib/api';
@@ -55,21 +56,71 @@ try {
   }
 } catch { await loaderDone; }
 
-// Boot handling for start_param deep links
-setTimeout(() => {
+// Join intent resolution — the bot button carries the invite THREE ways
+// (hash route, ?startapp= query, Telegram start_param) because some clients
+// drop the URL fragment when opening a web_app. First hit wins; the hash
+// route is canonical and we navigate to it when it isn't already set.
+function parseJoinParam(sp: string): { id: string; token: string } | null {
   try {
-    const sp = TG.startParam();
-    if (sp && sp.indexOf('.') !== -1) {
+    if (!sp) return null;
+    if (sp.indexOf('.') !== -1) {
       const [id, token] = sp.split('.');
-      if (id && token) location.hash = `#/deal/${id}/join/${token}`;
-    } else if (sp && sp.startsWith('join_')) {
-      // bot deep link join_<id>_<token>
+      if (id && /^\d+$/.test(id) && token) return { id, token };
+      return null;
+    }
+    if (sp.startsWith('join_')) {
       const parts = sp.split('_');
       if (parts.length >= 3) {
         const dealId = parts[1];
         const token = parts.slice(2).join('_');
-        location.hash = `#/deal/${dealId}/join/${token}`;
+        if (/^\d+$/.test(dealId) && token) return { id: dealId, token };
       }
     }
   } catch {}
-}, 600);
+  return null;
+}
+
+function resolveJoinIntent(): { id: string; token: string } | null {
+  try {
+    // 1. Canonical hash route #/deal/<id>/join/<token> (already where we need to be)
+    const hm = (location.hash || '').match(/^#\/deal\/(\d+)\/join\/([A-Za-z0-9_\-]+)/);
+    if (hm) return { id: hm[1], token: hm[2] };
+    // 2. Query redundancy from the bot button: ?startapp=join_<id>_<token>
+    const qs = new URLSearchParams(location.search || '');
+    const q = parseJoinParam(qs.get('startapp') || qs.get('start_param') || '');
+    if (q) return q;
+    // 3. Explicit ?deal=<id>&token=<token> (or ?join=<id>.<token>)
+    const qd = qs.get('deal');
+    const qt = qs.get('token');
+    if (qd && /^\d+$/.test(qd) && qt) return { id: qd, token: qt };
+    const qj = parseJoinParam(qs.get('join') || '');
+    if (qj) return qj;
+    // 4. Path form /join/<id>/<token> or /deal/<id>/join/<token> (nginx SPA fallback)
+    const pm = location.pathname.match(/^\/(?:join\/(\d+)\/([A-Za-z0-9_\-]+)|deal\/(\d+)\/join\/([A-Za-z0-9_\-]+))\/?$/);
+    if (pm) {
+      const id = pm[1] || pm[3];
+      const token = pm[2] || pm[4];
+      if (id && token) return { id, token };
+    }
+    // 5. Telegram start_param (t.me/<bot>/app?startapp=...)
+    return parseJoinParam(TG.startParam());
+  } catch {}
+  return null;
+}
+
+function applyJoinIntent(): boolean {
+  try {
+    const intent = resolveJoinIntent();
+    if (!intent) return false;
+    const want = `#/deal/${intent.id}/join/${intent.token}`;
+    if ((location.hash || '') !== want) location.hash = want;
+    return true;
+  } catch {}
+  return false;
+}
+
+// Apply immediately (before the legacy router boots) so the first paint is the
+// join page, then re-check late (Telegram can inject start_param after load).
+applyJoinIntent();
+setTimeout(() => { applyJoinIntent(); }, 600);
+setTimeout(() => { applyJoinIntent(); }, 2500);

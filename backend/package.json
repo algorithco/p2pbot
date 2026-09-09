@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node --files src/index.ts"
   },
   "dependencies": {
     "@ton/core": "^0.63.1",

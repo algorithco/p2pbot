@@ -34,20 +34,26 @@
 
     <main id="view" class="view-root" aria-live="polite"></main>
 
-    <nav id="tabbar" class="tabbar">
-      <button class="tab-btn active" data-tab="#/home">
-        <svg viewBox="0 0 24 24" width="23" height="23"><path fill="currentColor" d="M12 3.1 2.8 10v10.4h6.4V14h5.6v6.4h6.4V10zm7.2 15.9h-3.2v-6.4H8v6.4H4.8v-8.4L12 5l7.2 5.6z"/></svg>
-        <span>Bitimlar</span>
+    <nav id="tabbar" class="tabbar" role="navigation" aria-label="Main navigation">
+      <button class="tab-btn tab-create" data-tab="#/create" aria-label="Yangi">
+        <span class="tab-circle"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>
+        <span class="tab-label">Yangi</span>
       </button>
-      <button class="tab-btn tab-new" data-tab="#/create" aria-label="Yangi bitim">
-        <span class="fab-plus">
-          <svg viewBox="0 0 24 24" width="26" height="26"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
-        </span>
-        <span>Yangi</span>
+      <button class="tab-btn active" data-tab="#/home" aria-label="Bosh sahifa">
+        <span class="tab-circle"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5"/><path d="M6 9.8V20h12V9.8"/><path d="M10 20v-5.5h4V20"/></svg></span>
+        <span class="tab-label">Bosh sahifa</span>
       </button>
-      <button class="tab-btn" data-tab="#/profile">
-        <svg viewBox="0 0 24 24" width="23" height="23"><path fill="currentColor" d="M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12m0 2c-3.6 0-8 1.8-8 5.4V21h16v-1.6c0-3.6-4.4-5.4-8-5.4"/></svg>
-        <span>Hisob</span>
+      <button class="tab-btn" data-tab="#/trade" aria-label="Savdo">
+        <span class="tab-circle"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 8.5h12.5L16 5"/><path d="M17 15.5H4.5L8 19"/></svg></span>
+        <span class="tab-label">Savdo</span>
+      </button>
+      <button class="tab-btn" data-tab="#/channels" aria-label="Kanallar">
+        <span class="tab-circle"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5v3a1 1 0 0 0 1 1h2l5 3.5v-11L7 9.5H5a1 1 0 0 0-1 1Z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/></svg></span>
+        <span class="tab-label">Kanallar</span>
+      </button>
+      <button class="tab-btn" data-tab="#/profile" aria-label="Hisob">
+        <span class="tab-circle"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.8"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></span>
+        <span class="tab-label">Hisob</span>
       </button>
     </nav>
   </div>
@@ -62,5 +68,32 @@
   <script src="/js/ui.js?v=10"></script>
   <script src="/js/wallet.js?v=10"></script>
   <script src="/js/app.js?v=12"></script>
+  <script>
+    // Floating nav active-state sync (circular highlight, no panel).
+    (function () {
+      function order(h) {
+        h = h || '#/home';
+        if (h.indexOf('#/create') === 0) return 0;
+        if (h === '#/home' || h === '') return 1;
+        if (h.indexOf('#/trade') === 0) return 2;
+        if (h.indexOf('#/channels') === 0) return 3;
+        if (h.indexOf('#/profile') === 0) return 4;
+        return 1;
+      }
+      function sync() {
+        var btns = document.querySelectorAll('#tabbar .tab-btn');
+        if (!btns.length) return;
+        var idx = order(location.hash);
+        Array.prototype.forEach.call(btns, function (b, i) {
+          b.classList.toggle('active', i === idx);
+          if (i === idx) b.setAttribute('aria-current', 'page');
+          else b.removeAttribute('aria-current');
+        });
+      }
+      window.addEventListener('hashchange', sync);
+      document.addEventListener('DOMContentLoaded', sync);
+      sync();
+    })();
+  </script>
 </body>
 </html>

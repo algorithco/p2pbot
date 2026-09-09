@@ -199,53 +199,63 @@ a { color: var(--link); text-decoration: none; }
 .no-tabbar { padding-bottom: calc(var(--sab) + 24px); }
 .view-root.no-tabbar ~ .tabbar { display: none; }
 
-/* ---------------- Tab bar ---------------- */
+/* ---------------- Tab bar: transparent floating nav ----------------
+   No panel, no background container. The bar itself is invisible;
+   only the 5 circular buttons (rendered by float-nav) are visible. */
 .tabbar {
   position: fixed;
   bottom: 0; left: 50%;
   transform: translateX(-50%);
   width: 100%; max-width: 560px;
   display: flex;
-  align-items: stretch;
-  justify-content: space-around;
-  padding: 6px 6px calc(var(--sab) + 6px);
-  background: rgba(11,14,20,.92);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border-top: 1px solid var(--border);
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10px 14px calc(var(--sab) + 12px);
+  background: transparent;
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 0;
+  border-top: 0;
+  box-shadow: none;
   z-index: 40;
-  min-height:74px;
+  min-height: 86px;
+  pointer-events: none;
 }
+.tabbar > * { pointer-events: auto; }
+.gooey-nav-container { pointer-events: none; }
+.gooey-nav-container a { pointer-events: auto; }
 @supports (background: color-mix(in srgb, red 50%, blue)){
-  .tabbar{ background: color-mix(in srgb, var(--bg) 92%, transparent); }
+  .tabbar{ background: transparent; }
 }
 .tab-btn {
   flex: 1;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 7px 0 6px;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 2px 4px 0;
   color: var(--hint-2);
-  font-size: 10px; font-weight: 800;
+  font-size: 10px; font-weight: 600;
   letter-spacing: 0.04em;
-  text-transform:uppercase;
-  transition: color .2s, background .2s, transform .15s var(--ease);
+  transition: color .2s, transform .15s var(--ease);
   position: relative;
-  border-radius: var(--r-md);
+  border-radius: 18px;
+  background: transparent;
+  border: 0;
 }
 .tab-btn svg{width:22px;height:22px;stroke-width:1.7}
-.tab-btn.active { color: var(--accent); background: transparent; }
+.tab-btn.active { color: #fff; background: transparent; }
 .tab-btn:active { opacity: .85; transform: scale(.97); }
 .tab-btn:focus-visible { outline-offset: -2px; }
 .tab-new .fab-plus {
-  width: 56px; height: 56px; margin-top: -26px;
+  width: 52px; height: 52px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
-  color: #fff;
+  background: #f2f5fa;
+  color: #0b0e14;
   display: grid; place-items:center;
-  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.52), 0 0 0 6px rgba(11, 14, 20, 0.96);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
   border: 0;
-  transition: transform .18s var(--ease), box-shadow .2s;
+  transition: transform .18s var(--ease);
 }
-.tab-new:active .fab-plus { transform: scale(.92); }
+.tab-new:active .fab-plus { transform: scale(.93); }
 
 /* ---------------- Cards & sections ---------------- */
 .card {
@@ -1023,11 +1033,13 @@ body[data-theme-mode="light"] .btn-primary,
 body[data-theme-mode="light"] .pay-big,
 body[data-theme-mode="light"] .send-btn,
 body[data-theme-mode="light"] .fab-inline,
-body[data-theme-mode="light"] .tab-new .fab-plus,
 body[data-theme-mode="light"] .chip.active,
 body[data-theme-mode="light"] .trade-tabs button.active,
 body[data-theme-mode="light"] .msg.mine .bubble {
   box-shadow: 0 6px 18px rgba(37, 99, 235, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+body[data-theme-mode="light"] .tab-new .fab-plus {
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.25);
 }
 body[data-theme-mode="light"] .badge.st-funded { color: #1d4ed8; background: rgba(37, 99, 235, 0.1); border-color: rgba(37, 99, 235, 0.3); }
 body[data-theme-mode="light"] .badge.st-awaiting { color: #92400e; background: rgba(180, 83, 9, 0.1); border-color: rgba(180, 83, 9, 0.3); }
@@ -1037,7 +1049,7 @@ body[data-theme-mode="light"] .badge.st-released { color: #047857; background: r
 body[data-theme-mode="light"] .badge.st-cancelled,
 body[data-theme-mode="light"] .badge.st-refunded,
 body[data-theme-mode="light"] .badge.st-expired { color: #be123c; background: rgba(225, 29, 72, 0.08); border-color: rgba(225, 29, 72, 0.3); }
-body[data-theme-mode="light"] .tabbar { background: rgba(255, 255, 255, 0.92); }
+body[data-theme-mode="light"] .tabbar { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; border: 0; box-shadow: none; }
 body[data-theme-mode="light"] .topbar { background: rgba(242, 245, 250, 0.85); }
 body[data-theme-mode="light"] .search-input { background: #eef2f8; }
 body[data-theme-mode="light"] .input { background: #eef2f8; }
@@ -1112,6 +1124,7 @@ body[data-theme-mode="light"] .avatar.a3 { background: linear-gradient(135deg, #
 
 /* Tab icon micro-bounce when a tab becomes active */
 .tab-btn.active svg { animation: tabPop .32s var(--ease-spring); }
+.float-item.active .float-circle svg { animation: tabPop .32s var(--ease-spring); }
 @keyframes tabPop { 0% { transform: scale(.65); } 60% { transform: scale(1.14); } 100% { transform: scale(1); } }
 
 /* FAB plus bounce on load of Home */

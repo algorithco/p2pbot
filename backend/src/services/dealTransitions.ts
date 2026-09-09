@@ -4,7 +4,7 @@
 //
 // This is the single owner of "what may a Deal become, and from where".
 // Everything that moves a Deal (HTTP routes, bot commands, the on-chain
-// listener, the 24h schedulers) goes through assertTransition() before
+// listener, the 10h expiry scheduler) goes through assertTransition() before
 // touching the DB, and through guardedStatusUpdate() to write it. That
 // closes the race where the auto-close scheduler used to call the
 // unguarded updateDealStatus() and could refund a deal an admin had just
@@ -25,7 +25,7 @@ export const DEAL_ACTIONS = {
   RELEASE: 'RELEASE',
   /** Admin refund (escrow → buyer). */
   REFUND: 'REFUND',
-  /** 24h auto-close of a deal with no deposit (escrow → buyer). */
+  /** 10h auto-close of a deal with no deposit (record kept on server, shown as closed). */
   EXPIRE: 'EXPIRE',
 } as const;
 
