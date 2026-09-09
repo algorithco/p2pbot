@@ -3,7 +3,9 @@
   var eventHandlers = {};
 
   // User-controlled URL data must never be written to dangerous object keys
-  // (prototype pollution / property injection).
+  // (prototype pollution / property injection — CodeQL js/remote-property-injection).
+  // NOTE: guards are intentionally inline (not via helper) so static analysis
+  // recognizes the sanitizer; objects use null prototype as defense-in-depth.
   function isSafeKey(name) {
     return name !== '__proto__' && name !== 'constructor' && name !== 'prototype';
   }
@@ -17,7 +19,8 @@
   var storedParams = sessionStorageGet('initParams');
   if (storedParams) {
     for (var key in storedParams) {
-      if (isSafeKey(key) && typeof initParams[key] === 'undefined') {
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+      if (typeof initParams[key] === 'undefined') {
         initParams[key] = storedParams[key];
       }
     }
@@ -70,7 +73,7 @@
 
   function urlParseHashParams(locationHash) {
     locationHash = locationHash.replace(/^#/, '');
-    var params = {};
+    var params = Object.create(null);
     if (!locationHash.length) {
       return params;
     }
@@ -86,13 +89,14 @@
     }
     var query_params = urlParseQueryString(locationHash);
     for (var k in query_params) {
-      if (isSafeKey(k)) params[k] = query_params[k];
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+      params[k] = query_params[k];
     }
     return params;
   }
 
   function urlParseQueryString(queryString) {
-    var params = {};
+    var params = Object.create(null);
     if (!queryString.length) {
       return params;
     }
@@ -102,7 +106,8 @@
       param = queryStringParams[i].split('=');
       paramName = urlSafeDecode(param[0]);
       paramValue = param[1] == null ? null : urlSafeDecode(param[1]);
-      if (isSafeKey(paramName)) params[paramName] = paramValue;
+      if (paramName === '__proto__' || paramName === 'constructor' || paramName === 'prototype') continue;
+      params[paramName] = paramValue;
     }
     return params;
   }
