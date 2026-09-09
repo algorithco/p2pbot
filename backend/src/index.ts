@@ -2,6 +2,7 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import path from 'path';
 import cors from 'cors';
+import swaggerUi from 'swagger-ui-express';
 import type { Server } from 'http';
 import { config } from './config';
 import { db, connectDB, listDeals } from './db/queries';
@@ -1391,6 +1392,7 @@ const API_DOCS = {
     { method: 'GET', path: '/tonconnect-manifest.json', auth: 'public', desc: 'TON Connect manifest (dynamic origin)' },
     { method: 'GET', path: '/api/docs', auth: 'public', desc: 'This doc (JSON)' },
     { method: 'GET', path: '/api/openapi.json', auth: 'public', desc: 'OpenAPI 3.0 spec (machine-readable)' },
+    { method: 'GET', path: '/api/swagger', auth: 'public', desc: 'Swagger UI — interactive docs + Try it out (backed by /api/openapi.json)' },
     { method: 'GET', path: '/docs', auth: 'public', desc: 'Human HTML docs (try it)' },
     { method: 'GET', path: '/api/deals', auth: 'Identity (party or admin)', desc: 'List deals where caller is buyer/seller (admin sees all) — private' },
     { method: 'GET', path: '/api/deals/:id', auth: 'Identity (party or admin, token preview)', desc: 'Single deal by id — only buyer/seller/admin or valid invite token ?token=' },
@@ -1449,6 +1451,14 @@ app.get('/api/docs', (_req, res) => {
   res.json(API_DOCS);
 });
 
+// Swagger UI — interactive API docs. Loads the live spec from /api/openapi.json
+// (single source of truth, same origin), so Try-it-out targets the right host.
+app.use('/api/swagger', swaggerUi.serve, swaggerUi.setup(undefined, {
+  explorer: true,
+  customSiteTitle: 'TON Escrow — Swagger UI',
+  swaggerUrl: '/api/openapi.json',
+}));
+
 app.get('/api/openapi.json', (req, res) => {
   const host = req.get('host') || 'localhost:3000';
   const scheme = host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
@@ -1484,7 +1494,7 @@ app.get('/docs', (_req, res) => {
   .tag{padding:2px 8px;border-radius:999px;font-size:12px;background:#1a2030;border:1px solid #2a3550}
   .auth-public{color:#7dd3a5}.auth-Identity{color:#f0c27a}.auth-Admin{color:#ff8a8a}
   pre{white-space:pre-wrap;background:#0f131d;border:1px solid #1f2533;padding:14px;border-radius:10px;overflow:auto}
-  </style></head><body><header><div class="wrap"><h1>TON Escrow Bot — API Docs</h1><div style="opacity:.7;margin-top:6px">Base: <code>/api</code> · <a href="/api/docs">/api/docs</a> (JSON) · <a href="/api/openapi.json">/api/openapi.json</a> · <a href="/api/info">/api/info</a></div></div></header><div class="wrap">
+  </style></head><body><header><div class="wrap"><h1>TON Escrow Bot — API Docs</h1><div style="opacity:.7;margin-top:6px">Base: <code>/api</code> · <a href="/api/swagger">Swagger UI</a> · <a href="/api/docs">/api/docs</a> (JSON) · <a href="/api/openapi.json">/api/openapi.json</a> · <a href="/api/info">/api/info</a></div></div></header><div class="wrap">
   <h2>Auth</h2><pre>${JSON.stringify(API_DOCS.auth, null, 2)}</pre>
   <h2>Rate limits</h2><p><code>${API_DOCS.rateLimits}</code></p>
   <h2>Endpoints</h2><table><thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead><tbody id="rows"></tbody></table>
@@ -1535,6 +1545,7 @@ if (config.serveStatic) {
       docs: '/api/docs',
       htmlDocs: '/docs',
       openapi: '/api/openapi.json',
+      swagger: '/api/swagger',
       health: '/api/info',
       note: 'Frontend (Telegram Mini App) runs as separate service webapp:80 -> host :8080, proxies /api to this backend',
     });
