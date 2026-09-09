@@ -395,7 +395,12 @@ export function getBotDeepLink(dealId: number | string, token: string, botUserna
   return `https://t.me/${username}?start=join_${dealId}_${token}`;
 }
 
-/** Create a pending join request (for bot approval flow) */
+/** Create a pending join request (creator approves from the mini-app deal chat).
+ *  Returns `{ request, created }` — `created=false` on duplicate re-clicks so the
+ *  caller can skip re-notifying the creator (no DM spam on double taps).
+ *  `requesterPhotoFileId` is a Telegram file_id (NOT a file URL — URLs embed the
+ *  bot token and must never be stored/served; the photo proxy resolves it server-side).
+ */
 export async function createJoinRequest(params: {
   dealId: number;
   token: string;
@@ -403,21 +408,22 @@ export async function createJoinRequest(params: {
   requesterUsername?: string | null;
   requesterFirstName?: string | null;
   requesterPhotoUrl?: string | null;
-}) {
-  const { dealId, token, requesterTelegramId, requesterUsername, requesterFirstName, requesterPhotoUrl } = params;
+  requesterPhotoFileId?: string | null;
+}): Promise<{ request: any; created: boolean }> {
+  const { dealId, token, requesterTelegramId, requesterUsername, requesterFirstName, requesterPhotoUrl, requesterPhotoFileId } = params;
   // Upsert: if same requester already pending for same deal+token, return existing
   const existing = await db.query(
     `SELECT * FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND requester_telegram_id = $3 AND status = 'pending' LIMIT 1`,
     [dealId, token, requesterTelegramId]
   );
-  if (existing.rows[0]) return existing.rows[0];
+  if (existing.rows[0]) return { request: existing.rows[0], created: false };
   try {
     const res = await db.query(
-      `INSERT INTO deal_join_requests (deal_id, token, requester_telegram_id, requester_username, requester_first_name, requester_photo_url, status)
-       VALUES ($1,$2,$3,$4,$5,$6,'pending') RETURNING *`,
-      [dealId, token, requesterTelegramId, requesterUsername || null, requesterFirstName || null, requesterPhotoUrl || null]
+      `INSERT INTO deal_join_requests (deal_id, token, requester_telegram_id, requester_username, requester_first_name, requester_photo_url, requester_photo_file_id, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING *`,
+      [dealId, token, requesterTelegramId, requesterUsername || null, requesterFirstName || null, requesterPhotoUrl || null, requesterPhotoFileId || null]
     );
-    return res.rows[0];
+    return { request: res.rows[0], created: true };
   } catch (e) {
     // Concurrent double-click race: partial unique index uq_join_requests_pending
     // rejected the second INSERT — return the winner's row as a clean "already
@@ -427,7 +433,7 @@ export async function createJoinRequest(params: {
         `SELECT * FROM deal_join_requests WHERE deal_id = $1 AND requester_telegram_id = $2 AND status = 'pending' ORDER BY id ASC LIMIT 1`,
         [dealId, requesterTelegramId]
       );
-      if (winner.rows[0]) return winner.rows[0];
+      if (winner.rows[0]) return { request: winner.rows[0], created: false };
     }
     throw e;
   }
@@ -450,11 +456,38 @@ export async function updateJoinRequestStatus(id: number, status: 'approved' | '
   await db.query('UPDATE deal_join_requests SET status = $1, updated_at = now() WHERE id = $2', [status, id]);
 }
 
+/** Latest join request of one requester for a deal+token (any status).
+ *  Powers GET /join-status so the joiner sees pending/approved/rejected
+ *  instead of polling blindly forever after a rejection.
+ */
+export async function getMyJoinStatus(dealId: number, token: string, requesterId: number) {
+  const res = await db.query(
+    `SELECT * FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND requester_telegram_id = $3 ORDER BY id DESC LIMIT 1`,
+    [dealId, token, requesterId]
+  );
+  return res.rows[0] || null;
+}
+
+/** Reject every OTHER pending request for a deal once it fills.
+ *  Returns the auto-rejected rows so the route can notify those requesters
+ *  (their invite is dead — the link was consumed by the winner).
+ */
+export async function rejectOtherPendingRequests(dealId: number, exceptId: number) {
+  const res = await db.query(
+    `UPDATE deal_join_requests SET status = 'rejected', updated_at = now()
+     WHERE deal_id = $1 AND status = 'pending' AND id <> $2 RETURNING *`,
+    [dealId, exceptId]
+  );
+  return res.rows;
+}
+
 /** Approve a join request — atomic: assign role + consume link + mark request approved.
  *  Either side can create a deal, so the CREATOR (whichever slot is occupied)
  *  approves from the mini-app deal chat. The joiner fills the empty slot.
+ *  Also closes sibling pending requests (deal is full after this) and reports
+ *  them so the caller can notify the losers.
  */
-export async function approveJoinRequest(requestId: number, approverTelegramId: number): Promise<'buyer' | 'seller'> {
+export async function approveJoinRequest(requestId: number, approverTelegramId: number): Promise<{ role: 'buyer' | 'seller'; autoRejected: any[] }> {
   const req = await getJoinRequestById(requestId);
   if (!req) throw new Error('request_not_found');
   if (req.status !== 'pending') throw new Error('request_already_handled');
@@ -466,10 +499,16 @@ export async function approveJoinRequest(requestId: number, approverTelegramId: 
     (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === approverTelegramId);
   if (!isCreator) throw new Error('not_authorized_to_approve: only_creator_can_approve');
   if (Number(req.requester_telegram_id) === approverTelegramId) throw new Error('cannot_approve_own_request');
-  // Perform atomic join (assigns the empty slot)
+  // The invite link must still be alive — otherwise the join below fails with a
+  // cryptic invalid_token. Fail early with a clear, mappable error instead.
+  const link = await getDealLink(String(req.token)).catch(() => null);
+  if (!link || Number(link.deal_id) !== Number(req.deal_id)) throw new Error('link_expired: invite link already used or revoked');
+  if (new Date(link.expires_at).getTime() <= Date.now()) throw new Error('link_expired: invite link expired');
+  // Perform atomic join (assigns the empty slot; still the final race guard)
   const role = await atomicJoinDeal(req.deal_id, req.token, req.requester_telegram_id);
   await updateJoinRequestStatus(requestId, 'approved');
-  return role;
+  const autoRejected = await rejectOtherPendingRequests(req.deal_id, requestId);
+  return { role, autoRejected };
 }
 
 export async function rejectJoinRequest(requestId: number, approverTelegramId: number) {
@@ -488,6 +527,13 @@ export async function rejectJoinRequest(requestId: number, approverTelegramId: n
 /** Cleanup expired deal links */
 export async function purgeExpiredLinks() {
   await db.query('DELETE FROM deal_links WHERE expires_at < now()');
+}
+
+/** Cleanup stale pending join requests (older than maxAgeHours, default 48).
+ *  Their links are long dead — keeping them only confuses counts and badges.
+ */
+export async function purgeStaleJoinRequests(maxAgeHours = 48) {
+  await db.query(`DELETE FROM deal_join_requests WHERE status = 'pending' AND created_at < now() - ($1 || ' hours')::interval`, [String(Math.max(1, Math.floor(maxAgeHours)))]);
 }
 
 // ── CHANNEL/GROUP escrow helpers (custodial via @gramchioka) ──
