@@ -1,5 +1,6 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { config } from '../../config';
+import logger from '../../logger';
 import { webAppButton } from '../keyboards';
 
 function welcomeText(): string {
@@ -37,9 +38,19 @@ export function registerCommands(bot: Bot) {
         const dealId = rest.slice(0, sep);
         const token = rest.slice(sep + 1);
         const base = (config.webappUrl || '').replace(/\/$/, '');
+        const username = (config.botUsername || 'uzsavdochibot').replace(/^@/, '');
         if (dealId && token && base) {
           const joinUrl = `${base}/#/deal/${dealId}/join/${token}`;
-          const kb = webAppButton(joinUrl, 'Ilovani ochish');
+          const kb = webAppButton(joinUrl, "Ilovani ochish — qo'shilish");
+          await ctx.reply(`🤝 Sherik taklifini qabul qilish ilovada.\nPastdagi tugmani bosing.`, { reply_markup: kb });
+        } else if (dealId && token) {
+          // WEBAPP_URL not configured — fall back to the bot's Mini App link.
+          // Needs the Mini App attached in BotFather; the startapp value arrives
+          // in the app as start_param and the app routes it to the join page.
+          // Definitive fix: set WEBAPP_URL=https://<public-frontend> in backend/.env.
+          logger.warn(`Bot /start join_${dealId}_… without button-url: WEBAPP_URL empty, using t.me/${username}/app fallback`);
+          const appLink = `https://t.me/${username}/app?startapp=${encodeURIComponent(`join_${dealId}_${token}`)}`;
+          const kb = new InlineKeyboard().url("Ilovani ochish — qo'shilish", appLink);
           await ctx.reply(`🤝 Sherik taklifini qabul qilish ilovada.\nPastdagi tugmani bosing.`, { reply_markup: kb });
         } else {
           await ctx.reply(`🤝 Sherik taklifini qabul qilish ilovada.\nIlovani oching.`);
