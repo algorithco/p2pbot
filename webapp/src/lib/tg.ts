@@ -33,7 +33,14 @@ export const TG = {
     window.addEventListener('resize', applyVh);
     const applyScheme = () => {
       document.body.setAttribute('data-scheme', TG.colorScheme());
-      document.body.setAttribute('data-theme-mode', 'dark');
+      // Respect saved profile preference; fall back to Telegram scheme (dark default).
+      try {
+        const saved = window.localStorage.getItem('tonescrow:theme');
+        if (saved === 'light' || saved === 'dark') document.body.setAttribute('data-theme-mode', saved);
+        else document.body.setAttribute('data-theme-mode', TG.colorScheme() === 'light' ? 'light' : 'dark');
+      } catch {
+        document.body.setAttribute('data-theme-mode', TG.colorScheme() === 'light' ? 'light' : 'dark');
+      }
     };
     applyScheme();
     safe(() => wa.onEvent('themeChanged', applyScheme));
@@ -83,7 +90,7 @@ export const TG = {
       safe(() => {
         if (!wa || !wa.MainButton || !isAtLeast('6.0')) return;
         const mb = wa.MainButton;
-        mb.setParams({ text, color: opts.color || '#3390ec', is_active: true, is_visible: true });
+        mb.setParams({ text, color: opts.color || '#3b82f6', is_active: true, is_visible: true });
         (TG.main as any)._off();
         mb.onClick((TG.main as any)._cb = onClick);
         if (opts.progress) mb.showProgress(false);

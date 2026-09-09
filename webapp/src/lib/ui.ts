@@ -1,3 +1,5 @@
+import { prefersReducedMotion } from './motion';
+
 export function h(tag: string, attrs: Record<string, any> | null, children?: any): HTMLElement {
   const el = document.createElement(tag);
   if (attrs) {
@@ -155,10 +157,93 @@ export function skeletonDeals(n = 4): DocumentFragment {
 }
 export function sheetClose() {
   const root = document.getElementById('sheet-root')!;
-  root.classList.remove('open');
-  root.innerHTML = '';
-  (window as any).TG?.preventClose?.(false);
+  const sheet = root.querySelector('.sheet') as HTMLElement | null;
+  const backdrop = root.querySelector('.sheet-backdrop') as HTMLElement | null;
+  const finish = () => {
+    root.classList.remove('open');
+    root.innerHTML = '';
+    (window as any).TG?.preventClose?.(false);
+  };
+  if (!sheet || prefersReducedMotion()) { finish(); return; }
+  if (sheet.dataset.closing) return;
+  sheet.dataset.closing = '1';
+  let finished = false;
+  const done = () => { if (!finished) { finished = true; finish(); } };
+  try {
+    const anim = sheet.animate(
+      [
+        { transform: 'translate(-50%, 0)', opacity: 1 },
+        { transform: 'translate(-50%, 110%)', opacity: 0.7 },
+      ],
+      { duration: 190, easing: 'cubic-bezier(0.5, 0, 0.85, 0.45)', fill: 'forwards' },
+    );
+    anim.onfinish = done;
+    anim.oncancel = done;
+    if (backdrop) {
+      backdrop.animate(
+        [{ opacity: getComputedStyle(backdrop).opacity || '1' }, { opacity: '0' }],
+        { duration: 190, fill: 'forwards' },
+      );
+    }
+  } catch { /* WAAPI unavailable */ }
+  setTimeout(done, 280); // safety net
 }
+
+function attachSheetDrag(sheet: HTMLElement) {
+  if (prefersReducedMotion()) return;
+  let startY = 0, curY = 0, dragging = false, t0 = 0;
+  const onDown = (e: TouchEvent) => {
+    if (dragging || e.touches.length !== 1) return;
+    const target = e.target as HTMLElement;
+    const scrollable = sheet.scrollHeight > sheet.clientHeight + 4;
+    const atTop = sheet.scrollTop <= 2;
+    // start drag from grabber, or anywhere when the sheet isn't scrollable / is at top
+    if (!(target.closest('.sheet-grabber') || !scrollable || atTop)) return;
+    dragging = true; startY = curY = e.touches[0].clientY; t0 = performance.now();
+  };
+  const onMove = (e: TouchEvent) => {
+    if (!dragging) return;
+    curY = e.touches[0].clientY;
+    const dy = Math.max(0, curY - startY);
+    if (dy > 0) {
+      sheet.style.animation = 'none';
+      sheet.style.transform = `translate(-50%, ${Math.round(dy)}px)`;
+      if (dy > 4) e.preventDefault();
+    }
+  };
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    const dy = Math.max(0, curY - startY);
+    const dt = Math.max(1, performance.now() - t0);
+    const velocity = dy / dt; // px per ms
+    sheet.style.transform = '';
+    sheet.style.animation = '';
+    if (dy > 110 || velocity > 0.55) {
+      (window as any).TG?.haptic?.light?.();
+      sheetClose();
+      return;
+    }
+    if (dy > 8) {
+      // spring back
+      try {
+        sheet.animate(
+          [
+            { transform: `translate(-50%, ${dy}px)` },
+            { transform: 'translate(-50%, -5px)', offset: 0.7 },
+            { transform: 'translate(-50%, 0)' },
+          ],
+          { duration: 320, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)' },
+        );
+      } catch { /* ignore */ }
+    }
+  };
+  sheet.addEventListener('touchstart', onDown, { passive: true });
+  sheet.addEventListener('touchmove', onMove, { passive: false });
+  sheet.addEventListener('touchend', onUp);
+  sheet.addEventListener('touchcancel', onUp);
+}
+
 export function sheetOpen(contentEl: HTMLElement, opts: any = {}) {
   const root = document.getElementById('sheet-root')!;
   root.innerHTML = '';
@@ -167,6 +252,9 @@ export function sheetOpen(contentEl: HTMLElement, opts: any = {}) {
   root.appendChild(backdrop);
   root.appendChild(sheet);
   root.classList.add('open');
+  // once the entrance animation settles, clear fill state so drag transforms apply cleanly
+  setTimeout(() => { try { sheet.style.animation = 'none'; } catch {} }, 420);
+  attachSheetDrag(sheet);
   if ((window as any).TG?.available) {
     (window as any).TG.showBack(() => { if (!opts.locked) sheetClose(); });
     (window as any).TG.preventClose(!!opts.locked);
