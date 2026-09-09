@@ -4,10 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>TonEscrow — Xavfsiz P2P Bitimlar</title>
-  <meta name="theme-color" content="#0b1220" />
+  <meta name="theme-color" content="#0b0e14" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <script src="/js/telegram-web-app.js"></script>
   <script src="/js/tonconnect-ui.min.js"></script>
   <script>
@@ -33,25 +36,25 @@
 
     <nav id="tabbar" class="tabbar" role="navigation" aria-label="Main navigation">
       <button class="tab-btn active" data-tab="#/home" aria-label="Bitimlar" aria-current="page">
-        <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path fill="currentColor" d="M12 3.1 2.8 10v10.4h6.4V14h5.6v6.4h6.4V10zm7.2 15.9h-3.2v-6.4H8v6.4H4.8v-8.4L12 5l7.2 5.6z"/></svg>
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
         <span>Bitimlar</span>
       </button>
       <button class="tab-btn tab-trade" data-tab="#/trade" aria-label="Savdo">
-        <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path fill="currentColor" d="M7 14h10v2H7zM7 10h10v2H7zM12 3L2 12l2 1.5L12 6l8 7.5L22 12z"/></svg>
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12 12 4l9 8"/><path d="M7 14h10"/><path d="M7 10h10"/><path d="M7 18h10"/></svg>
         <span>Savdo</span>
       </button>
       <button class="tab-btn tab-new" data-tab="#/create" aria-label="Yangi bitim">
         <span class="fab-plus">
-          <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         </span>
         <span>Yangi</span>
       </button>
       <button class="tab-btn tab-channels" data-tab="#/channels" aria-label="Kanallar">
-        <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v8l5-4-5-4Z" fill="currentColor" stroke="none"/></svg>
         <span>Kanallar</span>
       </button>
       <button class="tab-btn" data-tab="#/profile" aria-label="Hisob">
-        <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path fill="currentColor" d="M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12m0 2c-3.6 0-8 1.8-8 5.4V21h16v-1.6c0-3.6-4.4-5.4-8-5.4"/></svg>
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>
         <span>Hisob</span>
       </button>
     </nav>
