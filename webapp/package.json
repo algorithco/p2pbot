@@ -15,8 +15,10 @@
   },
   "dependencies": {
     "@types/canvas-confetti": "^1.9.0",
+    "@types/three": "^0.185.4",
     "canvas-confetti": "^1.9.4",
-    "motion": "^13.2.0"
+    "motion": "^13.2.0",
+    "three": "^0.185.1"
   },
   "overrides": {
     "qs": "^6.16.0"
