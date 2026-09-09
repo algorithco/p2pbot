@@ -1,9 +1,9 @@
 import { client } from './tonClient';
 import { Address, Cell } from '@ton/core';
 import type { Transaction } from '@ton/core';
-import { updateDealStatus } from '../services/dealService';
+import { updateDealStatus, dealLike } from '../services/dealService';
 import { db } from '../db/queries';
-import { toBaseUnits, fromBaseUnits } from '../utils/money';
+import { toBaseUnits, fromBaseUnits, dealPricing } from '../utils/money';
 import { parseDepositComment, parseTonComment, parseJettonForwardComment } from '../utils/comments';
 import { decryptCommentString } from '../utils/tonPayload';
 import { encryptField } from '../utils/encryption';
@@ -99,18 +99,12 @@ async function findAwaitingDealById(dealId: number, paymentAddress?: string): Pr
 }
 
 function expectedForDeal(deal: DealRow): bigint {
-  const asset = String(deal.asset ?? 'TON').toUpperCase();
-  const priceBase = BigInt(toBaseUnits(String(deal.amount ?? '0'), asset));
-  const rawBps = Number((deal as { fee_bps?: unknown }).fee_bps ?? config.feeBps ?? 100);
-  const feeBps = Number.isFinite(rawBps) && rawBps >= 0 ? Math.floor(rawBps) : 100;
-  if (feeBps <= 0) return priceBase;
-  if (feeBps >= 10000) return priceBase;
-  const fee = (priceBase * BigInt(feeBps)) / 10000n;
-  return priceBase + fee;
-}
-
-function dealLike(deal: DealRow): { id: number; amount: string; asset: string; terms?: string } {
-  return { id: deal.id, amount: String(deal.amount ?? '0'), asset: String(deal.asset ?? 'TON'), terms: deal.terms ?? undefined };
+  // Single source: same pricing the deal creator, the payout path and the UI see.
+  return dealPricing(
+    String(deal.amount ?? '0'),
+    String(deal.asset ?? 'TON'),
+    (deal as { fee_bps?: unknown }).fee_bps as number | undefined ?? config.feeBps ?? 100
+  ).expectedDeposit;
 }
 
 async function postChatSystemMessage(dealId: number, text: string) {
