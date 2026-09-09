@@ -141,6 +141,24 @@ export const Api = {
   joinRequests(dealId: number | string): Promise<any[]> {
     return request('GET', '/api/deals/' + encodeURIComponent(String(dealId)) + '/join-requests').then(d => Array.isArray(d) ? d : Array.isArray(d?.requests) ? d.requests : []);
   },
+  joinStatus(id: number | string, token: string): Promise<{ status: string; requestId?: number; isPartyNow?: boolean }> {
+    return request('GET', '/api/deals/' + encodeURIComponent(String(id)) + '/join-status?token=' + encodeURIComponent(token));
+  },
+  joinRequestPhoto(dealId: number | string, requestId: number | string): Promise<string | null> {
+    // Profile photo bytes via authed fetch -> object URL.
+    // Plain <img src> can't send x-init-data headers, so callers must
+    // URL.revokeObjectURL() the result on unmount (see joinRequestsBox).
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = setTimeout(() => { if (ctrl) ctrl.abort(); }, 12000);
+    return fetch(BASE + '/api/deals/' + encodeURIComponent(String(dealId)) + '/join-requests/' + encodeURIComponent(String(requestId)) + '/photo', {
+      headers: Object.assign({ 'Accept': 'image/*' } as any, authHeaders()),
+      signal: ctrl ? ctrl.signal : undefined,
+    }).then(res => {
+      clearTimeout(timer);
+      if (!res.ok) return null;
+      return res.blob().then(b => (b && b.size > 0 ? URL.createObjectURL(b) : null));
+    }).catch(() => { clearTimeout(timer); return null; });
+  },
   approveJoin(dealId: number | string, requestId: number | string): Promise<any> {
     return request('POST', '/api/deals/' + encodeURIComponent(String(dealId)) + '/join-requests/' + encodeURIComponent(String(requestId)) + '/approve', {});
   },

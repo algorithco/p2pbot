@@ -282,6 +282,7 @@
     var box = UI.h('div', { class: 'join-req-box' });
     var prevCount = null;
     var stopped = false;
+    var photoCache = {}; // requestId -> objectURL (revoked on unmount)
 
     function setBusy(btns, busy) {
       btns.forEach(function (b) {
@@ -308,6 +309,14 @@
             UI.toast("So'rov allaqachon ko'rib chiqilgan", 'err');
             onChange();
             loadReqs();
+          } else if (m.indexOf('link_expired') !== -1) {
+            UI.toast("Taklif havolasi eskirgan — yangi havola yarating", 'err');
+            onChange();
+            loadReqs();
+          } else if (m.indexOf('deal_already_full') !== -1) {
+            UI.toast("Bitim allaqachon to'lgan", 'err');
+            onChange();
+            loadReqs();
           } else if (m.indexOf('not_authorized') !== -1) {
             UI.toast("Faqat bitim yaratuvchisi tasdiqlay oladi", 'err');
           } else {
@@ -327,11 +336,43 @@
           onChange();
           loadReqs();
         })
-        .catch(function () {
+        .catch(function (err) {
           TG.haptic.error();
-          UI.toast("Rad etilmadi — qayta urinib ko'ring", 'err');
+          var m = String((err && err.message) || '');
+          if (m.indexOf('already_handled') !== -1 || m.indexOf('request_already') !== -1) {
+            UI.toast("So'rov allaqachon ko'rib chiqilgan", 'err');
+            onChange();
+            loadReqs();
+          } else {
+            UI.toast("Rad etilmadi — qayta urinib ko'ring", 'err');
+          }
           setBusy(btns, false);
         });
+    }
+
+    // Avatar with secure photo: file_id rows load via the authed photo proxy
+    // (object URL, revoked on unmount); legacy http(s) photo_url renders directly.
+    function avatarFor(r, name) {
+      var slot = UI.h('div', { style: 'width:40px;height:40px;flex-shrink:0' });
+      var fallback = UI.h('div', { class: 'avatar ' + UI.avatarClass(r.requester_telegram_id), style: 'width:40px;height:40px;font-size:15px;margin:0;flex-shrink:0', text: String(name).slice(0, 2) });
+      slot.appendChild(fallback);
+      function setImg(src) {
+        if (stopped || !src) return;
+        try {
+          slot.innerHTML = '';
+          slot.appendChild(UI.h('img', { src: src, alt: '', style: 'width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0' }));
+        } catch (e) {}
+      }
+      if (r.requester_photo_file_id) {
+        Api.joinRequestPhoto(dealId, r.id).then(function (objUrl) {
+          if (objUrl) { photoCache[r.id] = objUrl; setImg(objUrl); }
+        }).catch(function () {});
+      } else if (r.requester_photo_url && /^https?:\/\//i.test(String(r.requester_photo_url))) {
+        var probe = new Image();
+        probe.onload = function () { setImg(String(r.requester_photo_url)); };
+        probe.src = String(r.requester_photo_url);
+      }
+      return slot;
     }
 
     function reqCard(r) {
@@ -352,9 +393,7 @@
       }, ['Rad etish']);
       var card = UI.h('div', { class: 'studio-card inbox-card', style: compact ? 'margin-bottom:8px' : '' }, [
         UI.h('div', { class: 'studio-head' }, [
-          r.requester_photo_url
-            ? UI.h('img', { src: r.requester_photo_url, alt: '', style: 'width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0' })
-            : UI.h('div', { class: 'avatar ' + UI.avatarClass(r.requester_telegram_id), style: 'width:40px;height:40px;font-size:15px;margin:0;flex-shrink:0', text: String(name).slice(0, 2) }),
+          avatarFor(r, name),
           UI.h('div', { style: 'min-width:0' }, [
             UI.h('b', { text: name }),
             UI.h('div', { class: 'small muted', text: uname + (when ? ' · ' + when : '') })
@@ -366,6 +405,7 @@
     }
 
     function render(list) {
+      revokePhotos();
       box.innerHTML = '';
       if (!list || !list.length) { prevCount = 0; return; }
       if (notifyNew && prevCount !== null && list.length > prevCount) {
@@ -388,9 +428,16 @@
         .catch(function () { /* 403/401 → not a party: stay silent, host view shows its own banner */ });
     }
 
+    function revokePhotos() {
+      Object.keys(photoCache).forEach(function (k) {
+        try { URL.revokeObjectURL(photoCache[k]); } catch (e) {}
+        delete photoCache[k];
+      });
+    }
+
     loadReqs();
     var timer = setInterval(loadReqs, pollMs);
-    App.cleanupFns.push(function () { stopped = true; if (timer) clearInterval(timer); });
+    App.cleanupFns.push(function () { stopped = true; if (timer) clearInterval(timer); revokePhotos(); });
     return box;
   }
 
@@ -1885,7 +1932,9 @@
     var m = String(msg || '');
     if (m.indexOf('already_party_to_deal') !== -1) return "Siz allaqachon bitimdasiz";
     if (m.indexOf('deal_already_full') !== -1) return "Bitim allaqachon to'lgan";
-    if (m.indexOf('link_expired') !== -1) return "Havola muddati o'tgan";
+    if (m.indexOf('deal_finished') !== -1) return "Bitim allaqachon yakunlangan";
+    if (m.indexOf('deal_locked') !== -1) return "To'lov jarayonda — birozdan keyin urinib ko'ring";
+    if (m.indexOf('link_expired') !== -1) return "Havola muddati o'tgan — yangisini so'rang";
     if (m.indexOf('invalid_token') !== -1) return "Havola noto'g'ri";
     if (m.indexOf('deal_has_no_buyer_creator') !== -1 || m.indexOf('deal_has_no_creator') !== -1) return "Bitimda yaratuvchi yo'q";
     return "Qo'shilib bo'lmadi — qayta urinib ko'ring";
@@ -1901,6 +1950,18 @@
     document.getElementById('view').appendChild(box);
     box.appendChild(UI.h('div', {}, UI.skeletonDeals(1)));
 
+    function showRejected() {
+      box.innerHTML = '';
+      box.appendChild(UI.h('div', { class: 'success-panel' }, [
+        UI.h('div', { class: 'check-ring', style: 'border-color:var(--danger);color:var(--danger)', html: '<svg viewBox="0 0 34 34" width="44" height="44"><path d="M11 11l12 12M23 11 11 23" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>' }),
+        UI.h('h2', { text: "So'rov rad etildi" }),
+        UI.h('p', { text: "Yaratuvchi so'rovingizni rad etdi. Qayta qo'shilish uchun yangi taklif havolasini so'rang." }),
+        UI.h('div', { class: 'btn-row' }, [
+          UI.h('button', { class: 'btn btn-primary', onclick: function () { go('#/home'); } }, ['Bosh sahifa'])
+        ])
+      ]));
+    }
+
     function showPending() {
       box.innerHTML = '';
       var statusLine = UI.h('p', { class: 'small muted', style: 'text-align:center', text: "Holat tekshirilmoqda…" });
@@ -1911,12 +1972,44 @@
         statusLine,
         UI.h('div', { class: 'btn-row' }, [
           UI.h('button', { class: 'btn btn-primary', onclick: function () { go('#/home'); } }, ['Bosh sahifa']),
-          UI.h('button', { class: 'btn btn-ghost', onclick: function () { checkApproved(true); } }, ['Hozir tekshirish'])
+          UI.h('button', { class: 'btn btn-ghost', onclick: function () { checkStatus(true); } }, ['Hozir tekshirish'])
         ])
       ]));
       var stopped = false;
       App.cleanupFns.push(function () { stopped = true; if (timer) clearInterval(timer); });
-      function checkApproved(manual) {
+      // Authoritative status from the server (pending/approved/rejected), not
+      // blind deal polling — so a rejection actually surfaces instead of
+      // waiting forever.
+      function checkStatus(manual) {
+        if (typeof Api.joinStatus !== 'function') { checkStatusLegacy(manual); return; }
+        Api.joinStatus(id, token).then(function (st) {
+          if (stopped) return;
+          var s = String((st && st.status) || 'pending');
+          if (s === 'approved' || (st && st.isPartyNow)) {
+            stopped = true;
+            if (timer) clearInterval(timer);
+            TG.haptic.success();
+            UI.toast("Tasdiqlandi — bitim chati ochilmoqda", 'ok');
+            go('#/deal/' + id + '/chat');
+          } else if (s === 'rejected') {
+            stopped = true;
+            if (timer) clearInterval(timer);
+            TG.haptic.error();
+            showRejected();
+          } else if (s === 'none') {
+            statusLine.textContent = "So'rov topilmadi — havola eskirgan bo'lishi mumkin, yangisini so'rang.";
+          } else if (manual) {
+            statusLine.textContent = "Hali tasdiqlanmagan — yaratuvchi bitim chatida ko'radi.";
+          } else {
+            statusLine.textContent = "Yaratuvchi tasdig'i kutilmoqda…";
+          }
+        }).catch(function () {
+          // Offline — keep waiting silently, or fall back to deal polling
+          if (manual) statusLine.textContent = "Hali tasdiqlanmagan — birozdan keyin qayta tekshiring.";
+        });
+      }
+      // Fallback for older cached backends without /join-status.
+      function checkStatusLegacy(manual) {
         Api.deal(id).then(function (deal) {
           if (stopped) return;
           if (!deal) return;
@@ -1934,13 +2027,12 @@
             statusLine.textContent = "Yaratuvchi tasdig'i kutilmoqda…";
           }
         }).catch(function () {
-          // Not a party yet (403) or offline — keep waiting silently
           if (manual) statusLine.textContent = "Hali tasdiqlanmagan — birozdan keyin qayta tekshiring.";
         });
       }
-      var timer = setInterval(function () { checkApproved(false); }, 4000);
+      var timer = setInterval(function () { checkStatus(false); }, 4000);
       App.cleanupFns.push(function () { if (timer) clearInterval(timer); });
-      checkApproved(false);
+      checkStatus(false);
     }
 
     Api.deal(id, token).then(function (deal) {
@@ -1991,7 +2083,9 @@
       }
     }).catch(function (err) {
       box.innerHTML = '';
-      if (err && err.status === 403) {
+      if (err && err.status === 410) {
+        box.appendChild(emptyState('⌛', "Havola muddati o'tgan", "Bu taklif havolasi eskirgan. Yangisini so'rang.", 'Bosh sahifa', '#/home'));
+      } else if (err && err.status === 403) {
         box.appendChild(emptyState('🔒', 'Maxfiy bitim', "Bu bitim maxfiy — faqat xaridor, sotuvchi yoki taklif egasi ko'ra oladi.", 'Bosh sahifa', '#/home'));
       } else if (err && err.status === 401) {
         box.appendChild(emptyState('🔒', 'Avtorizatsiya kerak', "Taklifni ko'rish uchun havolani Telegram ichida oching.", 'Bosh sahifa', '#/home'));
