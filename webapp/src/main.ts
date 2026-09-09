@@ -1,6 +1,7 @@
 import './styles/app.css';
 import './styles/tokens.css';
 import './styles/gooey-nav.css';
+import './styles/true-focus.css';
 
 import { TG } from './lib/tg';
 import { Api } from './lib/api';
@@ -8,7 +9,6 @@ import { UI } from './lib/ui';
 import { ChatCrypto } from './lib/crypto';
 import { Wallet } from './lib/wallet';
 import { FX } from './lib/motion';
-import { mountHeroScene } from './lib/hero-scene';
 import { mountLoader } from './lib/loader';
 
 // expose globals for legacy app.js (expects window.TG, Api, UI, ChatCrypto, Wallet, FX)
@@ -18,7 +18,20 @@ import { mountLoader } from './lib/loader';
 (window as any).ChatCrypto = ChatCrypto;
 (window as any).Wallet = Wallet;
 (window as any).FX = FX;
-(window as any).HeroFX = { mount: mountHeroScene };
+// Home hero uses a CSS aurora backdrop (Three.js removed) — same mount API
+// so legacy viewHome keeps working unchanged.
+(window as any).HeroFX = {
+  mount: (host: HTMLElement) => {
+    try {
+      host.classList.add('hero-aurora');
+    } catch {}
+    return () => {
+      try {
+        host.classList.remove('hero-aurora');
+      } catch {}
+    };
+  },
+};
 
 // TON Connect config (GitHub raw, no cloudflared)
 (window as any).TONCONNECT_MANIFEST_URL = "https://raw.githubusercontent.com/Hamroqulovv/raw-ton-m/main/tonconnect-manifest.json";
@@ -28,7 +41,7 @@ import { mountLoader } from './lib/loader';
   twaReturnUrl: (window as any).TONCONNECT_TWA_RETURN_URL,
 };
 
-// Premium 2s loader — starts immediately, runs in parallel with app boot
+// TrueFocus 4.5s loader — starts immediately, runs in parallel with app boot
 const loaderDone = mountLoader();
 
 // Ensure Vite HMR for CSS works
