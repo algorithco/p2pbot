@@ -259,7 +259,7 @@ export async function promoteToAdminWithEntities(
     mapChannelError(e, 'channelEntity');
   }
   const uidLog = (userEntity as { id?: unknown })?.id ? String((userEntity as { id: unknown }).toString()).slice(0, 20) : 'user';
-  logger.info(`Promoted ${uidLog} to admin (via entities)`);
+  logger.info(`Promoted ${sanitizeLogValue(uidLog)} to admin (via entities)`);
 }
 
 // Aliases for groupService compatibility
@@ -380,7 +380,7 @@ export async function transferChannelOwnershipWithEntities(
     }
     const chanId = (channelEntity as unknown as { id?: unknown })?.id ? String((channelEntity as unknown as { id: unknown }).toString()) : 'channel';
     const ownerId = (newOwnerEntity as { id?: unknown })?.id ? String((newOwnerEntity as { id: unknown }).toString()) : 'owner';
-    logger.info(`Transferred ownership of ${chanId} to ${ownerId} (via entities)`);
+    logger.info(`Transferred ownership of ${sanitizeLogValue(chanId)} to ${sanitizeLogValue(ownerId)} (via entities)`);
   } catch (e) {
     const msg = String((e as Error).message || e);
     if (msg.includes('PASSWORD_HASH_INVALID') || msg.includes('PASSWORD_EMPTY') || msg.includes('SRP_ID_INVALID')) {
@@ -577,7 +577,7 @@ export async function demoteAdmin(channel: string | number, userId: string | num
       })
     )
   );
-  logger.info(`Demoted ${userId} in ${channel}`);
+  logger.info(`Demoted ${sanitizeLogValue(userId)} in ${sanitizeLogValue(channel)}`);
 }
 
 export async function listChannelAdmins(channel: string | number): Promise<Array<{ id: number | string; isCreator: boolean }>> {

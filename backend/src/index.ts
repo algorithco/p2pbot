@@ -96,7 +96,7 @@ const corsOrigin = (origin: string | undefined, cb: (err: Error | null, allow?: 
   if (allowedOrigins.includes(origin)) return cb(null, true);
   // Fix: fail-closed — do not allow-all when WEBAPP_URL missing (was dev fallback that made prod insecure)
   if (!config.webappUrl && !config.frontendUrl) {
-    logger.warn(`CORS: blocking origin ${origin} — WEBAPP_URL/FRONTEND_URL not configured (allowed: ${allowedOrigins.join(', ')})`);
+    logger.warn(`CORS: blocking origin ${sanitizeLogValue(origin)} — WEBAPP_URL/FRONTEND_URL not configured (allowed: ${sanitizeLogValue(allowedOrigins.join(', '))})`);
   }
   return cb(null, false);
 };
@@ -395,7 +395,7 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
     // Keep role hint for backward compat: if role === 'sell' we still treat caller as buyer (webapp compatibility)
     const role = String((req.body as Record<string, unknown>).role || '').toLowerCase();
     if (role === 'sell') {
-      logger.warn(`Deal create with role=sell from ${meId} — coercing to buyer per desired flow`);
+      logger.warn(`Deal create with role=sell from ${sanitizeLogValue(meId)} — coercing to buyer per desired flow`);
     }
     const origSellerId = sellerId;
     const origBuyerId = buyerId;
@@ -573,7 +573,7 @@ app.post('/api/deals/:id/join/:token', joinLimiter, requireIdentity, asyncHandle
       const label = requesterUsername ? `@${requesterUsername}` : (requesterFirstName || String(telegramId));
       await notify.joinRequestToCreator(buyerId, { id: deal.id, amount: String(deal.amount), asset: String(deal.asset), terms: String(deal.terms || '') }, label);
     } catch (notifyErr) {
-      logger.warn(`Could not notify buyer ${buyerId} about join request ${joinReq.id}`, notifyErr);
+      logger.warn(`Could not notify buyer ${sanitizeLogValue(buyerId)} about join request ${sanitizeLogValue(joinReq.id)}`, notifyErr);
     }
 
     void purgeExpiredLinks().catch((err) => logger.warn('purgeExpiredLinks failed', err));
@@ -698,7 +698,7 @@ app.post('/api/deals/:id/confirm', dealActionLimiter, requireIdentity, asyncHand
   if (!Number.isInteger(dealId) || dealId <= 0) return res.status(400).json({ error: 'invalid_id' });
   const caller = getIdentityId(req);
   if (caller === null) return res.status(401).json({ error: 'identity_required' });
-  logger.warn(`POST /api/deals/${dealId}/confirm called by ${caller} — deprecated, use /approve (buyer-only)`);
+  logger.warn(`POST /api/deals/${sanitizeLogValue(dealId)}/confirm called by ${sanitizeLogValue(caller)} — deprecated, use /approve (buyer-only)`);
   const { buyerApproveReceipt } = await import('./services/escrowService');
   const result: any = await buyerApproveReceipt(caller, dealId);
   res.setHeader('X-Deprecated', 'use POST /api/deals/:id/approve');
@@ -792,14 +792,14 @@ app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asy
           try {
             await notify.joinApproved(partnerId, { id: deal.id, amount: String(deal.amount), asset: String(deal.asset), terms: String(deal.terms || '') }, uzRole as 'sotuvchi' | 'xaridor');
           } catch (e) {
-            logger.warn(`joinApproved notify failed for deal #${dealId}`, e);
+            logger.warn(`joinApproved notify failed for deal #${sanitizeLogValue(dealId)}`, e);
           }
         }
         if (String(deal.status) === 'DEPOSIT_CONFIRMED' && deal.seller_telegram_id != null) {
           try {
             await notify.depositToSeller(Number(deal.seller_telegram_id), { id: deal.id, amount: String(deal.amount), asset: String(deal.asset), terms: String(deal.terms || '') });
           } catch (e) {
-            logger.warn(`Post-approve DEPOSIT_CONFIRMED notify failed for deal #${dealId}`, e);
+            logger.warn(`Post-approve DEPOSIT_CONFIRMED notify failed for deal #${sanitizeLogValue(dealId)}`, e);
           }
           try {
             const { addDealMessage } = await import('./services/dealService');
@@ -808,7 +808,7 @@ app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asy
         }
       }
     } catch (notifyErr) {
-      logger.warn(`Post-approve notify failed for deal #${dealId}`, notifyErr);
+      logger.warn(`Post-approve notify failed for deal #${sanitizeLogValue(dealId)}`, notifyErr);
     }
     return res.json({ ok: true, role });
   } catch (e) {
@@ -842,7 +842,7 @@ app.post('/api/deals/:id/join-requests/:requestId/reject', requireIdentity, asyn
         await notify.joinRejected(partnerId, { id: dealForReject.id, amount: String(dealForReject.amount), asset: String(dealForReject.asset), terms: String(dealForReject.terms || '') });
       }
     } catch (e) {
-      logger.warn(`joinRejected notify failed for deal #${dealId}`, e);
+      logger.warn(`joinRejected notify failed for deal #${sanitizeLogValue(dealId)}`, e);
     }
     return res.json({ ok: true });
   } catch (e) {
@@ -869,7 +869,7 @@ app.post('/api/deals/:id/recheck', joinLimiter, requireIdentity, asyncHandler(as
   try {
     if (deal.payment_address) await recheckAddress(String(deal.payment_address));
   } catch (e) {
-    logger.warn(`recheck failed for deal #${dealId}`, e);
+    logger.warn(`recheck failed for deal #${sanitizeLogValue(dealId)}`, e);
   }
   const fresh = await getDealById(dealId);
   return res.json({ status: fresh ? String(fresh.status) : String(deal.status) });
@@ -935,8 +935,8 @@ app.post('/api/deals/:id/channel/payout', channelLimiter, requireIdentity, async
   const rawAddr = String((req.body as any).tonAddress || (req.body as any).ton_address || (req.body as any).address || '').trim();
   if (rawAddr) {
     try { Address.parse(rawAddr); } catch { return res.status(400).json({ error: 'invalid_ton_address' }); }
-    try { await db.query('UPDATE deals SET payout_address = $1, updated_at = now() WHERE id = $2', [rawAddr, dealId]); } catch (e) { logger.warn(`channel payout: payout_address persist failed for deal #${dealId}`, e); }
-    try { await db.query(`INSERT INTO users (telegram_id, username, ton_address) VALUES ($1,$2,$3) ON CONFLICT (telegram_id) DO UPDATE SET ton_address = EXCLUDED.ton_address`, [caller, (req as any).user?.username||null, rawAddr]); } catch (e) { logger.warn(`channel payout: ton_address upsert failed for user ${caller}`, e); }
+    try { await db.query('UPDATE deals SET payout_address = $1, updated_at = now() WHERE id = $2', [rawAddr, dealId]); } catch (e) { logger.warn(`channel payout: payout_address persist failed for deal #${sanitizeLogValue(dealId)}`, e); }
+    try { await db.query(`INSERT INTO users (telegram_id, username, ton_address) VALUES ($1,$2,$3) ON CONFLICT (telegram_id) DO UPDATE SET ton_address = EXCLUDED.ton_address`, [caller, (req as any).user?.username||null, rawAddr]); } catch (e) { logger.warn(`channel payout: ton_address upsert failed for user ${sanitizeLogValue(caller)}`, e); }
   }
   const { payoutSellerForChannel } = await import('./services/escrowService');
   const r: any = await payoutSellerForChannel(dealId, caller);
@@ -1588,7 +1588,7 @@ function startSchedulers() {
               await saveAdminAlert('auto_close', `Deal #${d.id} 24 soat to'lovsiz yopildi (REFUNDED)`, { dealId: Number(d.id) });
             } catch {}
           } catch (e) {
-            logger.warn(`expiry close failed for deal #${d.id}`, e);
+            logger.warn(`expiry close failed for deal #${sanitizeLogValue(d.id)}`, e);
           }
         }
       } catch (e) {
@@ -1614,7 +1614,7 @@ function startSchedulers() {
               [d.id]
             );
           } catch (e) {
-            logger.warn(`remPay failed for deal #${d.id}`, e);
+            logger.warn(`remPay failed for deal #${sanitizeLogValue(d.id)}`, e);
           }
         }
       } catch (e) {
@@ -1640,7 +1640,7 @@ function startSchedulers() {
               [d.id]
             );
           } catch (e) {
-            logger.warn(`remShip failed for deal #${d.id}`, e);
+            logger.warn(`remShip failed for deal #${sanitizeLogValue(d.id)}`, e);
           }
         }
       } catch (e) {
@@ -1666,7 +1666,7 @@ function startSchedulers() {
               [d.id]
             );
           } catch (e) {
-            logger.warn(`remConfirm failed for deal #${d.id}`, e);
+            logger.warn(`remConfirm failed for deal #${sanitizeLogValue(d.id)}`, e);
           }
         }
       } catch (e) {

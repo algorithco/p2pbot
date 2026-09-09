@@ -41,7 +41,7 @@ export class W5Signer {
           publicKey: kp.publicKey,
           workchain: config.workchain,
         });
-        logger.info(`W5 wallet initialized: ${this.wallet.address.toString({ urlSafe: true, bounceable: false })} (workchain ${config.workchain})`);
+        logger.info(`W5 wallet initialized: ${sanitizeLogValue(this.wallet.address.toString({ urlSafe: true, bounceable: false }))} (workchain ${sanitizeLogValue(config.workchain)})`);
       } catch (e) {
         logger.error('Failed to init W5 wallet', e);
         throw e;

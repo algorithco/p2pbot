@@ -3,7 +3,7 @@ import cors from 'cors';
 import crypto from 'crypto';
 import { config, validateMnemonic } from './config';
 import { signer } from './wallet';
-import logger from './logger';
+import logger, { sanitizeLogValue } from './logger';
 
 const app = express();
 
@@ -140,7 +140,7 @@ app.post('/send', authMiddleware, async (req, res) => {
       const hit = idemCheck(idemKey, phash);
       if (hit && 'conflict' in hit) return res.status(409).json({ error: 'idempotency_conflict: key already used with different transfer params' });
       if (hit) {
-        logger.warn(`POST /send idempotency replay key=${idemKey} seqno=${hit.seqno} — NOT re-sending`);
+        logger.warn(`POST /send idempotency replay key=${sanitizeLogValue(idemKey)} seqno=${sanitizeLogValue(hit.seqno)} — NOT re-sending`);
         return res.json({ ok: true, seqno: hit.seqno, duplicate: true });
       }
     }
@@ -188,7 +188,7 @@ app.post('/send-jetton', authMiddleware, async (req, res) => {
       const hit = idemCheck(idemKey, phash);
       if (hit && 'conflict' in hit) return res.status(409).json({ error: 'idempotency_conflict: key already used with different transfer params' });
       if (hit) {
-        logger.warn(`POST /send-jetton idempotency replay key=${idemKey} seqno=${hit.seqno} — NOT re-sending`);
+        logger.warn(`POST /send-jetton idempotency replay key=${sanitizeLogValue(idemKey)} seqno=${sanitizeLogValue(hit.seqno)} — NOT re-sending`);
         return res.json({ ok: true, seqno: hit.seqno, duplicate: true });
       }
     }
