@@ -85,7 +85,7 @@ cp signer/.env.example signer/.env         # SIGNER_MNEMONIC (24 words), SIGNER_
 cp ubot/.env.example ubot/.env             # API_ID, API_HASH, TWO_FA_PASSWORD, UBOT_SESSION_STRING, ENCRYPTION_KEY, UBOT_API_KEY
 cp utradebot/.env.example utradebot/.env   # UTRADE_BOT_TOKEN, API_ID, API_HASH, ENCRYPTION_KEY
 
-# 2) Optional: set host POSTGRES_PASSWORD (defaults to escrow_password)
+# 2) REQUIRED: set host POSTGRES_PASSWORD (compose fails fast without it — no weak default)
 #    echo "POSTGRES_PASSWORD=strong_random_password" > .env
 
 # 3) Build & run (6 services, detached, healthchecks, resource limits)

@@ -63,7 +63,12 @@ app.use((req, res, next) => {
   if (req.secure || req.get('x-forwarded-proto') === 'https') {
     res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
   }
-  // CSP: Telegram WebView needs inline scripts (Mini App), so allow self + unsafe-inline for now but block framing
+  // CSP: Telegram WebView needs inline scripts (Mini App), so allow self + unsafe-inline for now but block framing.
+  // ACCEPTED RISK (documented, do not "fix" by deleting): a nonce/hash-based script-src is
+  // infeasible here without breaking the app — the Telegram Mini App WebView injects and
+  // executes inline bootstrap scripts outside our build pipeline, so a strict nonce would
+  // block the app on real clients. Mitigations in place: frame-ancestors 'none',
+  // nosniff, SAMEORIGIN, and no remote script hosts beyond https: allowlist.
   res.setHeader('Content-Security-Policy', "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; connect-src 'self' https: wss:; frame-ancestors 'none'");
   next();
 });

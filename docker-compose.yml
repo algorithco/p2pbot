@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: escrow
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-escrow_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: escrow
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -86,7 +86,7 @@ services:
       - backend/.env
     environment:
       # Inside compose the DB host is the service name, not localhost.
-      DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:-escrow_password}@postgres:5432/escrow
+      DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/escrow
       PORT: "3000"
       SIGNER_URL: http://signer:3001
       SERVE_STATIC: "false"
@@ -191,7 +191,7 @@ services:
       - utradebot/.env
     environment:
       # Ensure DB URL uses compose service hostname (env_file value may have localhost)
-      DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:-escrow_password}@postgres:5432/escrow
+      DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/escrow
     expose:
       - "3003"
     # Uncomment if you want internal API externally:
