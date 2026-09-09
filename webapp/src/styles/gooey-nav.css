@@ -1,11 +1,254 @@
-/* Floating transparent bottom nav — minimal, premium, Telegram-native.
-   No panel, no pill, no goo. Transparent shell + 5 circular buttons.
-   Active = subtle filled circle. "+" (first item) = white filled circle. */
+/* GooeyNav styles — React Bits (JS + CSS variant) source, verbatim.
+   https://reactbits.dev/ — only the "App bridge" section at the bottom is ours. */
 
+:root {
+  --linear-ease: linear(
+    0,
+    0.068,
+    0.19 2.7%,
+    0.804 8.1%,
+    1.037,
+    1.199 13.2%,
+    1.245,
+    1.27 15.8%,
+    1.274,
+    1.272 17.4%,
+    1.249 19.1%,
+    0.996 28%,
+    0.949,
+    0.928 33.3%,
+    0.926,
+    0.933 36.8%,
+    1.001 45.6%,
+    1.013,
+    1.019 50.8%,
+    1.018 54.4%,
+    1 63.1%,
+    0.995 68%,
+    1.001 85%,
+    1
+  );
+}
+
+.gooey-nav-container {
+  position: relative;
+}
+
+.gooey-nav-container nav {
+  display: flex;
+  position: relative;
+  transform: translate3d(0, 0, 0.01px);
+}
+
+.gooey-nav-container nav ul {
+  display: flex;
+  gap: 2em;
+  list-style: none;
+  padding: 0 1em;
+  margin: 0;
+  position: relative;
+  z-index: 3;
+  color: white;
+  text-shadow: 0 1px 1px hsl(205deg 30% 10% / 0.2);
+}
+
+.gooey-nav-container nav ul li {
+  border-radius: 100vw;
+  position: relative;
+  cursor: pointer;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease,
+    box-shadow 0.3s ease;
+  box-shadow: 0 0 0.5px 1.5px transparent;
+  color: white;
+}
+
+.gooey-nav-container nav ul li a {
+  display: inline-block;
+  padding: 0.6em 1em;
+}
+
+.gooey-nav-container nav ul li:focus-within:has(:focus-visible) {
+  box-shadow: 0 0 0.5px 1.5px white;
+}
+
+.gooey-nav-container nav ul li::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: white;
+  opacity: 0;
+  transform: scale(0);
+  transition: all 0.3s ease;
+  z-index: -1;
+}
+
+.gooey-nav-container nav ul li.active {
+  color: black;
+  text-shadow: none;
+}
+
+.gooey-nav-container nav ul li.active::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.gooey-nav-container .effect {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 1;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  z-index: 1;
+}
+
+.gooey-nav-container .effect.text {
+  color: white;
+  transition: color 0.3s ease;
+}
+
+.gooey-nav-container .effect.text.active {
+  color: black;
+}
+
+.gooey-nav-container .effect.filter {
+  filter: blur(7px) contrast(100) blur(0);
+  mix-blend-mode: lighten;
+}
+
+.gooey-nav-container .effect.filter::before {
+  content: '';
+  position: absolute;
+  inset: -75px;
+  z-index: -2;
+  background: black;
+}
+
+.gooey-nav-container .effect.filter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: white;
+  transform: scale(0);
+  opacity: 0;
+  z-index: -1;
+  border-radius: 100vw;
+}
+
+.gooey-nav-container .effect.active::after {
+  animation: pill 0.3s ease both;
+}
+
+@keyframes pill {
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.particle,
+.point {
+  display: block;
+  opacity: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 100%;
+  transform-origin: center;
+}
+
+.particle {
+  --time: 5s;
+  position: absolute;
+  top: calc(50% - 8px);
+  left: calc(50% - 8px);
+  animation: particle calc(var(--time)) ease 1 -350ms;
+}
+
+.point {
+  background: var(--color);
+  opacity: 1;
+  animation: point calc(var(--time)) ease 1 -350ms;
+}
+
+@keyframes particle {
+  0% {
+    transform: rotate(0deg) translate(calc(var(--start-x)), calc(var(--start-y)));
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+
+  70% {
+    transform: rotate(calc(var(--rotate) * 0.5)) translate(calc(var(--end-x) * 1.2), calc(var(--end-y) * 1.2));
+    opacity: 1;
+    animation-timing-function: ease;
+  }
+
+  85% {
+    transform: rotate(calc(var(--rotate) * 0.66)) translate(calc(var(--end-x)), calc(var(--end-y)));
+    opacity: 1;
+  }
+
+  100% {
+    transform: rotate(calc(var(--rotate) * 1.2)) translate(calc(var(--end-x) * 0.5), calc(var(--end-y) * 0.5));
+    opacity: 1;
+  }
+}
+
+@keyframes point {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+
+  25% {
+    transform: scale(calc(var(--scale) * 0.25));
+  }
+
+  38% {
+    opacity: 1;
+  }
+
+  65% {
+    transform: scale(var(--scale));
+    opacity: 1;
+    animation-timing-function: ease;
+  }
+
+  85% {
+    transform: scale(var(--scale));
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+
+/* ---- App bridge (ours — circular buttons, transparent shell, no panel).
+   Buttons stay untouched: 52px circles, outline icons, floating with no
+   background container. The gooey pill tracks the icon circle (see
+   updateEffectPosition in gooey-nav.ts) so the highlight is circular.
+   NOTE: the upstream black-mask + lighten-blend + contrast trick is
+   DISABLED below — it needs a solid bar behind the nav to knock the mask
+   out, and on a transparent shell the mask paints a black box over app
+   content. Instead: each item owns its active circle (highlight and icon
+   color come from the same .active class, so they can't diverge), the JS
+   positions only the transient particle burst at the icon circle, and a
+   pop animation gives the selection its gooey feel. Upstream ends above. ---- */
 .gooey-nav-container.float-nav {
-  --nav-fg: rgba(242, 245, 250, 0.58);
-  --nav-fg-active: #ffffff;
-  --nav-circle: rgba(255, 255, 255, 0.13);
+  --color-1: #ffffff;
+  --color-2: #93c5fd;
+  --color-3: #ffffff;
+  --color-4: #e0e7ff;
+  --nav-fg: rgba(242, 245, 250, 0.85);
   --nav-plus-bg: #f2f5fa;
   --nav-plus-fg: #0b0e14;
   flex: 1 1 auto;
@@ -18,7 +261,6 @@
 
 .gooey-nav-container.float-nav nav {
   flex: 1 1 auto;
-  display: flex;
   justify-content: center;
   pointer-events: none;
 }
@@ -27,13 +269,11 @@
   flex: 1 1 auto;
   width: 100%;
   max-width: 460px;
-  display: flex;
+  gap: 6px;
+  padding: 2px 10px 0;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 6px;
-  list-style: none;
-  margin: 0;
-  padding: 2px 10px 0;
+  text-shadow: none;
 }
 
 .gooey-nav-container.float-nav .float-item {
@@ -41,15 +281,19 @@
   min-width: 0;
   display: flex;
   justify-content: center;
-  background: transparent;
-  border: 0;
+  border-radius: 50%;
   box-shadow: none;
+  color: var(--nav-fg);
 }
 
-/* Kill legacy gooey pseudo-pill if any cached markup lingers */
-.gooey-nav-container.float-nav .float-item::after,
-.gooey-nav-container.float-nav .effect {
-  display: none !important;
+/* The filter pill is the active highlight — hide the rectangular one. */
+.gooey-nav-container.float-nav .float-item::after {
+  display: none;
+}
+
+.gooey-nav-container.float-nav .float-item.active {
+  color: #0b0e14;
+  text-shadow: none;
 }
 
 .gooey-nav-container.float-nav .float-tab {
@@ -60,11 +304,10 @@
   min-width: 60px;
   max-width: 84px;
   padding: 2px 4px 0;
-  color: var(--nav-fg);
+  color: inherit;
   text-decoration: none;
   border-radius: 18px;
   pointer-events: auto;
-  transition: color 0.2s ease;
 }
 
 .gooey-nav-container.float-nav .float-circle {
@@ -75,13 +318,25 @@
   place-items: center;
   line-height: 0;
   background: transparent;
-  border: 0;
-  box-shadow: none;
-  color: inherit;
-  transition:
-    background-color 0.22s ease,
-    color 0.22s ease,
-    transform 0.18s cubic-bezier(0.25, 0.8, 0.35, 1);
+  color: var(--nav-fg);
+  position: relative;
+  z-index: 2;
+  transition: background-color 0.22s ease, color 0.22s ease, transform 0.18s ease;
+}
+
+/* Pure-CSS active circle: dark icon on white, driven by the SAME .active
+   class that positions nothing else — highlight and icon color can never
+   diverge (a separately-positioned pill could sit behind the wrong item). */
+.gooey-nav-container.float-nav .float-item.active .float-circle {
+  background: #ffffff;
+  color: #0b0e14;
+  animation: circlePop 0.32s var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
+}
+
+@keyframes circlePop {
+  0% { transform: scale(0.65); }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); }
 }
 
 .gooey-nav-container.float-nav .float-circle svg {
@@ -89,8 +344,12 @@
   height: 22px;
   stroke-width: 1.7;
   display: block;
+  position: relative;
+  z-index: 2;
 }
 
+/* Labels sit below the circle — the pill never covers them, and they stay
+   readable (white) while the icon turns dark on the white goo. */
 .gooey-nav-container.float-nav .float-label {
   font-size: 10px;
   font-weight: 600;
@@ -101,35 +360,49 @@
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: center;
-  color: inherit;
+  color: var(--nav-fg);
 }
 
-/* Active: subtle circular highlight, white icon + label */
-.gooey-nav-container.float-nav .float-item.active .float-circle {
-  background: var(--nav-circle);
-  color: var(--nav-fg-active);
+.gooey-nav-container.float-nav .float-item.active .float-label {
+  color: #ffffff;
 }
 
-.gooey-nav-container.float-nav .float-item.active .float-tab {
-  color: var(--nav-fg-active);
+/* Sliding text is meaningless for icon buttons — the filter goo is enough. */
+.gooey-nav-container.float-nav .effect.text {
+  display: none;
 }
 
-/* "+" first item: always emphasized, flat white circle, dark plus */
+/* Flat goo: kill the black mask, blend mode and contrast — they require a
+   solid bar behind the nav. Plain white circle + soft dots instead. */
+.gooey-nav-container.float-nav .effect.filter {
+  filter: none;
+  mix-blend-mode: normal;
+}
+
+.gooey-nav-container.float-nav .effect.filter::before {
+  display: none;
+}
+
+.gooey-nav-container.float-nav .effect.filter::after {
+  border-radius: 50%;
+  /* No persistent pill: the item's own circle above is the highlight, so a
+     second positioned layer can never sit behind the wrong icon. The filter
+     element stays as the (transient, desync-proof) particle burst origin. */
+  display: none;
+}
+
+.gooey-nav-container.float-nav .point {
+  background: radial-gradient(circle, var(--color) 0 35%, transparent 70%);
+}
+
+/* "+" (first item): always emphasized white circle, flat, minimal shadow.
+   The goo pill carries no shadow, so "+" stays distinguishable. */
 .gooey-nav-container.float-nav .float-item.is-create .float-circle {
   background: var(--nav-plus-bg);
   color: var(--nav-plus-fg);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
 }
 
-.gooey-nav-container.float-nav .float-item.is-create .float-tab {
-  color: var(--nav-fg);
-}
-
-.gooey-nav-container.float-nav .float-item.is-create.active .float-tab {
-  color: var(--nav-fg-active);
-}
-
-/* Pressed: gentle scale, one-hand friendly */
 .gooey-nav-container.float-nav .float-tab:active .float-circle {
   transform: scale(0.93);
 }
@@ -139,20 +412,39 @@
   outline-offset: 3px;
 }
 
-/* Light theme: same language on light canvas */
+/* Light theme: dark goo pill, dark idle icons, white icon on the pill. */
 body[data-theme-mode='light'] .gooey-nav-container.float-nav {
-  --nav-fg: rgba(15, 23, 42, 0.58);
-  --nav-fg-active: #0f172a;
-  --nav-circle: rgba(15, 23, 42, 0.1);
+  --color-1: #0b0e14;
+  --color-2: #3b82f6;
+  --color-3: #0b0e14;
+  --color-4: #6366f1;
+  --nav-fg: rgba(15, 23, 42, 0.72);
   --nav-plus-bg: #0b0e14;
   --nav-plus-fg: #ffffff;
+}
+
+body[data-theme-mode='light'] .gooey-nav-container.float-nav .float-item.active {
+  color: #ffffff;
+}
+
+body[data-theme-mode='light'] .gooey-nav-container.float-nav .float-item.active .float-circle {
+  background: #0b0e14;
+  color: #ffffff;
+}
+
+body[data-theme-mode='light'] .gooey-nav-container.float-nav .float-item.active .float-label {
+  color: #0f172a;
+}
+
+body[data-theme-mode='light'] .gooey-nav-container.float-nav .effect.filter::after {
+  background: #0b0e14;
 }
 
 body[data-theme-mode='light'] .gooey-nav-container.float-nav .float-item.is-create .float-circle {
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.25);
 }
 
-/* Small phones: keep 5 circles fitted, generous but compact */
+/* Small phones: keep 5 circles fitted, generous but compact. */
 @media (max-width: 360px) {
   .gooey-nav-container.float-nav .float-list {
     gap: 2px;
@@ -173,7 +465,12 @@ body[data-theme-mode='light'] .gooey-nav-container.float-nav .float-item.is-crea
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gooey-nav-container.float-nav .float-circle,
+  .gooey-nav-container.float-nav .effect.active::after,
+  .gooey-nav-container.float-nav .float-item.active .float-circle,
+  .gooey-nav-container.float-nav .particle,
+  .gooey-nav-container.float-nav .point {
+    animation-duration: 0.01ms;
+  }
   .gooey-nav-container.float-nav .float-tab {
     transition-duration: 0.01ms;
   }

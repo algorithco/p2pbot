@@ -173,7 +173,7 @@ a { color: var(--link); text-decoration: none; }
   min-width: 0;
   display: flex; flex-direction: column; align-items: center; gap: 5px;
   padding: 2px 4px 0;
-  color: rgba(238, 243, 250, 0.58);
+  color: rgba(238, 243, 250, 0.85);
   background: transparent;
   border: 0;
   transition: color .2s;
@@ -200,7 +200,7 @@ a { color: var(--link); text-decoration: none; }
   color: #0b1220;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
 }
-.tab-btn.tab-create { color: rgba(238, 243, 250, 0.58); }
+.tab-btn.tab-create { color: rgba(238, 243, 250, 0.85); }
 .tab-btn.tab-create.active { color: #fff; }
 @media (max-width: 360px) {
   .tabbar { padding-left: 10px; padding-right: 10px; gap: 2px; }
