@@ -1,6 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { config } from '../../config';
 import logger from '../../logger';
+import { getMonthlyBuyerRating } from '../../db/queries';
 import { webAppButton } from '../keyboards';
 
 function welcomeText(): string {
@@ -98,4 +99,63 @@ export function registerCommands(bot: Bot) {
   bot.command('help', async (ctx) => {
     await ctx.reply(helpText(), { parse_mode: 'HTML' });
   });
+
+  // Monthly buyer rating — completed (RELEASED) deals only; only the buyer
+  // (the side that sent TON/USDT) earns rating.
+  bot.command('reyting', async (ctx) => {
+    try {
+      const [ton, usdt] = await Promise.all([
+        getMonthlyBuyerRatingSafe('TON', 5),
+        getMonthlyBuyerRatingSafe('USDT', 5),
+      ]);
+      await ctx.reply(formatRating(ton, usdt), { parse_mode: 'HTML' });
+    } catch (e) {
+      logger.warn('/reyting failed', e);
+      await ctx.reply('Reyting hozircha mavjud emas — birozdan keyin urinib ko‘ring.');
+    }
+  });
+}
+
+const MEDALS = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+
+function fmtVol(v: string): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  return String(Math.round(n * 10000) / 10000);
+}
+
+function ratingName(r: { telegram_id: number; username: string | null }): string {
+  return r.username ? '@' + r.username : 'ID ' + r.telegram_id;
+}
+
+function ratingBlock(title: string, rows: { telegram_id: number; username: string | null; volume: string; deals: number }[]): string {
+  if (!rows.length) return `${title}\n— hali bitim yo‘q`;
+  const lines = rows.map((r, i) => `${MEDALS[i] || `#${i + 1}`} ${ratingName(r)} — <b>${fmtVol(r.volume)}</b> (${r.deals} bitim)`);
+  return `${title}\n${lines.join('\n')}`;
+}
+
+function formatRating(
+  ton: { telegram_id: number; username: string | null; volume: string; deals: number }[],
+  usdt: { telegram_id: number; username: string | null; volume: string; deals: number }[],
+): string {
+  const d = new Date();
+  const month = `${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+  return [
+    `🏆 <b>Oylik reyting — ${month}</b>`,
+    `Faqat yakunlangan bitimlar; ochko faqat TON/USDT yuborgan xaridorga.`,
+    ``,
+    ratingBlock('💎 <b>TON</b>', ton),
+    ``,
+    ratingBlock('💵 <b>USDT</b>', usdt),
+  ].join('\n');
+}
+
+// Small indirection so a single-asset DB outage still shows the other board.
+async function getMonthlyBuyerRatingSafe(asset: string, limit: number) {
+  try {
+    return await getMonthlyBuyerRating(asset, limit);
+  } catch (e) {
+    logger.warn(`monthly rating ${asset} failed`, e);
+    return [];
+  }
 }

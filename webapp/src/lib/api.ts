@@ -181,15 +181,13 @@ export const Api = {
     groupPromote(groupId: string, body: any): Promise<any> { return request('POST', '/api/ubot/group/' + encodeURIComponent(groupId) + '/promote', body); },
     groupTransfer(groupId: string, body: any): Promise<any> { return request('POST', '/api/ubot/group/' + encodeURIComponent(groupId) + '/transfer', body); },
   },
-  // utrade proxy
-  utrade: {
-    createTrade(body: any): Promise<any> { return request('POST', '/api/utrade/trades', body); },
-    myTrades(): Promise<any[]> { return request('GET', '/api/utrade/trades/mine').then(d => Array.isArray(d) ? d : []); },
-    trade(id: string | number): Promise<any> { return request('GET', '/api/utrade/trades/' + encodeURIComponent(String(id))); },
-    setPhone(id: string | number, phone: string): Promise<any> { return request('POST', '/api/utrade/trades/' + encodeURIComponent(String(id)) + '/phone', { phone }); },
-    setBuyer(id: string | number, buyerId: number): Promise<any> { return request('POST', '/api/utrade/trades/' + encodeURIComponent(String(id)) + '/buyer', { buyerId }); },
-    confirmPayment(id: string | number): Promise<any> { return request('POST', '/api/utrade/trades/' + encodeURIComponent(String(id)) + '/confirm-payment', {}); },
-    submitCode(id: string | number, code: string, password?: string): Promise<any> { return request('POST', '/api/utrade/trades/' + encodeURIComponent(String(id)) + '/code', { code, password }); },
+  // Monthly buyer rating (RELEASED deals, buyer side earns)
+  rating(asset: string): Promise<{ month: string; asset: string; rows: any[] }> {
+    return request('GET', '/api/rating?asset=' + encodeURIComponent(asset) + '&limit=50').then(d => ({
+      month: (d && d.month) || '',
+      asset: (d && d.asset) || asset,
+      rows: (d && Array.isArray(d.rows)) ? d.rows : [],
+    }));
   },
 };
 

@@ -33,6 +33,7 @@ export async function startBot(): Promise<Bot> {
 
   await b.api.setMyCommands([
     { command: 'start', description: 'Ilovani ochish' },
+    { command: 'reyting', description: 'Oylik savdo reytingi' },
     { command: 'admin_release', description: 'Admin: pulni chiqarish' },
     { command: 'admin_refund', description: 'Admin: pulni qaytarish' },
     { command: 'disputes', description: 'Admin: nizolar' },

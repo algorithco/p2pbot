@@ -240,6 +240,40 @@ export async function upsertUserByTelegramId(telegramId: number, username?: stri
   return createUserIfNotExists(telegramId, username);
 }
 
+// Monthly buyer leaderboard — only RELEASED deals count, and only the buyer
+// (the side that sent TON/USDT) earns rating. Window = current calendar month
+// by completion time (resolved_at). One row per buyer+asset, ranked by volume.
+export interface BuyerRatingRow {
+  telegram_id: number;
+  username: string | null;
+  asset: string;
+  volume: string;
+  deals: number;
+}
+
+export async function getMonthlyBuyerRating(asset: string, limit = 50): Promise<BuyerRatingRow[]> {
+  const a = String(asset || 'TON').toUpperCase();
+  const n = Math.max(1, Math.min(100, Math.floor(limit) || 50));
+  const res = await pool.query(
+    `SELECT d.buyer_telegram_id AS telegram_id,
+            MAX(u.username) AS username,
+            UPPER(d.asset) AS asset,
+            COALESCE(SUM(d.amount), 0)::text AS volume,
+            COUNT(*)::int AS deals
+       FROM deals d
+       LEFT JOIN users u ON u.telegram_id = d.buyer_telegram_id
+      WHERE d.status = 'RELEASED'
+        AND d.buyer_telegram_id IS NOT NULL
+        AND UPPER(d.asset) = $1
+        AND COALESCE(d.resolved_at, d.updated_at, d.created_at) >= date_trunc('month', now())
+      GROUP BY d.buyer_telegram_id, UPPER(d.asset)
+      ORDER BY COALESCE(SUM(d.amount), 0) DESC, COUNT(*) DESC
+      LIMIT $2`,
+    [a, n]
+  );
+  return res.rows as BuyerRatingRow[];
+}
+
 export async function listDeals(limit = 100) {
   const res = await pool.query('SELECT * FROM deals ORDER BY id DESC LIMIT $1', [limit]);
   return res.rows;

@@ -57,10 +57,15 @@ function enhanceApp(App: any) {
   // Expose new views to legacy router (added to ROUTES in src/legacy/app.js)
   // NOTE: join-request approval lives ONLY in the mini-app deal chat
   // (inline box in viewDeal/viewChat) — there is no separate inbox page.
-  (window as any).__viewTrade = viewTrade;
+  (window as any).__viewRating = viewRating;
   (window as any).__viewChannels = viewChannels;
   // Old #/inbox bookmarks redirect home (approval happens in deal chat now).
   if (location.hash.startsWith('#/inbox')) location.hash = '#/home';
+  // Savdo page removed — old #/trade bookmarks go to Reyting.
+  if (location.hash.startsWith('#/trade')) location.hash = '#/rating';
+  window.addEventListener('hashchange', () => {
+    if (location.hash.startsWith('#/trade')) location.hash = '#/rating';
+  });
 
   // Schedule inbox badge polling
   setTimeout(pollInboxBadge, 1200);
@@ -110,7 +115,7 @@ function enhanceApp(App: any) {
 }
 
 function isNewRoute(hash: string): boolean {
-  return /^#\/trade/.test(hash) || /^#\/channels/.test(hash);
+  return /^#\/rating/.test(hash) || /^#\/channels/.test(hash);
 }
 
 function handleHash(hash: string): boolean {
@@ -120,7 +125,7 @@ function handleHash(hash: string): boolean {
 }
 
 function renderNewRoute(hash: string) {
-  if (hash.startsWith('#/trade')) return viewTrade();
+  if (hash.startsWith('#/rating')) return viewRating();
   if (hash.startsWith('#/channels')) return viewChannels();
 }
 
@@ -175,16 +180,22 @@ function mountBottomNav() {
   if (!tabbar) return;
   tabbar.innerHTML = '';
   const hashFor = (h: string) => h;
-  // Order left → right: + (create) · Bosh sahifa · Savdo · Kanallar · Hisob.
-  // Transparent floating nav: circular buttons, outline icons, circular active.
+  // Order left → right: + (create) · Bosh sahifa · Reyting · Kanallar · Hisob.
+  // Transparent floating nav: circular buttons, outline icons, GooeyNav goo.
   const handle: GooeyNavHandle = mountGooeyNav(tabbar, {
     items: [
       { hash: '#/create', label: 'Yangi', icon: svgPlus },
       { hash: '#/home', label: 'Bosh sahifa', icon: svgWrap('<path d="M4 10.5 12 4l8 6.5"/><path d="M6 9.8V20h12V9.8"/><path d="M10 20v-5.5h4V20"/>') },
-      { hash: '#/trade', label: 'Savdo', icon: svgWrap('<path d="M7 8.5h12.5L16 5"/><path d="M17 15.5H4.5L8 19"/>') },
+      { hash: '#/rating', label: 'Reyting', icon: svgWrap('<path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4.5A4 4 0 0 0 8.5 11"/><path d="M17 6h2.5A4 4 0 0 1 15.5 11"/><path d="M12 14v3.5"/><path d="M9 20.5h6"/>') },
       { hash: '#/channels', label: 'Kanallar', icon: svgWrap('<path d="M4 10.5v3a1 1 0 0 0 1 1h2l5 3.5v-11L7 9.5H5a1 1 0 0 0-1 1Z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/>') },
       { hash: '#/profile', label: 'Hisob', icon: svgWrap('<circle cx="12" cy="8" r="3.8"/><path d="M5 20a7 7 0 0 1 14 0"/>') },
     ],
+    particleCount: 5,
+    particleDistances: [90, 10],
+    particleR: 0,
+    animationTime: 600,
+    timeVariance: 0,
+    colors: [1, 2, 3, 1, 2, 3, 1, 4],
     initialActiveIndex: indexForHash(location.hash || '#/home'),
     onSelect: (_index, item) => {
       TG.haptic.tap();
@@ -206,7 +217,7 @@ function indexForHash(h: string): number {
   const hash = h || '#/home';
   if (hash.startsWith('#/create')) return 0;
   if (hash === '#/home' || hash === '') return 1;
-  if (hash.startsWith('#/trade')) return 2;
+  if (hash.startsWith('#/rating') || hash.startsWith('#/trade')) return 2;
   if (hash.startsWith('#/channels')) return 3;
   if (hash.startsWith('#/profile')) return 4;
   return 1;
@@ -898,203 +909,98 @@ function viewChannels() {
   view.appendChild(root);
 }
 
-// ---------------- Trade View ----------------
-function viewTrade() {
+// ---------------- Rating View ----------------
+// Monthly buyer leaderboard: RELEASED deals only, buyer side earns.
+// Window = current calendar month by completion time.
+const UZ_MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr'];
+const RATING_MEDALS = ['🥇', '🥈', '🥉'];
+
+function uzMonthLabel(ym: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym || '');
+  if (!m) return 'Shu oy';
+  const mi = Math.max(1, Math.min(12, parseInt(m[2], 10))) - 1;
+  return UZ_MONTHS[mi] + ' ' + m[1];
+}
+
+function ratingName(r: any): string {
+  const u = String(r.username || '').trim().replace(/^@/, '');
+  if (u) return '@' + u;
+  return 'ID ' + r.telegram_id;
+}
+
+function viewRating() {
   setTabbarPatched(true);
-  setTopbarPatched('Savdo studiyasi', { back: () => navBack('#/home') });
+  setTopbarPatched('Reyting', { back: () => navBack('#/home') });
   TG.showBack(() => navBack('#/home'));
   const view = document.getElementById('view')!;
   view.innerHTML = '';
-  let mode: 'sell' | 'buy' | 'my' = 'sell';
+  let asset: 'TON' | 'USDT' = 'TON';
+  const App = (window as any).App;
+  const meId = Number(App?.state?.meId || 0);
 
   const tabs = UI.h('div', { class: 'trade-tabs', role: 'tablist' }, [
-    UI.h('button', { class: 'active', onclick() { mode='sell'; update(); (tabs.children[0] as any).classList.add('active'); Array.from(tabs.children).slice(1).forEach(c=>c.classList.remove('active')); } }, ['Sotish']),
-    UI.h('button', { onclick() { mode='buy'; update(); Array.from(tabs.children).forEach((c,i)=> { if(i===1) c.classList.add('active'); else c.classList.remove('active'); }); } }, ['Sotib olish']),
-    UI.h('button', { onclick() { mode='my'; update(); Array.from(tabs.children).forEach((c,i)=> { if(i===2) c.classList.add('active'); else c.classList.remove('active'); }); } }, ['Bitimlarim'])
+    UI.h('button', { class: 'active', onclick() { asset='TON'; update(); (tabs.children[0] as any).classList.add('active'); (tabs.children[1] as any).classList.remove('active'); } }, ['TON']),
+    UI.h('button', { onclick() { asset='USDT'; update(); (tabs.children[1] as any).classList.add('active'); (tabs.children[0] as any).classList.remove('active'); } }, ['USDT'])
   ]);
+  const sub = UI.h('p', { text: 'Oylik savdo hajmi — faqat yakunlangan bitimlar.' });
   const body = UI.h('div', {});
 
   function update() {
     body.innerHTML = '';
-    if (mode === 'sell') body.appendChild(renderSell());
-    else if (mode === 'buy') body.appendChild(renderBuy());
-    else renderMyTrades(body);
-  }
-
-  function renderSell(): HTMLElement {
-    const sessionInput = UI.h('textarea', { class: 'input', placeholder: 'StringSession kiriting (1… ) yoki telefon:+998...', rows: '3', style: 'min-height:88px' }) as HTMLTextAreaElement;
-    const phoneInput = UI.h('input', { class: 'input', placeholder: 'Telefon +998... (E.164) — sessiyaga muqobil', type: 'text' }) as HTMLInputElement;
-    const statusEl = UI.h('div', { class: 'small muted', style: 'margin-top:8px' });
-
-    const createBtn = UI.h('button', {
-      class: 'btn btn-primary',
-      onclick: async (e: any) => {
-        const sess = sessionInput.value.trim();
-        const phone = phoneInput.value.trim();
-        if (!sess && !phone) { UI.toast('Sessiya yoki telefon kiriting','err'); return; }
-        const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent='Yaratilmoqda…';
-        try {
-          let res: any;
-          if (sess && sess.length > 50) {
-            res = await Api.utrade.createTrade({ session: sess, phone: phone || undefined });
-          } else if (phone) {
-            // phone path via utrade — server will send code to phone
-            res = await Api.utrade.createTrade({ phone });
-          } else { throw new Error('Sessiya juda qisqa'); }
-          TG.haptic.success();
-          const id = res.trade?.id || res.id || res.tradeId;
-          statusEl.textContent = "Bitim #" + id + ' yaratildi — holat: ' + (res.trade?.status || res.status || 'SELLER_REMOVED');
-          UI.toast("Bitim yaratildi #" + id, 'ok');
-        } catch (err: any) { TG.haptic.error(); UI.toast(err.message || 'Yaratilmadi','err'); }
-        finally { btn.removeAttribute('disabled'); btn.textContent=orig!; }
-      }
-    }, ['Sotuv bitimini yaratish']);
-
-    const setPhoneRow = UI.h('div', { class: 'search-row', style: 'margin-top:16px' }, [
-      UI.h('input', { class: 'input', placeholder: 'Bitim ID', id: 'sell-trade-id', style: 'max-width:120px' } as any),
-      UI.h('input', { class: 'input', placeholder: 'Telefon', id: 'sell-phone' } as any),
-      UI.h('button', {
-        class: 'btn btn-soft', style: 'width:auto',
-        onclick: async () => {
-          const tid = (document.getElementById('sell-trade-id') as HTMLInputElement)?.value.trim();
-          const ph = (document.getElementById('sell-phone') as HTMLInputElement)?.value.trim();
-          if (!tid || !ph) { UI.toast('ID + telefon shart','err'); return; }
-          try { await Api.utrade.setPhone(tid, ph); UI.toast("Telefon saqlandi",'ok'); } catch (e: any) { UI.toast(e.message || 'Xatolik','err'); }
-        }
-      }, ['Telefonni saqlash'])
-    ]);
-
-    const confirmRow = UI.h('div', { class: 'search-row' }, [
-      UI.h('input', { class: 'input', placeholder: "To'lovni tasdiqlash uchun bitim ID", id: 'sell-confirm-id', style: 'max-width:160px' } as any),
-      UI.h('button', {
-        class: 'btn btn-primary', style: 'width:auto',
-        onclick: async () => {
-          const tid = (document.getElementById('sell-confirm-id') as HTMLInputElement)?.value.trim();
-          if (!tid) { UI.toast('Bitim ID shart','err'); return; }
-          try { await Api.utrade.confirmPayment(tid); UI.toast("To'lov tasdiqlandi — xaridor telefonni oladi",'ok'); } catch (e: any) { UI.toast(e.message || 'Xatolik','err'); }
-        }
-      }, ["✅ To'lov qabul qilindi"])
-    ]);
-
-    return UI.h('div', {}, [
-      UI.h('div', { class: 'card' }, [
-        UI.h('b', { text: 'Hisob sotish — StringSession yoki Telefon' }),
-        UI.h('p', { class: 'small muted', style: 'margin-top:4px', text: "StringSession kiriting (boshqa sessiyalar o'chiriladi). Yoki telefon:+E.164 orqali Telegram login kodi olinadi." }),
-        UI.h('div', { style: 'height:8px' }),
-        sessionInput,
-        UI.h('div', { style: 'height:8px' }),
-        phoneInput,
-        UI.h('div', { style: 'height:12px' }),
-        createBtn,
-        statusEl
-      ]),
-      UI.h('div', { class: 'card' }, [ UI.h('b', { text: 'Yaratgandan keyin' }), UI.h('p', { class: 'small muted', text: "Xaridor va telefonni alohida kiriting, xaridor botdan tashqari (TON/USDT) to'lagach to'lovni tasdiqlang." }), setPhoneRow, confirmRow ])
-    ]);
-  }
-
-  function renderBuy(): HTMLElement {
-    const tradeIdInput = UI.h('input', { class: 'input', placeholder: 'Bitim ID (sotuvchidan)', type: 'text', inputmode: 'numeric' }) as HTMLInputElement;
-    const codeInput = UI.h('input', { class: 'input otp-input', placeholder: '— — — — — —', maxlength: '6', inputmode: 'numeric' }) as HTMLInputElement;
-    const passInput = UI.h('input', { class: 'input', placeholder: "2FA parol agar kerak bo'lsa (2fa:parol)", type: 'password' }) as HTMLInputElement;
-    const statusEl = UI.h('div', { class: 'small muted', style: 'margin-top:10px' });
-
-    const bindBtn = UI.h('button', {
-      class: 'btn btn-soft',
-      onclick: async (e: any) => {
-        const tid = tradeIdInput.value.trim();
-        if (!tid) { UI.toast('Bitim ID kiriting','err'); return; }
-        const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent="Bog'lanmoqda…";
-        try {
-          const t = await Api.utrade.trade(tid);
-          // Backend binds buyer implicitly on POST /api/utrade/trades/:id/code when trade has no buyer — no separate buy call needed.
-          statusEl.textContent = "Bitim #" + tid + ' — telefon ' + (t.phone ? (t.phone.slice(0,6)+'****') : 'tez orada ulashiladi') + ' — Telegramga kelgan kodni kiriting.';
-          UI.toast("Bog'landi — Telegramga kelgan login kodni tekshiring",'ok');
-        } catch (err: any) { UI.toast(err.message || "Bog'lanmadi",'err'); }
-        finally { btn.removeAttribute('disabled'); btn.textContent=orig!; }
-      }
-    }, ["Xaridor sifatida bog'lash"]);
-
-    const codeBtn = UI.h('button', {
-      class: 'btn btn-primary',
-      onclick: async (e: any) => {
-        const tid = tradeIdInput.value.trim();
-        const code = codeInput.value.trim();
-        const pw = passInput.value.trim() || undefined;
-        if (!tid || !code) { UI.toast('Bitim ID + kod shart','err'); return; }
-        if (!/^\d{5,6}$/.test(code) && !pw) { UI.toast('5-6 xonali kod kiriting','err'); return; }
-        const btn = e.currentTarget as HTMLButtonElement; btn.setAttribute('disabled',''); const orig=btn.textContent; btn.textContent='Tekshirilmoqda…';
-        try {
-          await Api.utrade.submitCode(tid, code, pw);
-          TG.haptic.success();
-          UI.toast("Kirish muvaffaqiyatli — sessiya topshirildi, sotuvchi chiqarildi",'ok');
-          statusEl.textContent = '✓ Yakunlandi — yangi sessiya hisobingizda.';
-        } catch (err: any) {
-          TG.haptic.error();
-          const m = err.message || "Kod noto'g'ri";
-          if (m.includes('2fa')) statusEl.textContent = "2FA kerak — parolni 2fa: prefiksi bilan kiriting";
-          UI.toast(m,'err');
-        } finally { btn.removeAttribute('disabled'); btn.textContent=orig!; }
-      }
-    }, ['Kodni yuborish']);
-
-    return UI.h('div', {}, [
-      UI.h('div', { class: 'card' }, [
-        UI.h('b', { text: 'Hisob sotib olish — Telegramdan kelgan kodni kiriting' }),
-        UI.h('p', { class: 'small muted', style: 'margin-top:4px', text: "Sotuvchi telefonni ulashdi. Telegram shu raqamga login kod yuboradi — hisobni olish uchun shu yerda kiriting. Sotuvchi sessiyasi avtomatik yopiladi." }),
-        UI.h('div', { style: 'height:10px' }),
-        tradeIdInput,
-        UI.h('div', { style: 'height:8px' }),
-        bindBtn,
-        UI.h('div', { style: 'height:16px' }),
-        UI.h('label', { text: 'Login kod (5-6 xona)' }),
-        codeInput,
-        UI.h('div', { style: 'height:8px' }),
-        passInput,
-        UI.h('div', { style: 'height:8px' }),
-        codeBtn,
-        statusEl
-      ])
-    ]);
-  }
-
-  function renderMyTrades(container: HTMLElement) {
-    container.innerHTML = '';
-    const sk = UI.h('div', { class: 'sk', style: 'height:80px;border-radius:18px' });
-    container.appendChild(sk);
-    Api.utrade.myTrades().then((trades: any[]) => {
-      container.innerHTML = '';
-      if (!trades.length) {
-        container.appendChild(UI.h('div', { class: 'empty' }, [
-          UI.h('div', { class: 'art', text: '🛒' }),
-          UI.h('h3', { text: "Hozircha hisob savdolari yo'q" }),
-          UI.h('p', { text: "Sessiya/telefon bilan Sotish bitimi yarating yoki sotuvchidan olingan Bitim ID bilan Sotib oling." })
-        ]));
-        return;
-      }
-      trades.forEach((t: any) => {
-        const st = (t.status || '').toUpperCase();
-        const cls = st === 'COMPLETED' ? 'st-released' : st.includes('AWAITING') ? 'st-awaiting' : 'st-unknown';
-        container.appendChild(UI.h('div', { class: 'studio-card' }, [
-          UI.h('div', { class: 'row' }, [
-            UI.h('b', { text: '#' + t.id + ' · ' + st }),
-            UI.h('span', { class: 'badge ' + cls, text: st, style: 'margin-left:auto' })
-          ]),
-          UI.h('div', { class: 'small muted', style: 'margin-top:4px', text: `Telefon ${t.phone ? t.phone.slice(0,6)+'****' : '—'} · ${UI.timeAgo(t.created_at)}` }),
-        ]));
-      });
+    body.appendChild(UI.h('div', { class: 'sk', style: 'height:72px;border-radius:18px' }));
+    Api.rating(asset).then((res) => {
+      sub.textContent = uzMonthLabel(res.month) + ' — yakunlangan bitimlar hajmi. Ochko faqat TON/USDT yuborgan xaridorga yoziladi.';
+      renderRows(res.rows || []);
     }).catch((e: any) => {
-      container.innerHTML = '';
-      container.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || 'Bitimlar yuklanmadi' }) ]));
+      body.innerHTML = '';
+      body.appendChild(UI.h('div', { class: 'banner error' }, [ UI.h('div', { class: 'small', text: e.message || 'Reyting yuklanmadi' }) ]));
+      body.appendChild(UI.h('div', { class: 'btn-row' }, [
+        UI.h('button', { class: 'btn btn-soft', onclick: () => update() }, ['Qayta urinish'])
+      ]));
+    });
+  }
+
+  function renderRows(rows: any[]) {
+    body.innerHTML = '';
+    if (!rows.length) {
+      body.appendChild(UI.h('div', { class: 'empty' }, [
+        UI.h('div', { class: 'art', text: '🏆' }),
+        UI.h('h3', { text: 'Hali reyting yo‘q' }),
+        UI.h('p', { text: 'Bu oyda yakunlangan ' + asset + ' bitim topilmadi. Birinchi bo‘ling!' })
+      ]));
+      return;
+    }
+    rows.forEach((r: any, i: number) => {
+      const isMe = meId > 0 && Number(r.telegram_id) === meId;
+      const rank = i < RATING_MEDALS.length ? RATING_MEDALS[i] : '#' + (i + 1);
+      body.appendChild(UI.h('div', {
+        class: 'deal-card',
+        style: isMe ? 'border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)' : null,
+      }, [
+        UI.h('div', { class: 'deal-top' }, [
+          UI.h('div', { class: 'asset-glyph ' + (i === 0 ? 'asset-ton' : i === 1 ? 'asset-usdt' : 'asset-any'), text: rank }),
+          UI.h('div', {}, [
+            UI.h('div', { class: 'deal-title', text: ratingName(r) }),
+            UI.h('div', { class: 'deal-sub', text: r.deals + ' bitim' + (isMe ? ' · Siz' : '') })
+          ]),
+          UI.h('div', { class: 'deal-amt' }, [
+            UI.h('b', { text: UI.fmtAmount(r.volume) + ' ' + asset })
+          ])
+        ])
+      ]));
     });
   }
 
   const root = UI.h('div', {}, [
-    UI.h('div', { class: 'hero' }, [ UI.h('h1', { text: 'Savdo studiyasi' }), UI.h('p', { text: "Hisob savdosi escrow — avtomatik chiqarish va yopish bilan StringSession topshirish." }) ]),
+    UI.h('div', { class: 'hero' }, [ UI.h('h1', { text: 'Reyting' }), sub ]),
     tabs,
+    UI.h('div', { style: 'height:12px' }),
     body
   ]);
   view.appendChild(root);
   update();
 }
+
+
 
 

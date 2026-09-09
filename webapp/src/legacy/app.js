@@ -33,7 +33,8 @@
     { re: /^#\/deal\/(\d+)$/, fn: viewDeal },
     { re: /^#\/profile$/, fn: viewProfile },
     { re: /^#\/admin$/, fn: function(){ location.hash='#/home'; if(window.UI) window.UI.toast('Admin faqat bot orqali','err'); } },
-    { re: /^#\/trade$/, fn: function(){ return window.__viewTrade && window.__viewTrade(); } },
+    { re: /^#\/trade$/, fn: function(){ location.hash='#/rating'; } },
+    { re: /^#\/rating$/, fn: function(){ return window.__viewRating && window.__viewRating(); } },
     { re: /^#\/channels$/, fn: function(){ return window.__viewChannels && window.__viewChannels(); } }
   ];
 

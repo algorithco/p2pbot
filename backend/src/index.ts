@@ -1127,6 +1127,26 @@ app.get('/api/inbox', requireIdentity, asyncHandler(async (req, res) => {
   return res.json(rows.rows);
 }));
 
+// Monthly buyer leaderboard — completed (RELEASED) deals only, buyer side
+// earns the rating. Public to any authenticated Mini App user.
+app.get('/api/rating', requireIdentity, asyncHandler(async (req, res) => {
+  const caller = getIdentityId(req);
+  if (caller === null) return res.status(401).json({ error: 'identity_required' });
+  const asset = String((req.query as any)?.asset || 'TON').toUpperCase();
+  if (asset !== 'TON' && asset !== 'USDT') return res.status(400).json({ error: 'unsupported_asset' });
+  const limitRaw = parseInt(String((req.query as any)?.limit || '50'), 10);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 50;
+  try {
+    const { getMonthlyBuyerRating } = await import('./db/queries');
+    const rows = await getMonthlyBuyerRating(asset, limit);
+    const month = new Date().toISOString().slice(0, 7);
+    return res.json({ month, asset, rows });
+  } catch (e) {
+    logger.warn('/api/rating error', e);
+    return res.status(500).json({ error: 'rating_unavailable' });
+  }
+}));
+
 // --- Internal microservice proxies (host-bound, via backend) -------------------
 // Generic helper to proxy to ubot/utrade with x-api-key server-side (keeps keys out of frontend)
 async function proxyToService(serviceUrl: string, apiKey: string, req: Request, res: Response, targetPath: string) {
