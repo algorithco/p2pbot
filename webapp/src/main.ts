@@ -6,13 +6,18 @@ import { Api } from './lib/api';
 import { UI } from './lib/ui';
 import { ChatCrypto } from './lib/crypto';
 import { Wallet } from './lib/wallet';
+import { FX } from './lib/motion';
+import { mountHeroScene } from './lib/hero-scene';
+import { mountLoader } from './lib/loader';
 
-// expose globals for legacy app.js (expects window.TG, Api, UI, ChatCrypto, Wallet)
+// expose globals for legacy app.js (expects window.TG, Api, UI, ChatCrypto, Wallet, FX)
 (window as any).TG = TG;
 (window as any).Api = Api;
 (window as any).UI = UI;
 (window as any).ChatCrypto = ChatCrypto;
 (window as any).Wallet = Wallet;
+(window as any).FX = FX;
+(window as any).HeroFX = { mount: mountHeroScene };
 
 // TON Connect config (GitHub raw, no cloudflared)
 (window as any).TONCONNECT_MANIFEST_URL = "https://raw.githubusercontent.com/Hamroqulovv/raw-ton-m/main/tonconnect-manifest.json";
@@ -22,6 +27,9 @@ import { Wallet } from './lib/wallet';
   twaReturnUrl: (window as any).TONCONNECT_TWA_RETURN_URL,
 };
 
+// Premium 2s loader — starts immediately, runs in parallel with app boot
+const loaderDone = mountLoader();
+
 // Ensure Vite HMR for CSS works
 TG.init();
 
@@ -30,6 +38,22 @@ await import('./legacy/app.js');
 
 const { patchApp } = await import('./patches');
 patchApp();
+
+// Keep app hidden until loader completes its 2s reveal (avoids flash)
+try {
+  const appEl = document.getElementById('app') as HTMLElement | null;
+  if (appEl) {
+    appEl.style.opacity = '0';
+    appEl.style.transition = 'opacity .38s ease';
+    loaderDone.then(() => {
+      appEl.style.opacity = '1';
+      // trigger hero entrance after loader
+      setTimeout(() => { try { (window as any).FX?.fadeUp?.(document.querySelector('.hero') as any); } catch {} }, 80);
+    });
+  } else {
+    await loaderDone;
+  }
+} catch { await loaderDone; }
 
 // Boot handling for start_param deep links
 setTimeout(() => {

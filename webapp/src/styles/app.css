@@ -1144,3 +1144,103 @@ body[data-theme-mode="light"] .avatar.a3 { background: linear-gradient(135deg, #
   100% { transform: scale(1); }
 }
 .success-panel .btn-row, .success-panel .link-box { animation: riseIn .4s .2s var(--ease-out) both; }
+
+/* ================= Premium 2s loader — Telegram Mini App (compact, responsive) ================= */
+#app-loader{
+  position:fixed; inset:0; z-index:999;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  /* match #app max-width + Telegram viewport height */
+  width:100%; max-width:560px; left:50%; transform:translateX(-50%);
+  height:var(--app-height, 100dvh);
+  height:var(--app-height, 100vh);
+  padding:calc(env(safe-area-inset-top,0px) + 12px) 16px calc(env(safe-area-inset-bottom,0px) + 16px);
+  background:
+    radial-gradient(420px 260px at 50% 34%, rgba(59,130,246,.16), transparent 62%),
+    radial-gradient(360px 300px at 70% 78%, rgba(139,92,246,.12), transparent 60%),
+    radial-gradient(480px 280px at 20% 84%, rgba(52,211,153,.05), transparent 60%),
+    linear-gradient(180deg, #0e121c 0%, var(--bg) 52%);
+  overflow:hidden;
+  transition: opacity .36s var(--ease), transform .36s var(--ease), visibility .36s;
+}
+#app-loader.hide{ opacity:0; transform:translateX(-50%) scale(1.015); visibility:hidden; pointer-events:none; }
+/* canvas: centered, capped — not full-bleed website hero */
+.loader-canvas-wrap{
+  position:absolute; z-index:0;
+  left:50%; top:42%; transform:translate(-50%,-50%);
+  width:min(320px, 82vw); height:min(320px, 46vh);
+  max-width:360px; max-height:360px;
+  pointer-events:none;
+}
+.loader-canvas-wrap canvas{ width:100% !important; height:100% !important; display:block; }
+.loader-aurora{
+  position:absolute; inset:-14%; z-index:0; pointer-events:none; opacity:.62;
+  background:
+    radial-gradient(38% 42% at 28% 36%, rgba(59,130,246,.20), transparent 70%),
+    radial-gradient(32% 38% at 74% 30%, rgba(139,92,246,.14), transparent 70%),
+    radial-gradient(36% 40% at 54% 82%, rgba(52,211,153,.06), transparent 70%);
+  animation: loaderAurora 5s var(--ease-inout) infinite alternate;
+  filter: blur(14px);
+}
+@keyframes loaderAurora{ from{ transform:translate3d(-1.2%,-1%,0) scale(1);} to{ transform:translate3d(1.2%,1.2%,0) scale(1.04);} }
+.loader-center{
+  position:relative; z-index:1; text-align:center; padding:0 12px;
+  width:100%; max-width:320px;
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  animation: loaderIn .45s var(--ease-out) both;
+}
+@keyframes loaderIn{ from{ opacity:0; transform:translateY(10px);} to{ opacity:1; transform:none; } }
+.loader-mark{
+  width:52px; height:52px; border-radius:15px;
+  background:var(--accent-grad);
+  display:grid; place-items:center;
+  box-shadow:0 10px 28px rgba(59,130,246,.38), inset 0 1px 0 rgba(255,255,255,.22);
+  margin-bottom:2px;
+  animation: loaderMark .55s var(--ease-spring) both .08s;
+}
+.loader-mark svg{ width:28px; height:28px; }
+@keyframes loaderMark{ from{ transform:scale(.72) rotate(-6deg); opacity:0;} to{ transform:scale(1) rotate(0); opacity:1;} }
+.loader-title{ font-size:20px; font-weight:800; letter-spacing:-.03em; line-height:1.1; }
+.loader-sub{ font-size:12px; color:var(--hint); margin-top:-4px; letter-spacing:.01em; line-height:1.4; }
+.loader-bar{
+  width:min(148px, 48vw); height:3px; border-radius:999px; overflow:hidden;
+  background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.06);
+  margin-top:10px;
+}
+.loader-fill{
+  height:100%; width:0%; border-radius:999px;
+  background:var(--accent-grad);
+  box-shadow:0 0 12px rgba(59,130,246,.5);
+  transition: width .08s linear;
+}
+.loader-meta{ font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--hint); margin-top:6px; }
+.loader-pct{ color:var(--text); font-variant-numeric: tabular-nums; }
+.loader-foot{
+  position:absolute; z-index:1; bottom:calc(env(safe-area-inset-bottom,0px) + 14px);
+  font-size:10px; font-weight:600; color:var(--hint-2); letter-spacing:.04em; text-align:center; padding:0 16px;
+}
+/* Telegram compact heights — shrink further so it never feels like a website splash */
+@media (max-height: 700px){
+  .loader-canvas-wrap{ width:min(260px, 74vw); height:min(260px, 38vh); top:40%; }
+  .loader-mark{ width:46px; height:46px; border-radius:13px; }
+  .loader-mark svg{ width:24px; height:24px; }
+  .loader-title{ font-size:18px; }
+  .loader-sub{ font-size:11.5px; }
+  .loader-bar{ width:min(132px, 44vw); margin-top:8px; }
+}
+@media (max-height: 580px){
+  .loader-canvas-wrap{ width:min(220px, 68vw); height:min(220px, 34vh); }
+  .loader-foot{ display:none; }
+}
+@media (min-width: 560px){
+  #app-loader{ border-left:1px solid var(--border); border-right:1px solid var(--border); }
+}
+@media (prefers-reduced-motion: reduce){
+  .loader-aurora{ animation:none; }
+  #app-loader{ transition:none; }
+}
+body[data-theme-mode="light"] #app-loader{
+  background:
+    radial-gradient(560px 360px at 50% 38%, rgba(59,130,246,.12), transparent 62%),
+    radial-gradient(520px 420px at 70% 78%, rgba(139,92,246,.09), transparent 60%),
+    linear-gradient(180deg, #f2f5fa 0%, #eef2f8 100%);
+}
