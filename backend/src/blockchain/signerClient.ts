@@ -25,6 +25,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
+    // best-effort: non-JSON signer body still surfaces via `raw` in the error below.
     data = { raw: text };
   }
   if (!res.ok) {

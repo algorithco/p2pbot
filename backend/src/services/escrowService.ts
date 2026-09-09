@@ -46,14 +46,21 @@ async function resolvePayoutAddress(deal: any, optsToAddress: string | undefined
   const payoutAddr = (deal as any).payout_address as string | undefined;
   if (payoutAddr && payoutAddr.trim()) return payoutAddr.trim();
   if (targetTelegramId != null) {
+    // Fallback lookups: a transient DB error here must stay visible — swallowing it
+    // silently would surface later as a misleading "address missing" error. Warn,
+    // then fall through to the next source (callers still fail closed on null).
     try {
       const res = await db.query('SELECT ton_address FROM users WHERE telegram_id = $1 LIMIT 1', [Number(targetTelegramId)]);
       if (res.rows[0]?.ton_address) return String(res.rows[0].ton_address).trim();
-    } catch {}
+    } catch (e) {
+      logger.warn(`resolvePayoutAddress: users lookup failed for deal #${deal.id}`, e);
+    }
     try {
       const r2 = await db.query('SELECT payout_address FROM deals WHERE id = $1 LIMIT 1', [deal.id]);
       if (r2.rows[0]?.payout_address) return String(r2.rows[0].payout_address).trim();
-    } catch {}
+    } catch (e) {
+      logger.warn(`resolvePayoutAddress: payout_address re-read failed for deal #${deal.id}`, e);
+    }
   }
   return null;
 }
@@ -153,7 +160,7 @@ async function executePayout(plan: PayoutPlan, dealId: number): Promise<{ feeFai
         `Deal #${dealId} fee ${feeHuman} ${assetUpper} NOT sent to fee address: ${feeError} — reconcile manually`,
         { dealId, feeHuman, asset: assetUpper, feeError, feeAddress: config.feeAddress }
       );
-    } catch {}
+    } catch {} // best-effort: hub notify below is the backstop; alert-table write must not throw.
     await notifyAdminsHub(
       `Deal #${dealId} fee failed: ${feeError} — ${feeHuman} ${assetUpper} to fee address not sent.`,
       feeHuman,
@@ -222,7 +229,7 @@ export async function reconcileStuckPayouts(stuckAfterMinutes = 15): Promise<num
         idempotencyKey: String(r.payout_idempotency_key ?? ''),
         attemptedAt: String(r.payout_attempted_at ?? ''),
       });
-    } catch {}
+    } catch {} // best-effort: hub notify below is the backstop; alert-table write must not throw.
     await notifyAdminsHub(text, String(r.amount ?? ''), String(r.asset ?? ''));
   }
   if (rows.length) logger.warn(`reconcileStuckPayouts: flagged ${rows.length} stuck payout(s) for manual review`);
@@ -328,7 +335,7 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     }
     await client.query('COMMIT');
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch {}
+    try { await client.query('ROLLBACK'); } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
     throw e;
   } finally {
     client.release();
@@ -501,7 +508,7 @@ export async function markItemSent(sellerTelegramId: number, dealId: number | st
     logger.info(`Deal #${id} marked ITEM_SENT by seller ${sellerTelegramId}`);
     return { success: true, message: `Yetkazildi deb belgilandi — xaridor xabardor qilindi.`, status: DEAL_STATUS.ITEM_SENT };
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch {}
+    try { await client.query('ROLLBACK'); } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
     logger.error(`markItemSent failed for #${id}`, e);
     return { success: false, message: String((e as Error).message || 'internal_error') };
   } finally {
@@ -620,7 +627,7 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
     }
     await client.query('COMMIT');
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch {}
+    try { await client.query('ROLLBACK'); } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
     logger.error(`buyerApproveReceipt failed for #${id}`, e);
     return { success: false, message: String((e as Error).message || 'internal_error') };
   } finally {
@@ -713,7 +720,7 @@ async function ubotFetch(path: string, init?: RequestInit): Promise<any> {
   const url = base.replace(/\/+$/,'') + path;
   const res = await fetch(url, { ...init, headers:{ ...headers, ...(init?.headers as any||{}) } } as any);
   const txt = await res.text();
-  let data:any = txt; try{ data=txt?JSON.parse(txt):null;}catch{}
+  let data:any = txt; try{ data=txt?JSON.parse(txt):null;}catch{} // best-effort: non-JSON upstream body surfaces as raw text in the error below.
   if (!res.ok) {
     const err: any = new Error(data?.error || txt || `ubot ${res.status}`);
     err.status = res.status; err.body = data;
@@ -825,7 +832,7 @@ export async function transferChannelToBuyer(dealId: number | string, newOwnerUs
   const raw = String(newOwnerUsername).trim().replace(/^@/, '');
   if (!raw || !/^([A-Za-z0-9_]{4,32})$/.test(raw)) return { ok:false, error:'invalid_username' };
   const target = '@' + raw;
-  try { await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/invite`, { method:'POST', body: JSON.stringify({ userId: target })}); } catch {}
+  try { await ubotFetch(`/channel/${encodeURIComponent(String(channelId))}/invite`, { method:'POST', body: JSON.stringify({ userId: target })}); } catch {} // best-effort: invite is courtesy; takeover below enforces membership with an explicit user_not_participant error.
   await new Promise(r=> setTimeout(r, 1200));
   try {
     const idemp = `channel-deal-${dealId}-${target}`;

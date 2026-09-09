@@ -37,6 +37,7 @@ export function parseJettonNotification(body: Cell | Slice): JettonNotificationP
     const sender = slice.loadAddress();
     return { queryId, amount, sender, forwardPayload: slice };
   } catch {
+    // best-effort: malformed bodies are simply "not a jetton notification" for the listener.
     return null;
   }
 }
@@ -58,6 +59,7 @@ export async function getWalletAddress(
     ]);
     return res.stack.readAddress();
   } catch {
+    // best-effort: null return; callers surface their own explicit error (never silent).
     return null;
   }
 }

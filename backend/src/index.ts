@@ -80,7 +80,7 @@ function buildAllowedOrigins(): string[] {
   const origins = new Set<string>();
   for (const u of [config.webappUrl, config.frontendUrl]) {
     if (!u) continue;
-    try { origins.add(new URL(u).origin); } catch {}
+    try { origins.add(new URL(u).origin); } catch {} // best-effort: skip malformed configured URLs.
   }
   // Local dev + docker internal
   origins.add('http://localhost:8080');
@@ -175,7 +175,7 @@ async function checkDealAccess(req: Request, dealId: number): Promise<{ deal: an
       }
       const jr = await db.query('SELECT 1 FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND status = $3 LIMIT 1', [dealId, token, 'pending']);
       if (jr.rows.length > 0) return { deal, hasAccess: true, isParty: false, isAdmin: false };
-    } catch {}
+    } catch {} // best-effort preview: DB error means no preview access (falls through to 403).
   }
   return { deal, hasAccess: false, isParty, isAdmin };
 }
@@ -489,7 +489,7 @@ app.post('/api/deals', dealsCreateLimiter, requireIdentity, asyncHandler(async (
         forwardComment: encMemo,
         forwardTonAmount: BigInt(1000000), // 0.001 TON for forward
       });
-    } catch { jettonPayload = null; }
+    } catch { jettonPayload = null; } // best-effort: optional payload; TON path and deal creation are unaffected.
   }
   return res.json({
     deal,
@@ -771,11 +771,11 @@ app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asy
   const { approveJoinRequest } = await import('./services/dealService');
   try {
     const role = await approveJoinRequest(requestId, caller);
-    try { await getDealChatKey(dealId); } catch {}
+    try { await getDealChatKey(dealId); } catch {} // best-effort: chat key backfills lazily on first /key or message post.
     try {
       const { addDealMessage } = await import('./services/dealService');
       await addDealMessage(dealId, 0, `Tizim: Deal boshlandi (Deal #${dealId}) — tomonlar kelishildi, to'lovni boshlang.`);
-    } catch {}
+    } catch {} // best-effort: join already approved above; chat mirror must not fail the response.
     try {
       const deal = await getDealById(dealId);
       if (deal) {
@@ -784,7 +784,7 @@ app.post('/api/deals/:id/join-requests/:requestId/approve', requireIdentity, asy
         try {
           const jr = await getJoinRequestById(requestId);
           if (jr && jr.requester_telegram_id != null) partnerId = Number(jr.requester_telegram_id);
-        } catch {}
+        } catch {} // best-effort: partner lookup falls back to the deal's seller/buyer below.
         if (partnerId == null && deal.seller_telegram_id != null) partnerId = Number(deal.seller_telegram_id);
         if (partnerId == null && deal.buyer_telegram_id != null) partnerId = Number(deal.buyer_telegram_id);
         if (partnerId != null) {
@@ -935,8 +935,8 @@ app.post('/api/deals/:id/channel/payout', channelLimiter, requireIdentity, async
   const rawAddr = String((req.body as any).tonAddress || (req.body as any).ton_address || (req.body as any).address || '').trim();
   if (rawAddr) {
     try { Address.parse(rawAddr); } catch { return res.status(400).json({ error: 'invalid_ton_address' }); }
-    try { await db.query('UPDATE deals SET payout_address = $1, updated_at = now() WHERE id = $2', [rawAddr, dealId]); } catch {}
-    try { await db.query(`INSERT INTO users (telegram_id, username, ton_address) VALUES ($1,$2,$3) ON CONFLICT (telegram_id) DO UPDATE SET ton_address = EXCLUDED.ton_address`, [caller, (req as any).user?.username||null, rawAddr]); } catch {}
+    try { await db.query('UPDATE deals SET payout_address = $1, updated_at = now() WHERE id = $2', [rawAddr, dealId]); } catch (e) { logger.warn(`channel payout: payout_address persist failed for deal #${dealId}`, e); }
+    try { await db.query(`INSERT INTO users (telegram_id, username, ton_address) VALUES ($1,$2,$3) ON CONFLICT (telegram_id) DO UPDATE SET ton_address = EXCLUDED.ton_address`, [caller, (req as any).user?.username||null, rawAddr]); } catch (e) { logger.warn(`channel payout: ton_address upsert failed for user ${caller}`, e); }
   }
   const { payoutSellerForChannel } = await import('./services/escrowService');
   const r: any = await payoutSellerForChannel(dealId, caller);
@@ -964,7 +964,7 @@ app.post('/api/deals/:id/channel/set-new-owner', channelLimiter, requireIdentity
   if (!/^@[A-Za-z0-9_]{4,32}$/.test(uname)) return res.status(400).json({ error: 'invalid_username' });
   const { setPendingNewOwner } = await import('./services/dealService');
   await setPendingNewOwner(dealId, uname);
-  try { const { addDealMessage } = await import('./services/dealService'); await addDealMessage(dealId, caller, `Xaridor ${deal.channel_username} uchun yangi ega tanladi → ${uname}.`);} catch {}
+  try { const { addDealMessage } = await import('./services/dealService'); await addDealMessage(dealId, caller, `Xaridor ${deal.channel_username} uchun yangi ega tanladi → ${uname}.`);} catch {} // best-effort: chat mirror; the pending_new_owner write above already succeeded.
   return res.json({ ok:true, pending_new_owner: uname });
 }));
 app.post('/api/deals/:id/channel/transfer-to-buyer', channelLimiter, requireIdentity, asyncHandler(async (req, res) => {
@@ -1018,7 +1018,7 @@ async function proxyToService(serviceUrl: string, apiKey: string, req: Request, 
     const resp = await fetch(url, { method, headers, body } as any);
     const txt = await resp.text();
     let data: any = txt;
-    try { data = txt ? JSON.parse(txt) : null; } catch {}
+    try { data = txt ? JSON.parse(txt) : null; } catch {} // best-effort: non-JSON upstream body is forwarded as raw text.
     res.status(resp.status);
     // Forward rate limit headers if present
     const rl = resp.headers.get('x-ratelimit-remaining');
@@ -1107,7 +1107,7 @@ app.post('/api/utrade/trades', requireIdentity, asyncHandler(async (req, res) =>
     throw e;
   }
   // Ensure table exists (idempotent)
-  try { await db.query("SELECT 1 FROM utrade_trades LIMIT 1"); } catch {
+  try { await db.query("SELECT 1 FROM utrade_trades LIMIT 1"); } catch { // best-effort probe: missing table is created below.
     await db.query(`CREATE TABLE IF NOT EXISTS utrade_trades (
       id SERIAL PRIMARY KEY, seller_telegram_id BIGINT NOT NULL, buyer_telegram_id BIGINT,
       phone TEXT, phone_enc TEXT, session_encrypted TEXT NOT NULL, status TEXT NOT NULL,
@@ -1125,7 +1125,7 @@ app.post('/api/utrade/trades', requireIdentity, asyncHandler(async (req, res) =>
      VALUES ($1,$2,$3,$4,$5, now() + interval '24 hours', '{}'::jsonb) RETURNING id, status, created_at`,
     [caller, null, null, phEnc, enc, 'SELLER_REMOVED']
   );
-  try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event) VALUES ($1,$2,$3)', [r.rows[0].id, caller, 'created_via_webapp']); } catch {}
+  try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event) VALUES ($1,$2,$3)', [r.rows[0].id, caller, 'created_via_webapp']); } catch {} // best-effort: audit event; trade creation already succeeded.
   return res.json({ ok: true, trade: r.rows[0], id: r.rows[0].id });
 }));
 
@@ -1236,14 +1236,14 @@ app.post('/api/utrade/trades/:id/code', requireIdentity, asyncHandler(async (req
   // Mark for manual review and log event; real verification must happen via utradebot teleproto.
   if (password) {
     await db.query("UPDATE utrade_trades SET status = 'AWAITING_BUYER_LOGIN', updated_at = now(), meta = COALESCE(meta,'{}'::jsonb) || '{\"webapp_2fa_submitted\":true}'::jsonb WHERE id = $1", [id]);
-    try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [id, caller, '2fa_submitted_via_webapp_manual_review', JSON.stringify({ hasPassword: true })]); } catch {}
+    try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [id, caller, '2fa_submitted_via_webapp_manual_review', JSON.stringify({ hasPassword: true })]); } catch {} // best-effort: audit event; status update above already succeeded.
     return res.json({ ok: true, status: 'AWAITING_BUYER_LOGIN', note: '2FA received but NOT verified — manual review / utradebot teleproto verification required. Trade NOT marked COMPLETED.' });
   }
   if (/^\d{5,6}$/.test(code)) {
     // First code submission moves PHONE_SHARED -> AWAITING_CODE; subsequent stays AWAITING_CODE (never COMPLETED)
     const newSt = st === 'PHONE_SHARED' ? 'AWAITING_CODE' : 'AWAITING_CODE';
     await db.query(`UPDATE utrade_trades SET status = $1, updated_at = now(), meta = COALESCE(meta,'{}'::jsonb) || '{\"webapp_code_submitted\":true}'::jsonb WHERE id = $2`, [newSt, id]);
-    try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [id, caller, 'code_submitted_via_webapp_manual_review', JSON.stringify({ code: '***' })]); } catch {}
+    try { await db.query('INSERT INTO utrade_events (trade_id, actor_telegram_id, event, meta) VALUES ($1,$2,$3,$4::jsonb)', [id, caller, 'code_submitted_via_webapp_manual_review', JSON.stringify({ code: '***' })]); } catch {} // best-effort: audit event; status update above already succeeded.
     return res.json({ ok: true, status: 'AWAITING_CODE', note: 'Code received but NOT verified — manual review / utradebot verification required. Trade NOT marked COMPLETED.', next: 'await_manual_review' });
   }
   return res.status(400).json({ error: 'invalid_code' });
@@ -1356,7 +1356,7 @@ app.get('/api/deals/:id/payload', requireIdentity, asyncHandler(async (req, res)
         forwardComment: encryptField(memo),
         forwardTonAmount: BigInt(1000000),
       });
-    } catch { jettonPayload = null; }
+    } catch { jettonPayload = null; } // best-effort: optional payload; response still carries TON payloads.
   }
   return res.json({
     dealId,

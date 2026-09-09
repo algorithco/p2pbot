@@ -62,6 +62,9 @@ export function isDisputedDeal(d: { confirmations?: Record<string, unknown> | st
     }
     return !!(c && (c as { disputed?: unknown }).disputed === true);
   } catch {
+    // best-effort: unparsable confirmations JSON counts as "not disputed" (fail-open
+    // would freeze deals; fail-closed here only skips the dispute badge, schedulers
+    // still skip via the same helper consistently).
     return false;
   }
 }
@@ -218,7 +221,7 @@ export async function getDealChatKey(dealId: number | string): Promise<string | 
     await client.query('COMMIT');
     return newKey;
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch {}
+    try { await client.query('ROLLBACK'); } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
     throw e;
   } finally {
     client.release();
@@ -315,7 +318,8 @@ export async function atomicJoinDeal(dealId: number, token: string, telegramId: 
     await client.query('COMMIT');
     return role;
   } catch (e) {
-    await client.query('ROLLBACK');
+    // best-effort: never let a rollback failure mask the original join error.
+    try { await client.query('ROLLBACK'); } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
     throw e;
   } finally {
     client.release();

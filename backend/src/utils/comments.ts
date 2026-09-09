@@ -84,6 +84,7 @@ export function parseTonComment(body: Cell | Slice | null | undefined): string |
     }
     return s;
   } catch {
+    // best-effort: malformed on-chain comment parses as "no memo", never crashes the listener.
     return null;
   }
 }
@@ -104,11 +105,13 @@ export function parseJettonForwardComment(forwardPayload: Slice | Cell | null | 
       try {
         return (slice as unknown as { loadStringTail: () => string }).loadStringTail?.() ?? null;
       } catch {
+        // best-effort: raw tail unreadable — treat as no memo.
         return null;
       }
     }
     return null;
   } catch {
+    // best-effort: malformed forward payload parses as "no memo", never crashes the listener.
     return null;
   }
 }

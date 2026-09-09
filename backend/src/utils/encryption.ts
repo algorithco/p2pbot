@@ -19,6 +19,7 @@ export function getMasterKey(): Buffer | null {
     if (buf.length === 0) return null;
     return null;
   } catch {
+    // best-effort: malformed key hex means "no key" (strict boot gate rejects it in prod).
     return null;
   }
 }
@@ -87,6 +88,7 @@ export function decryptField(b64: string): string {
     const dec = Buffer.concat([decipher.update(enc), decipher.final()]);
     return dec.toString('utf8');
   } catch {
+    // best-effort: undecryptable field returns as-is (legacy plaintext rows).
     return b64;
   }
 }
@@ -115,6 +117,7 @@ export function decryptDealKey(stored: string): string {
     if (dec === stored && Buffer.from(stored, 'base64').length === 32) return stored;
     return dec || stored;
   } catch {
+    // best-effort: undecryptable chat key falls back to stored value (legacy plaintext keys).
     return stored;
   }
 }

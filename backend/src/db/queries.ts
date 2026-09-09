@@ -212,6 +212,7 @@ export async function listAdminAlerts(limit = 10) {
     const res = await pool.query('SELECT * FROM admin_alerts ORDER BY id DESC LIMIT $1', [limit]);
     return res.rows;
   } catch {
+    // best-effort: alert listing is read-only admin UI; empty beats a 500.
     return [];
   }
 }

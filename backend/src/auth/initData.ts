@@ -26,6 +26,7 @@ export function parseInitData(initData: string): Map<string, string> {
     try {
       params.set(decodeURIComponent(rawKey), decodeURIComponent(rawValue));
     } catch {
+      // best-effort: keep raw pair on malformed encoding; signature check still decides.
       params.set(rawKey, rawValue);
     }
   }
@@ -95,6 +96,7 @@ export function validateInitData(
         };
       }
     } catch {
+      // best-effort: malformed user JSON means "no verified user", not a crash.
       user = undefined;
     }
   }

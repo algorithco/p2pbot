@@ -54,6 +54,7 @@ export function registerCommands(bot: Bot) {
     try {
       await ctx.editMessageText(welcomeText(), { parse_mode: 'HTML', reply_markup: welcomeKeyboard() });
     } catch {
+      // best-effort: edit fails when the message is unchanged/deleted — reply instead.
       await ctx.reply(welcomeText(), { parse_mode: 'HTML', reply_markup: welcomeKeyboard() });
     }
   });
@@ -61,10 +62,11 @@ export function registerCommands(bot: Bot) {
   const showHelp = async (ctx: any) => {
     try {
       await ctx.answerCallbackQuery?.();
-    } catch {}
+    } catch {} // best-effort: callback may already be answered/expired.
     try {
       await ctx.editMessageText?.(helpText(), { parse_mode: 'HTML' });
     } catch {
+      // best-effort: uneditable message — reply instead.
       await ctx.reply(helpText(), { parse_mode: 'HTML' });
     }
   };

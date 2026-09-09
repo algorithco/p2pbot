@@ -92,6 +92,7 @@ async function findAwaitingDealById(dealId: number, paymentAddress?: string): Pr
         return null;
       }
     } catch {
+      // best-effort: unparsable address falls back to plain string compare.
       if (row.payment_address !== paymentAddress) return null;
     }
   }
@@ -126,7 +127,7 @@ async function unknownToAdminsAndSave(info: { amount: string | number; asset: st
     const { saveAdminAlert } = await import('../db/queries');
     const text = `Noma'lum to'lov: ${info.amount} ${info.asset} — ${info.memo}`.slice(0, 500);
     await saveAdminAlert('unknown_deposit', text, { amount: String(info.amount), asset: info.asset, address: info.address, memo: info.memo });
-  } catch {}
+  } catch {} // best-effort: Telegram notify above already attempted; alert persistence must not break deposit handling.
 }
 
 async function notifySellerDeposit(deal: DealRow) {
@@ -448,10 +449,12 @@ async function handleTransaction(addr: string, tx: Transaction) {
             forwardComment = parseTonComment(bodySlice) ?? parseJettonForwardComment(bodySlice);
           }
         } catch {
+          // best-effort: unparsable forward payload means "no memo" (deposit handled as unknown), never crash the poll loop.
           forwardComment = null;
         }
       }
     } catch {
+      // best-effort: same as above for the outer notification-field parse.
       forwardComment = null;
     }
     await processJettonDeposit(addr, note, forwardComment, txHash);
@@ -466,6 +469,7 @@ async function handleTransaction(addr: string, tx: Transaction) {
       try {
         comment = parseTonComment(tx.inMessage.body);
       } catch {
+        // best-effort: unparsable body means "no memo" (deposit handled as unknown).
         comment = null;
       }
       await processTonDeposit(addr, src, value, txHash, comment);

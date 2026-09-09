@@ -13,40 +13,12 @@ import { config } from '../config';
 import { ESCROW_CODE_HEX, deployBody, Escrow } from '../contracts/wrappers/Escrow';
 import { computeJettonWalletAddress } from './jettonUtils';
 import { getSignerAddress, deployEscrowViaSigner } from './signerClient';
-
-/**
- * Defensive import of ../utils/money (owned by a parallel workstream; may not
- * exist yet). Falls back to a local identical implementation until it lands.
- * TODO(dedupe): remove fallback once src/utils/money.ts is merged.
- */
-type ToBaseUnits = (amount: string | number, decimals?: number) => bigint;
-
-let loadedToBaseUnits: ToBaseUnits | undefined;
-try {
-  const mod = require('../utils/money') as { toBaseUnits?: ToBaseUnits } | undefined;
-  if (mod && typeof mod.toBaseUnits === 'function') {
-    loadedToBaseUnits = mod.toBaseUnits;
-  }
-} catch {
-  // module not present yet — fallback below covers us
-}
-
-const toBaseUnits: ToBaseUnits =
-  loadedToBaseUnits ??
-  ((amount: string | number, decimals = 9): bigint => {
-    const str = String(amount).trim();
-    const neg = str.startsWith('-');
-    const unsigned = neg ? str.slice(1) : str;
-    const [whole, frac = ''] = unsigned.split('.');
-    const fracPadded = (frac + '0'.repeat(decimals)).slice(0, decimals);
-    const result =
-      BigInt(whole === '' ? '0' : whole) * 10n ** BigInt(decimals) + BigInt(fracPadded === '' ? '0' : fracPadded);
-    return neg ? -result : result;
-  });
+import { toBaseUnits } from '../utils/money';
 
 /** Human amount -> base units (nanoTON for TON deals, 6dp for USDT-style jettons). */
 export function parseDealAmount(amount: string | number, assetType: number): bigint {
-  return toBaseUnits(amount, assetType === 0 ? 9 : 6);
+  const asset = assetType === 0 ? 'TON' : 'USDT';
+  return BigInt(toBaseUnits(amount, asset));
 }
 
 /**
@@ -107,6 +79,7 @@ export async function deployEscrowContract(
     try {
       contractJettonWallet = await computeJettonWalletAddress(jettonMaster, signerAddr);
     } catch {
+      // best-effort: null flows into the explicit "could not derive" throw below.
       contractJettonWallet = null;
     }
     if (!contractJettonWallet) {

@@ -35,6 +35,7 @@ export function payloadB64ToDecryptedComment(b64: string): string | null {
     // If encrypted and decrypt succeeded, dec will be original text; if not encrypted, decryptField returns raw
     return dec;
   } catch {
+    // best-effort: undecryptable payload falls back to raw (old plaintext memos).
     return raw;
   }
 }
@@ -45,6 +46,7 @@ export function decryptCommentString(maybeEncrypted: string | null | undefined):
     const dec = decryptField(String(maybeEncrypted));
     return dec || String(maybeEncrypted);
   } catch {
+    // best-effort: on decrypt error the listener still matches the raw memo.
     return String(maybeEncrypted);
   }
 }
@@ -63,6 +65,7 @@ export function payloadB64ToComment(b64: string): string | null {
     if (op !== 0) return null;
     return slice.loadStringTail();
   } catch {
+    // best-effort: malformed BOC decodes as "no comment" for the listener.
     return null;
   }
 }

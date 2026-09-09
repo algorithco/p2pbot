@@ -2,6 +2,7 @@ import { Bot } from 'grammy';
 import { db } from '../../db/queries';
 import { adminRelease, adminRefund } from '../../services/escrowService';
 import { adminKeyboard } from '../keyboards';
+import logger from '../../logger';
 
 function isAdminCtx(ctx: any): boolean {
   return Boolean((ctx as any).session?.isAdmin);
@@ -56,13 +57,17 @@ export function registerAdminCommands(bot: Bot) {
           let when = '';
           try {
             when = a.created_at ? new Date(a.created_at).toLocaleString('uz-UZ') : '';
-          } catch {}
+          } catch {} // best-effort: bad timestamp omits the date, alert text still sent.
           await ctx.reply(`• #${a.id} [${a.kind}] ${a.text}${when ? `\n${when}` : ''}`);
         }
       } else {
         await ctx.reply(`ℹ️ Admin ogohlantirishlar yo'q.`);
       }
-    } catch {}
+    } catch (e) {
+      // Was silent: an admin tapping "alerts" with a failing DB saw nothing. Log it.
+      logger.warn('disputes/alerts handler failed', e);
+      try { await ctx.reply(`❌ Ogohlantirishlarni o'qib bo'lmadi, keyinroq urinib ko'ring.`); } catch {}
+    }
   });
 
   bot.callbackQuery(/^admin_do_release:(\d+)$/, async (ctx) => {
