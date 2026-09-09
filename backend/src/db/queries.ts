@@ -145,6 +145,9 @@ export async function ensureTables() {
   // race in createJoinRequest — the unique violation is caught and mapped to the
   // existing row (see dealService.createJoinRequest).
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_join_requests_pending ON deal_join_requests(deal_id, requester_telegram_id) WHERE status = 'pending'`);
+  // Join-request requester photo: Telegram file_id only (file URLs embed the bot
+  // token and must never be stored — the photo proxy resolves file_id server-side).
+  await ensureColumn('deal_join_requests', 'requester_photo_file_id TEXT');
 
   // Telegram IDs exceed 32-bit range — widen legacy INTEGER id columns to BIGINT.
   await pool.query('ALTER TABLE deals ALTER COLUMN buyer_id TYPE BIGINT');

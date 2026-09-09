@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS deal_join_requests (
   requester_username TEXT,
   requester_first_name TEXT,
   requester_photo_url TEXT,
+  requester_photo_file_id TEXT,
   status TEXT DEFAULT 'pending',
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
