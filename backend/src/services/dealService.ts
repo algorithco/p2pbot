@@ -8,13 +8,22 @@ import {
   decryptDealKey,
   encryptWithDealKey,
 } from '../utils/encryption';
+import { dealPricing, fromBaseUnits } from '../utils/money';
 
-/** Canonical deal status strings. */
+/** Canonical deal status strings.
+ * RELEASE_PENDING / REFUND_PENDING are transient crash-safety states owned by the
+ * payout path (see escrowService guardedTransition): a deal sits in PENDING only
+ * between "payout attempt committed" and "on-chain send confirmed". They are never
+ * final and never auto-retried — see reconcileStuckPayouts. Clients must treat any
+ * unknown non-final status as "in progress".
+ */
 export const DEAL_STATUS = {
   AWAITING_DEPOSIT: 'AWAITING_DEPOSIT',
   DEPOSIT_CONFIRMED: 'DEPOSIT_CONFIRMED',
   ITEM_SENT: 'ITEM_SENT',
   BUYER_CONFIRMED: 'BUYER_CONFIRMED',
+  RELEASE_PENDING: 'RELEASE_PENDING',
+  REFUND_PENDING: 'REFUND_PENDING',
   RELEASED: 'RELEASED',
   REFUNDED: 'REFUNDED',
 } as const;
@@ -26,6 +35,36 @@ export const DEAL_TYPE = {
 } as const;
 
 const FINAL_STATUSES = new Set<string>([DEAL_STATUS.RELEASED, DEAL_STATUS.REFUNDED]);
+
+/** Shape used by every Telegram notification helper (single source of truth). */
+export function dealLike(deal: { id: number | string; amount: string | number | null; asset: string | null; terms?: string | null }): {
+  id: number | string;
+  amount: string | number;
+  asset: string;
+  terms?: string;
+} {
+  return {
+    id: deal.id,
+    amount: deal.amount != null ? String(deal.amount) : '0',
+    asset: String(deal.asset ?? 'TON'),
+    terms: deal.terms ?? undefined,
+  };
+}
+
+/** True when the deal was flagged as disputed (confirmations JSONB). */
+export function isDisputedDeal(d: { confirmations?: Record<string, unknown> | string | null }): boolean {
+  try {
+    let c: Record<string, unknown> | null = null;
+    if (typeof d.confirmations === 'string' && d.confirmations) {
+      c = JSON.parse(d.confirmations);
+    } else if (d.confirmations && typeof d.confirmations === 'object') {
+      c = d.confirmations as Record<string, unknown>;
+    }
+    return !!(c && (c as { disputed?: unknown }).disputed === true);
+  } catch {
+    return false;
+  }
+}
 
 export function normalizeChannelUsername(v: unknown): string | null {
   if (!v) return null;
@@ -81,7 +120,10 @@ export async function createDealRecord(params: {
   } = params;
 
   const normalizedType = ['P2P','CHANNEL','GROUP'].includes(String(dealType).toUpperCase()) ? String(dealType).toUpperCase() : DEAL_TYPE.P2P;
-  const feeAmount = (amount * feeBps) / 10000; // feeBps in basis points (100 = 1%)
+  // Single source for fee + expected-deposit math (see utils/money.dealPricing).
+  const assetUpper = String(asset || 'TON').toUpperCase();
+  const feeBase = dealPricing(amount, assetUpper, feeBps).feeBase;
+  const feeAmount = Number(fromBaseUnits(feeBase, assetUpper));
 
   // Generate per-deal E2E chat key (32 bytes base64, encrypted at rest if ENCRYPTION_KEY set)
   const chatKeyPlain = generateDealChatKey();

@@ -81,13 +81,170 @@ function feeParts(amountStr: string, assetUpper: string, feeBpsRaw: unknown): { 
 }
 
 /**
+ * IDEMPOTENCY MODEL (double-payout protection — read before touching this file).
+ *
+ * Old flow held ONE db transaction across the on-chain send:
+ *   BEGIN -> SELECT FOR UPDATE -> sendTon/sendJetton -> UPDATE status -> COMMIT.
+ * If the process died (or the signer response was lost) after the chain accepted
+ * the transfer but before COMMIT, the DB still showed the pre-payout status and any
+ * retry paid a SECOND time. SELECT FOR UPDATE only serializes concurrent attempts
+ * inside live transactions — it cannot see a send that already landed on-chain.
+ *
+ * New flow splits the payout into three phases:
+ *   tx1 (short, no network I/O): lock row, validate, mark RELEASE_PENDING/REFUND_PENDING
+ *       with a deterministic idempotency key `release:{dealId}` / `refund:{dealId}`, COMMIT.
+ *   send (no db tx held): execute on-chain legs, passing the key to the signer
+ *       (signer dedupes same-key replays in memory; durable truth stays here in the DB).
+ *   tx2: finalize to RELEASED/REFUNDED only WHERE status=PENDING AND key=key.
+ * A second attempt while PENDING sees the marker and refuses to send
+ * (`payout_in_progress`). A crash between send and tx2 leaves a PENDING row that
+ * `reconcileStuckPayouts` (run at boot) flags to admins for MANUAL on-chain
+ * verification — we never blindly auto-retry, because the transfer may have landed.
+ */
+function payoutIdempotencyKey(dealId: number, status: string): string {
+  return `${status === DEAL_STATUS.RELEASED ? 'release' : 'refund'}:${dealId}`;
+}
+
+function pendingStatusFor(status: string): string {
+  return status === DEAL_STATUS.RELEASED ? DEAL_STATUS.RELEASE_PENDING : DEAL_STATUS.REFUND_PENDING;
+}
+
+function isPendingStatus(status: unknown): boolean {
+  return status === DEAL_STATUS.RELEASE_PENDING || status === DEAL_STATUS.REFUND_PENDING;
+}
+
+interface PayoutPlan {
+  assetUpper: string;
+  principalHuman: string; // what the party receives (price; == amount for refunds)
+  amountStr: string; // deal price (human), for logging/alerts
+  feeHuman: string;
+  feeBase: bigint;
+  toAddress: string;
+  encryptedMemo: string;
+  idempotencyKey: string;
+}
+
+/**
+ * Execute the on-chain payout legs. MUST be called with no DB transaction held
+ * (after tx1 committed PENDING, before tx2 finalizes) so a slow signer cannot
+ * exhaust the pg pool or hold a row lock across network I/O.
+ *
+ * Throws on PRINCIPAL-leg failure: the caller must roll the deal back to a
+ * retryable status and raise a persistent admin alert (the send may have landed
+ * on-chain despite the error — the alert carries the idempotency key + timestamp
+ * so an admin can verify before any manual retry).
+ *
+ * Never throws on FEE-leg failure: the principal already left custody, so the deal
+ * must still finalize — but the missing fee is returned for persistent recording
+ * (`fee_payout_failed`), never just a log line.
+ */
+async function executePayout(plan: PayoutPlan, dealId: number): Promise<{ feeFailed: boolean; feeError: string | null }> {
+  const { assetUpper, principalHuman, amountStr, feeHuman, feeBase, toAddress, encryptedMemo, idempotencyKey } = plan;
+  let feeFailed = false;
+  let feeError: string | null = null;
+  const recordFeeFailure = async (err: unknown): Promise<void> => {
+    feeFailed = true;
+    feeError = String((err as Error)?.message || err).slice(0, 500);
+    logger.warn(`Fee payout failed for deal #${dealId}`, err);
+    try {
+      const { saveAdminAlert } = await import('../db/queries');
+      await saveAdminAlert(
+        'fee_payout_failed',
+        `Deal #${dealId} fee ${feeHuman} ${assetUpper} NOT sent to fee address: ${feeError} — reconcile manually`,
+        { dealId, feeHuman, asset: assetUpper, feeError, feeAddress: config.feeAddress }
+      );
+    } catch {}
+    await notifyAdminsHub(
+      `Deal #${dealId} fee failed: ${feeError} — ${feeHuman} ${assetUpper} to fee address not sent.`,
+      feeHuman,
+      assetUpper
+    );
+  };
+  if (assetUpper === 'TON') {
+    await sendTon({ to: toAddress, value: principalHuman, comment: encryptedMemo, bounce: false, idempotencyKey });
+    logger.info(`Custodial payout for deal #${dealId} to ${toAddress} amount ${principalHuman} (price ${amountStr} fee ${feeHuman})`);
+    if (feeBase > 0n && config.feeAddress && feeHuman !== '0') {
+      try {
+        const feeMemo = encryptField(`Fee for Escrow #${dealId} — ${feeHuman} ${assetUpper}`);
+        await sendTon({ to: config.feeAddress, value: feeHuman, comment: feeMemo, bounce: false, idempotencyKey: `${idempotencyKey}:fee` });
+        logger.info(`Fee ${feeHuman} ${assetUpper} sent to ${config.feeAddress} for deal #${dealId}`);
+      } catch (feeErr) {
+        await recordFeeFailure(feeErr);
+      }
+    }
+  } else {
+    const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
+    if (!jettonMaster) throw new Error(`jetton_master_not_configured: jetton sozlanmagan, admin bilan bog'laning`);
+    await sendJetton({ jettonMasterAddress: jettonMaster, to: toAddress, amount: principalHuman, forwardComment: encryptedMemo, forwardTonAmount: '0.01', idempotencyKey });
+    logger.info(`Custodial Jetton payout for deal #${dealId} to ${toAddress} amount ${principalHuman}`);
+    if (feeBase > 0n && config.feeAddress && feeHuman !== '0') {
+      try {
+        const feeMemo = encryptField(`Fee for Escrow #${dealId} — ${feeHuman} ${assetUpper}`);
+        await sendJetton({ jettonMasterAddress: jettonMaster, to: config.feeAddress, amount: feeHuman, forwardComment: feeMemo, forwardTonAmount: '0.01', idempotencyKey: `${idempotencyKey}:fee` });
+      } catch (feeErr) {
+        await recordFeeFailure(feeErr);
+      }
+    }
+  }
+  return { feeFailed, feeError };
+}
+
+/**
+ * Flag PENDING deals left behind by a crash for MANUAL reconciliation.
+ * Called at boot. NEVER auto-retries: the on-chain transfer may already have
+ * landed, and a blind retry would double-pay. An admin must check the chain
+ * (amount/to/idempotency key in the alert) then either finalize or reset manually.
+ */
+export async function reconcileStuckPayouts(stuckAfterMinutes = 15): Promise<number> {
+  let rows: any[] = [];
+  try {
+    const cutoff = new Date(Date.now() - Math.max(1, stuckAfterMinutes) * 60_000);
+    const res = await db.query(
+      `SELECT id, status, payout_idempotency_key, payout_attempted_at, amount, asset
+       FROM deals WHERE status = ANY($1) AND payout_attempted_at IS NOT NULL AND payout_attempted_at < $2
+       ORDER BY id ASC LIMIT 100`,
+      [[DEAL_STATUS.RELEASE_PENDING, DEAL_STATUS.REFUND_PENDING], cutoff]
+    );
+    rows = res.rows;
+  } catch (e) {
+    logger.warn('reconcileStuckPayouts query failed', e);
+    return 0;
+  }
+  for (const r of rows) {
+    const text =
+      `Deal #${r.id} stuck in ${r.status} since ${r.payout_attempted_at} ` +
+      `(key ${r.payout_idempotency_key}, ${r.amount ?? '?'} ${r.asset ?? '?'}) — ` +
+      `payout may or may not have landed on-chain. Verify on-chain BEFORE any manual retry; DO NOT auto-retry.`;
+    try {
+      const { saveAdminAlert } = await import('../db/queries');
+      await saveAdminAlert('payout_stuck', text, {
+        dealId: Number(r.id), status: String(r.status),
+        idempotencyKey: String(r.payout_idempotency_key ?? ''),
+        attemptedAt: String(r.payout_attempted_at ?? ''),
+      });
+    } catch {}
+    await notifyAdminsHub(text, String(r.amount ?? ''), String(r.asset ?? ''));
+  }
+  if (rows.length) logger.warn(`reconcileStuckPayouts: flagged ${rows.length} stuck payout(s) for manual review`);
+  return rows.length;
+}
+
+/**
  * Shared guarded transition for RELEASED/REFUNDED.
  * MONEY MODEL: deal.amount = price (seller net). Buyer deposited price+fee.
  * On RELEASED: seller gets amount, feeAddress gets fee.
- * FIX 2.1: wrapped in SELECT ... FOR UPDATE transaction to prevent double-payout races.
+ * Crash-safe: three-phase PENDING + idempotency key (see IDEMPOTENCY MODEL above).
  */
 async function guardedTransition(dealId: number, status: string, opts?: { toAddress?: string; amount?: string | number; asset?: string; terms?: string }) {
+  const isRelease = status === DEAL_STATUS.RELEASED;
+  const isRefund = status === DEAL_STATUS.REFUNDED;
+  const pendingStatus = pendingStatusFor(status);
+  const idemKey = payoutIdempotencyKey(dealId, status);
+
+  // ── Phase 1: lock, validate,durably mark PENDING (short tx, NO network I/O) ──
   const client = await db.connect();
+  let fromStatus: string;
+  let plan: PayoutPlan;
   try {
     await client.query('BEGIN');
     const lockedRes = await client.query('SELECT * FROM deals WHERE id = $1 FOR UPDATE', [dealId]);
@@ -96,9 +253,15 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
       await client.query('ROLLBACK');
       throw new Error(`deal_not_found: bitim topilmadi`);
     }
-    if (![DEAL_STATUS.RELEASED, DEAL_STATUS.REFUNDED].includes(status as any)) {
+    if (!isRelease && !isRefund) {
       await client.query('ROLLBACK');
       throw new Error(`invalid_target_status: noto'g'ri holat`);
+    }
+    // A PENDING row means a payout attempt already committed phase 1 (possibly crashed
+    // before finalizing). Refuse to start a second send for the same logical payout.
+    if (isPendingStatus(deal.status)) {
+      await client.query('ROLLBACK');
+      throw new Error(`payout_in_progress: Deal #${dealId} "${deal.status}" holatda — to'lov allaqachon jarayonda (key ${deal.payout_idempotency_key || idemKey}). Takrorlamang; admin on-chain tekshirsin.`);
     }
     if (!isValidTransition(String(deal.status), status)) {
       await client.query('ROLLBACK');
@@ -108,6 +271,7 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
       await client.query('ROLLBACK');
       throw new Error(`already_${String(status).toLowerCase()}: bitim allaqachon ${status} holatda`);
     }
+    fromStatus = String(deal.status);
     const asset = String(opts?.asset || deal.asset || 'TON').toUpperCase();
     const assetUpper = asset;
     const amountStr = String(opts?.amount ?? deal.amount ?? 0);
@@ -117,7 +281,7 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     let payoutHuman = amountStr;
     let feeHuman = fromBaseUnits(0n, assetUpper);
     let feeBase = 0n;
-    if (status === DEAL_STATUS.RELEASED) {
+    if (isRelease) {
       try {
         const parts = feeParts(amountStr, assetUpper, (deal as any).fee_bps ?? config.feeBps ?? 100);
         payoutHuman = parts.sellerHuman;
@@ -130,7 +294,6 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
       }
     }
 
-    const isRelease = status === DEAL_STATUS.RELEASED;
     const targetTelegramId = isRelease ? deal.seller_telegram_id : deal.buyer_telegram_id;
     const memoPlainBase = releaseComment({ id: dealId, amount: amountStr, asset, terms });
     let memoPlain = isRelease ? memoPlainBase : `Refund: ${memoPlainBase}`;
@@ -138,7 +301,6 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
     const encryptedMemo = encryptField(memoPlain);
 
     const toAddress = await resolvePayoutAddress(deal, opts?.toAddress, targetTelegramId != null ? Number(targetTelegramId) : null);
-    const isRefund = status === DEAL_STATUS.REFUNDED;
     if (!toAddress) {
       await client.query('ROLLBACK');
       if (isRelease) throw new Error(`seller_ton_address_required: sotuvchi TON manzilni ilovada kiritishi shart (Bitim → To'lov manzili yoki Profil → TON manzil)`);
@@ -148,84 +310,90 @@ async function guardedTransition(dealId: number, status: string, opts?: { toAddr
       throw new Error(`payout_address_required`);
     }
 
-    const shouldSend = isRelease || isRefund;
-    if (shouldSend && toAddress) {
-      try {
-        if (assetUpper === 'TON') {
-          await sendTon({ to: toAddress!, value: isRelease ? payoutHuman : amountStr, comment: encryptedMemo, bounce: false });
-          logger.info(`Custodial ${status} for deal #${dealId} to ${toAddress} amount ${isRelease ? payoutHuman : amountStr} (price ${amountStr} fee ${feeHuman})`);
-          if (isRelease && feeBase > 0n && config.feeAddress && feeHuman !== '0') {
-            try {
-              const feeMemo = encryptField(`Fee for Escrow #${dealId} — ${feeHuman} ${assetUpper}`);
-              await sendTon({ to: config.feeAddress, value: feeHuman, comment: feeMemo, bounce: false });
-              logger.info(`Fee ${feeHuman} ${assetUpper} sent to ${config.feeAddress} for deal #${dealId}`);
-            } catch (feeErr) {
-              logger.warn(`Fee payout failed for deal #${dealId}`, feeErr);
-            }
-          }
-        } else {
-          const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
-          if (!jettonMaster) throw new Error(`jetton_master_not_configured: jetton sozlanmagan, admin bilan bog'laning`);
-          await sendJetton({ jettonMasterAddress: jettonMaster, to: toAddress!, amount: isRelease ? payoutHuman : amountStr, forwardComment: encryptedMemo, forwardTonAmount: '0.01' });
-          logger.info(`Custodial Jetton ${status} for deal #${dealId} to ${toAddress} amount ${isRelease ? payoutHuman : amountStr}`);
-          if (isRelease && feeBase > 0n && config.feeAddress && feeHuman !== '0') {
-            try {
-              const feeMemo = encryptField(`Fee for Escrow #${dealId} — ${feeHuman} ${assetUpper}`);
-              await sendJetton({ jettonMasterAddress: jettonMaster, to: config.feeAddress, amount: feeHuman, forwardComment: feeMemo, forwardTonAmount: '0.01' });
-            } catch (feeErr) {
-              logger.warn(`Jetton fee payout failed for deal #${dealId}`, feeErr);
-            }
-          }
-        }
-      } catch (e) {
-        const msg = String((e as Error).message || '');
-        if (msg.includes('seller_ton_address_required') || msg.includes('buyer_ton_address_required')) {
-          await client.query('ROLLBACK');
-          throw e;
-        }
-        await client.query('ROLLBACK');
-        if (isRelease) {
-          logger.warn(`Payout failed for deal #${dealId} — not marking ${status}, manual required: ${msg}`, e);
-          await notifyAdminsHub(`Deal #${dealId} payout failed: ${msg} — amount ${isRelease ? payoutHuman : amountStr} to ${toAddress}.`, String(isRelease ? payoutHuman : amountStr), assetUpper);
-          throw new Error(`payout_failed: ${msg}`);
-        }
-        logger.error(`On-chain send failed for deal #${dealId} (${status})`, e);
-        throw new Error(`onchain_send_failed: ${msg}`);
-      }
-    } else if (isRelease && !toAddress) {
-      await client.query('ROLLBACK');
-      throw new Error(`seller_ton_address_required: sotuvchi to'lov manzilini kiritishi shart`);
-    }
+    plan = {
+      assetUpper, principalHuman: isRelease ? payoutHuman : amountStr, amountStr,
+      feeHuman, feeBase, toAddress, encryptedMemo, idempotencyKey: idemKey,
+    };
 
-    // Guarded status update inside transaction — row still locked, prevents race
-    const finalSets: string[] = ['status = $1'];
-    const finalParams: unknown[] = [status];
-    finalSets.push('updated_at = now()');
-    finalSets.push('resolved_at = now()');
-    finalParams.push(dealId);
-    const upd = await client.query(`UPDATE deals SET ${finalSets.join(', ')} WHERE id = $${finalParams.length} AND status = $${finalParams.length + 1} RETURNING id`, [...finalParams.slice(0, -1), dealId, deal.status]);
-    // status guard: if rowCount 0 means concurrent transition already happened
-    if (upd.rowCount === 0) {
+    // Durably record the attempt BEFORE any money moves. From here on, a crash no
+    // longer looks like "nothing happened" — the PENDING row + key prove an attempt ran.
+    const mark = await client.query(
+      `UPDATE deals SET status = $1, payout_idempotency_key = $2, payout_attempted_at = now(), updated_at = now()
+       WHERE id = $3 AND status = $4 RETURNING id`,
+      [pendingStatus, idemKey, dealId, fromStatus]
+    );
+    if (mark.rowCount === 0) {
       await client.query('ROLLBACK');
-      throw new Error(`concurrent_transition: deal status changed concurrently from ${deal.status}`);
+      throw new Error(`concurrent_transition: deal status changed concurrently from ${fromStatus}`);
     }
-    // also set tx_hash if needed (kept separate for compatibility)
     await client.query('COMMIT');
-    // System message after commit (best-effort)
-    try {
-      const { addDealMessage } = await import('./dealService');
-      const sysText = status === DEAL_STATUS.RELEASED
-        ? `Tizim: Yakunlandi (Deal #${dealId}) — ${isRelease ? payoutHuman : amountStr} ${asset} sotuvchiga yuborildi${feeHuman !== '0' ? ` (komissiya ${feeHuman} ${asset})` : ''}.`
-        : `Tizim: Qaytarildi (Deal #${dealId}) — ${amountStr} ${asset} xaridorga qaytarildi.`;
-      await addDealMessage(dealId, 0, sysText);
-    } catch (e) {
-      logger.warn(`post-commit system message failed for deal #${dealId}`, e);
-    }
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
     throw e;
   } finally {
     client.release();
+  }
+
+  // ── Phase 2: on-chain send with NO db transaction held ──
+  let feeFailed = false;
+  let feeError: string | null = null;
+  try {
+    ({ feeFailed, feeError } = await executePayout(plan!, dealId));
+  } catch (e) {
+    // Send failed — or its response was lost AFTER the chain accepted it (ambiguous).
+    // Roll the status back so a human CAN retry, but leave a persistent, queryable
+    // alert: before ANY manual retry the admin MUST verify on-chain whether the
+    // transfer with this idempotency key already landed, or the retry double-pays.
+    const msg = String((e as Error).message || '');
+    try {
+      await db.query(`UPDATE deals SET status = $1, updated_at = now() WHERE id = $2 AND status = $3`, [fromStatus!, dealId, pendingStatus]);
+    } catch (rbErr) {
+      logger.error(`Payout rollback failed for deal #${dealId} — manual reconciliation required`, rbErr);
+    }
+    try {
+      const { saveAdminAlert } = await import('../db/queries');
+      await saveAdminAlert(
+        'payout_failed',
+        `Deal #${dealId} ${status} failed: ${msg} — amount ${plan!.principalHuman} to ${plan!.toAddress} (key ${idemKey}). ON-CHAIN TEKSHIRING: transfer executed bo'lishi mumkin; qayta yuborishdan oldin tekshiring.`,
+        { dealId, status, error: msg, to: plan!.toAddress, amount: plan!.principalHuman, idempotencyKey: idemKey }
+      );
+    } catch {}
+    if (isRelease) {
+      logger.warn(`Payout failed for deal #${dealId} — not marking ${status}, manual required: ${msg}`, e);
+      await notifyAdminsHub(`Deal #${dealId} payout failed: ${msg} — amount ${plan!.principalHuman} to ${plan!.toAddress}.`, plan!.principalHuman, plan!.assetUpper);
+      throw new Error(`payout_failed: ${msg}`);
+    }
+    logger.error(`On-chain send failed for deal #${dealId} (${status})`, e);
+    throw new Error(`onchain_send_failed: ${msg}`);
+  }
+
+  // ── Phase 3: finalize only if the row is still OUR pending attempt ──
+  const upd = await db.query(
+    `UPDATE deals SET status = $1, fee_payout_failed = $2, fee_payout_error = $3, updated_at = now(), resolved_at = now()
+     WHERE id = $4 AND status = $5 AND payout_idempotency_key = $6 RETURNING id`,
+    [status, feeFailed, feeError, dealId, pendingStatus, idemKey]
+  );
+  if (upd.rowCount === 0) {
+    // Money moved but the row moved underneath us (manual admin edit?). Never silent:
+    // flag for human reconciliation with everything needed to verify on-chain.
+    const text = `Deal #${dealId} payout SENT (${plan!.principalHuman} ${plan!.assetUpper} to ${plan!.toAddress}, key ${idemKey}) but status is no longer ${pendingStatus} — human reconciliation required.`;
+    logger.error(text);
+    try {
+      const { saveAdminAlert } = await import('../db/queries');
+      await saveAdminAlert('payout_finalize_conflict', text, { dealId, idempotencyKey: idemKey, to: plan!.toAddress, amount: plan!.principalHuman });
+    } catch {}
+    await notifyAdminsHub(text, plan!.principalHuman, plan!.assetUpper);
+    throw new Error(`concurrent_transition: payout sent but deal status changed during send (key ${idemKey})`);
+  }
+  // System message after commit (best-effort)
+  try {
+    const { addDealMessage } = await import('./dealService');
+    const sysText = status === DEAL_STATUS.RELEASED
+      ? `Tizim: Yakunlandi (Deal #${dealId}) — ${plan!.principalHuman} ${plan!.assetUpper} sotuvchiga yuborildi${feeFailed ? ` (komissiya yuborilmadi — admin tekshiradi)` : plan!.feeHuman !== '0' ? ` (komissiya ${plan!.feeHuman} ${plan!.assetUpper})` : ''}.`
+      : `Tizim: Qaytarildi (Deal #${dealId}) — ${plan!.amountStr} ${plan!.assetUpper} xaridorga qaytarildi.`;
+    await addDealMessage(dealId, 0, sysText);
+  } catch (e) {
+    logger.warn(`post-commit system message failed for deal #${dealId}`, e);
   }
 }
 
@@ -348,7 +516,12 @@ export async function markItemSent(sellerTelegramId: number, dealId: number | st
  */
 export async function buyerApproveReceipt(buyerTelegramId: number, dealId: number | string) {
   const id = Number(dealId);
+  const idemKey = payoutIdempotencyKey(id, DEAL_STATUS.RELEASED);
+  const pendingStatus = DEAL_STATUS.RELEASE_PENDING;
+  // ── Phase 1: lock, validate, durably mark RELEASE_PENDING (short tx, no network I/O) ──
   const client = await db.connect();
+  let fromStatus: string;
+  let plan: PayoutPlan;
   try {
     await client.query('BEGIN');
     const locked = await client.query('SELECT * FROM deals WHERE id = $1 FOR UPDATE', [id]);
@@ -361,6 +534,11 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
     if (!isBuyer) {
       await client.query('ROLLBACK');
       return { success: false, message: `Faqat xaridor qabulni tasdiqlab pulni chiqara oladi.` };
+    }
+    // Same PENDING guard as guardedTransition: never start a second send.
+    if (isPendingStatus(deal.status)) {
+      await client.query('ROLLBACK');
+      return { success: false, message: `Deal #${id} "${deal.status}" holatda — to'lov allaqachon jarayonda. Takrorlamang; admin on-chain tekshirsin.` };
     }
     const allowed = [DEAL_STATUS.ITEM_SENT];
     if (!allowed.includes(deal.status as any)) {
@@ -375,6 +553,7 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
         return { success: false, message: `Deal #${id} "${deal.status}" holatda — faqat ITEM_SENT dan tasdiqlash mumkin (sotuvchi avval yuborishi shart).` };
       }
     }
+    fromStatus = String(deal.status);
     if (deal.seller_telegram_id == null) {
       await client.query('ROLLBACK');
       return { success: false, message: `Sotuvchi hali qo'shilmagan — chiqarib bo'lmaydi.` };
@@ -424,63 +603,22 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
     if (memoPlain.length > 120) memoPlain = memoPlain.slice(0, 119) + '…';
     const encryptedMemo = encryptField(memoPlain);
 
-    try {
-      if (assetUpper === 'TON') {
-        await sendTon({ to: payoutAddress, value: sellerHuman, comment: encryptedMemo, bounce: false });
-        logger.info(`Custodial RELEASED deal #${id} seller ${sellerHuman} TON to ${payoutAddress} fee ${feeHuman}`);
-        if (feeBase > 0n && config.feeAddress && feeHuman !== '0') {
-          try {
-            const feeMemo = encryptField(`Fee for Escrow #${id} — ${feeHuman} ${assetUpper}`);
-            await sendTon({ to: config.feeAddress, value: feeHuman, comment: feeMemo, bounce: false });
-          } catch (feeErr) {
-            logger.warn(`Fee payout failed for deal #${id}`, feeErr);
-          }
-        }
-      } else {
-        const jettonMaster = config.jettonMasterAddress || config.usdtJettonAddress;
-        if (!jettonMaster) throw new Error('jetton_master_not_configured: set JETTON_MASTER_ADDRESS or USDT_JETTON_ADDRESS');
-        await sendJetton({ jettonMasterAddress: jettonMaster, to: payoutAddress, amount: sellerHuman, forwardComment: encryptedMemo, forwardTonAmount: '0.01' });
-        logger.info(`Custodial RELEASED deal #${id} seller ${sellerHuman} ${assetUpper} to ${payoutAddress} fee ${feeHuman}`);
-        if (feeBase > 0n && config.feeAddress && feeHuman !== '0') {
-          try {
-            const feeMemo = encryptField(`Fee for Escrow #${id} — ${feeHuman} ${assetUpper}`);
-            await sendJetton({ jettonMasterAddress: jettonMaster, to: config.feeAddress, amount: feeHuman, forwardComment: feeMemo, forwardTonAmount: '0.01' });
-          } catch (feeErr) {
-            logger.warn(`Jetton fee payout failed for deal #${id}`, feeErr);
-          }
-        }
-      }
-    } catch (e) {
-      await client.query('ROLLBACK');
-      const msg = String((e as Error).message || '');
-      logger.error(`buyerApproveReceipt payout failed for deal #${id}`, e);
-      await notifyAdminsHub(`Deal #${id} to'lov xatosi: ${msg} — ${sellerHuman} manzil ${payoutAddress}.`, sellerHuman, assetUpper);
-      return { success: false, message: msg.startsWith('payout_failed') ? msg : `payout_failed: to'lov yuborilmadi: ${msg}` };
-    }
+    plan = {
+      assetUpper, principalHuman: sellerHuman, amountStr,
+      feeHuman, feeBase, toAddress: payoutAddress, encryptedMemo, idempotencyKey: idemKey,
+    };
 
-    const upd = await client.query(`UPDATE deals SET status = $1, updated_at = now(), resolved_at = now() WHERE id = $2 AND status = $3 RETURNING id`, [DEAL_STATUS.RELEASED, id, deal.status]);
-    if (upd.rowCount === 0) {
+    // Durably record the attempt BEFORE money moves (see IDEMPOTENCY MODEL above).
+    const mark = await client.query(
+      `UPDATE deals SET status = $1, payout_idempotency_key = $2, payout_attempted_at = now(), updated_at = now()
+       WHERE id = $3 AND status = $4 RETURNING id`,
+      [pendingStatus, idemKey, id, fromStatus]
+    );
+    if (mark.rowCount === 0) {
       await client.query('ROLLBACK');
       return { success: false, message: `concurrent_transition: deal status changed` };
     }
     await client.query('COMMIT');
-    // Post-commit side effects (best-effort)
-    try {
-      const { addDealMessage } = await import('./dealService');
-      await addDealMessage(id, 0, `Tizim: Yakunlandi (Deal #${id}) — ${sellerHuman} ${assetUpper} sotuvchiga yuborildi (komissiya ${feeHuman} ${assetUpper}).`);
-    } catch (e) { logger.warn(`buyerApproveReceipt system message failed #${id}`, e); }
-    try {
-      await notify.releasedToBuyer(Number(deal.buyer_telegram_id), dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }));
-    } catch (e) {
-      logger.warn(`releasedToBuyer notify failed for #${id}`, e);
-    }
-    try {
-      await notify.releasedToSeller(Number(deal.seller_telegram_id), dealLike({ id, amount: amountStr, asset: assetUpper, terms: deal.terms }), sellerHuman);
-    } catch (e) {
-      logger.warn(`releasedToSeller notify failed for #${id}`, e);
-    }
-    logger.info(`Deal #${id} RELEASED by buyer ${buyerTelegramId} approval (seller ${sellerHuman}, fee ${feeHuman})`);
-    return { success: true, message: `Qabul qilindi — pul sotuvchiga chiqarildi (komissiya chegirilgan). Bitim yopildi.`, released: true, status: DEAL_STATUS.RELEASED };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
     logger.error(`buyerApproveReceipt failed for #${id}`, e);
@@ -488,6 +626,73 @@ export async function buyerApproveReceipt(buyerTelegramId: number, dealId: numbe
   } finally {
     client.release();
   }
+
+  // ── Phase 2: on-chain send with NO db transaction held ──
+  let feeFailed = false;
+  let feeError: string | null = null;
+  try {
+    ({ feeFailed, feeError } = await executePayout(plan!, id));
+  } catch (e) {
+    // Ambiguous failure: the transfer may have landed despite the error. Roll back to
+    // a retryable status but persist everything an admin needs to verify on-chain
+    // before any manual retry (idempotency key) — a blind retry would double-pay.
+    const msg = String((e as Error).message || '');
+    try {
+      await db.query(`UPDATE deals SET status = $1, updated_at = now() WHERE id = $2 AND status = $3`, [fromStatus!, id, pendingStatus]);
+    } catch (rbErr) {
+      logger.error(`buyerApproveReceipt rollback failed for #${id} — manual reconciliation required`, rbErr);
+    }
+    logger.error(`buyerApproveReceipt payout failed for deal #${id}`, e);
+    try {
+      const { saveAdminAlert } = await import('../db/queries');
+      await saveAdminAlert(
+        'payout_failed',
+        `Deal #${id} buyer-approve payout failed: ${msg} — ${plan!.principalHuman} to ${plan!.toAddress} (key ${idemKey}). ON-CHAIN TEKSHIRING: qayta yuborishdan oldin tekshiring.`,
+        { dealId: id, error: msg, to: plan!.toAddress, amount: plan!.principalHuman, idempotencyKey: idemKey }
+      );
+    } catch {}
+    await notifyAdminsHub(`Deal #${id} to'lov xatosi: ${msg} — ${plan!.principalHuman} manzil ${plan!.toAddress}.`, plan!.principalHuman, plan!.assetUpper);
+    return { success: false, message: msg.startsWith('payout_failed') ? msg : `payout_failed: to'lov yuborilmadi: ${msg}` };
+  }
+
+  // ── Phase 3: finalize only if the row is still OUR pending attempt ──
+  const upd = await db.query(
+    `UPDATE deals SET status = $1, fee_payout_failed = $2, fee_payout_error = $3, updated_at = now(), resolved_at = now()
+     WHERE id = $4 AND status = $5 AND payout_idempotency_key = $6 RETURNING id`,
+    [DEAL_STATUS.RELEASED, feeFailed, feeError, id, pendingStatus, idemKey]
+  );
+  if (upd.rowCount === 0) {
+    const text = `Deal #${id} buyer-approve payout SENT (${plan!.principalHuman} ${plan!.assetUpper} to ${plan!.toAddress}, key ${idemKey}) but status is no longer ${pendingStatus} — human reconciliation required.`;
+    logger.error(text);
+    try {
+      const { saveAdminAlert } = await import('../db/queries');
+      await saveAdminAlert('payout_finalize_conflict', text, { dealId: id, idempotencyKey: idemKey, to: plan!.toAddress, amount: plan!.principalHuman });
+    } catch {}
+    await notifyAdminsHub(text, plan!.principalHuman, plan!.assetUpper);
+    return { success: false, message: `concurrent_transition: payout sent but deal status changed during send (key ${idemKey})` };
+  }
+  // Post-finalize side effects (best-effort)
+  const done = plan!;
+  let finalDeal: any = null;
+  try { finalDeal = await getDealById(id); } catch {}
+  try {
+    const { addDealMessage } = await import('./dealService');
+    await addDealMessage(id, 0, `Tizim: Yakunlandi (Deal #${id}) — ${done.principalHuman} ${done.assetUpper} sotuvchiga yuborildi${feeFailed ? ` (komissiya yuborilmadi — admin tekshiradi)` : ` (komissiya ${done.feeHuman} ${done.assetUpper})`}.`);
+  } catch (e) { logger.warn(`buyerApproveReceipt system message failed #${id}`, e); }
+  try {
+    const buyerId = finalDeal ? Number(finalDeal.buyer_telegram_id) : buyerTelegramId;
+    if (buyerId) await notify.releasedToBuyer(buyerId, dealLike({ id, amount: done.amountStr, asset: done.assetUpper, terms: finalDeal?.terms }));
+  } catch (e) {
+    logger.warn(`releasedToBuyer notify failed for #${id}`, e);
+  }
+  try {
+    const sellerId = finalDeal && finalDeal.seller_telegram_id != null ? Number(finalDeal.seller_telegram_id) : null;
+    if (sellerId) await notify.releasedToSeller(sellerId, dealLike({ id, amount: done.amountStr, asset: done.assetUpper, terms: finalDeal?.terms }), done.principalHuman);
+  } catch (e) {
+    logger.warn(`releasedToSeller notify failed for #${id}`, e);
+  }
+  logger.info(`Deal #${id} RELEASED by buyer ${buyerTelegramId} approval (seller ${done.principalHuman}, fee ${done.feeHuman})`);
+  return { success: true, message: `Qabul qilindi — pul sotuvchiga chiqarildi (komissiya chegirilgan). Bitim yopildi.`, released: true, status: DEAL_STATUS.RELEASED };
 }
 
 // ── CHANNEL/GROUP custodial escrow (via @gramchioka) ──

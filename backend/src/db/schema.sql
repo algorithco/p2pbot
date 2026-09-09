@@ -1,7 +1,9 @@
 -- Canonical backend schema — mirrors src/db/queries.ts ensureTables().
 -- ensureTables() is authoritative at boot; this file documents/creates the same shape.
 -- Deal statuses (canonical webapp-first): AWAITING_DEPOSIT, DEPOSIT_CONFIRMED,
--- ITEM_SENT, BUYER_CONFIRMED (legacy), RELEASED, REFUNDED.
+-- ITEM_SENT, BUYER_CONFIRMED (legacy), RELEASE_PENDING / REFUND_PENDING
+-- (transient payout-in-progress, see escrowService guardedTransition),
+-- RELEASED, REFUNDED.
 
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -44,7 +46,12 @@ CREATE TABLE IF NOT EXISTS deals (
   escrow_holder_id BIGINT,
   transfer_to_escrow_at TIMESTAMPTZ,
   transfer_to_buyer_at TIMESTAMPTZ,
-  pending_new_owner TEXT
+  pending_new_owner TEXT,
+  -- Crash-safe payouts: PENDING marker committed before any on-chain send.
+  payout_idempotency_key TEXT,
+  payout_attempted_at TIMESTAMPTZ,
+  fee_payout_failed BOOLEAN DEFAULT false,
+  fee_payout_error TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_deals_type ON deals(deal_type);
 CREATE INDEX IF NOT EXISTS idx_deals_channel_id ON deals(channel_id) WHERE channel_id IS NOT NULL;

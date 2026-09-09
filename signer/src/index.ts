@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import { config, validateMnemonic } from './config';
 import { signer } from './wallet';
 import logger from './logger';
@@ -31,6 +32,48 @@ function authMiddleware(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ error: 'unauthorized', hint: 'x-api-key required' });
   }
   return next();
+}
+
+// ── Idempotency dedupe (last line of defense before an on-chain transfer) ──
+// The DURABLE double-payout guarantee lives in the backend DB (PENDING states +
+// deterministic payout_idempotency_key committed before any send). This cache only
+// covers the crash window where the backend sent twice with the SAME key because it
+// never got our first response (timeout/crash). Memory-only: lost on signer restart,
+// bounded size + TTL so it cannot grow unboundedly. A repeat with the same key but
+// DIFFERENT transfer params is rejected (409) — that signals a key-collision bug.
+const IDEM_MAX_ENTRIES = 1000;
+const IDEM_TTL_MS = 24 * 3600 * 1000;
+const idemCache = new Map<string, { seqno: number; paramsHash: string; at: number }>();
+
+function idemKeyFrom(req: Request): string | null {
+  const h = (req.headers['x-idempotency-key'] as string) || '';
+  const b = typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : '';
+  const k = (h || b || '').trim();
+  return k ? k.slice(0, 128) : null;
+}
+
+function paramsHashOf(obj: unknown): string {
+  return crypto.createHash('sha256').update(JSON.stringify(obj ?? null)).digest('hex');
+}
+
+/** Returns {seqno} on replay hit, {conflict:true} on key-reuse-with-new-params, null on miss. */
+function idemCheck(key: string, paramsHash: string): { seqno: number } | { conflict: true } | null {
+  const e = idemCache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.at > IDEM_TTL_MS) {
+    idemCache.delete(key);
+    return null;
+  }
+  if (e.paramsHash !== paramsHash) return { conflict: true };
+  return { seqno: e.seqno };
+}
+
+function idemStore(key: string, seqno: number, paramsHash: string): void {
+  if (idemCache.size >= IDEM_MAX_ENTRIES) {
+    const oldest = idemCache.keys().next();
+    if (!oldest.done) idemCache.delete(oldest.value);
+  }
+  idemCache.set(key, { seqno, paramsHash, at: Date.now() });
 }
 
 // Public health (no auth) — docker healthcheck
@@ -91,7 +134,18 @@ app.post('/send', authMiddleware, async (req, res) => {
     } catch {
       return res.status(400).json({ error: 'invalid to address' });
     }
+    const idemKey = idemKeyFrom(req);
+    const phash = paramsHashOf({ to, value: String(value), bounce, comment });
+    if (idemKey) {
+      const hit = idemCheck(idemKey, phash);
+      if (hit && 'conflict' in hit) return res.status(409).json({ error: 'idempotency_conflict: key already used with different transfer params' });
+      if (hit) {
+        logger.warn(`POST /send idempotency replay key=${idemKey} seqno=${hit.seqno} — NOT re-sending`);
+        return res.json({ ok: true, seqno: hit.seqno, duplicate: true });
+      }
+    }
     const result = await signer.send({ to, value: String(value), body: body || null, bounce, comment });
+    if (idemKey) idemStore(idemKey, result.seqno, phash);
     res.json({ ok: true, ...result });
   } catch (err) {
     const msg = (err as Error).message;
@@ -128,7 +182,18 @@ app.post('/send-jetton', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'invalid address' });
     }
     if (!forwardComment) return res.status(400).json({ error: 'forwardComment (memo) required — every Jetton tx must carry escrow# memo' });
+    const idemKey = idemKeyFrom(req);
+    const phash = paramsHashOf({ jettonMasterAddress, to, amount: String(amount), forwardComment, forwardTonAmount });
+    if (idemKey) {
+      const hit = idemCheck(idemKey, phash);
+      if (hit && 'conflict' in hit) return res.status(409).json({ error: 'idempotency_conflict: key already used with different transfer params' });
+      if (hit) {
+        logger.warn(`POST /send-jetton idempotency replay key=${idemKey} seqno=${hit.seqno} — NOT re-sending`);
+        return res.json({ ok: true, seqno: hit.seqno, duplicate: true });
+      }
+    }
     const result = await signer.sendJetton({ jettonMasterAddress, to, amount: String(amount), forwardComment, forwardTonAmount });
+    if (idemKey) idemStore(idemKey, result.seqno, phash);
     res.json({ ok: true, ...result });
   } catch (err) {
     const msg = (err as Error).message;

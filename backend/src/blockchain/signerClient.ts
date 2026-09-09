@@ -45,19 +45,23 @@ export async function getSignerInfo(): Promise<{ address: string | null; deploye
   return data as never;
 }
 
-export async function sendTon(params: { to: string; value: string; comment?: string; bounce?: boolean }): Promise<{ seqno: number }> {
+export async function sendTon(params: { to: string; value: string; comment?: string; bounce?: boolean; idempotencyKey?: string }): Promise<{ seqno: number; duplicate?: boolean }> {
   if (!params.comment) throw new Error('memo_required: TON transfers must include comment memo (escrow# or release memo)');
+  const { idempotencyKey, ...body } = params;
   return request<{ seqno: number }>('/send', {
     method: 'POST',
-    body: JSON.stringify(params),
+    headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : {},
+    body: JSON.stringify(idempotencyKey ? { ...body, idempotencyKey } : body),
   });
 }
 
-export async function sendJetton(params: { jettonMasterAddress: string; to: string; amount: string; forwardComment: string; forwardTonAmount?: string }): Promise<{ seqno: number }> {
+export async function sendJetton(params: { jettonMasterAddress: string; to: string; amount: string; forwardComment: string; forwardTonAmount?: string; idempotencyKey?: string }): Promise<{ seqno: number; duplicate?: boolean }> {
   if (!params.forwardComment) throw new Error('memo_required: Jetton forwardComment (escrow# memo) is mandatory');
+  const { idempotencyKey, ...body } = params;
   return request<{ seqno: number }>('/send-jetton', {
     method: 'POST',
-    body: JSON.stringify(params),
+    headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : {},
+    body: JSON.stringify(idempotencyKey ? { ...body, idempotencyKey } : body),
   });
 }
 

@@ -111,6 +111,13 @@ export async function ensureTables() {
   await ensureColumn('deals', 'transfer_to_escrow_at TIMESTAMPTZ');
   await ensureColumn('deals', 'transfer_to_buyer_at TIMESTAMPTZ');
   await ensureColumn('deals', 'pending_new_owner TEXT');
+  // Crash-safe payouts (group A): PENDING marker + idempotency key committed BEFORE
+  // any on-chain send, so a crash between send and final COMMIT is detectable and
+  // never silently re-paid. fee_payout_failed persists fee-leg failures for reconcile.
+  await ensureColumn('deals', 'payout_idempotency_key TEXT');
+  await ensureColumn('deals', 'payout_attempted_at TIMESTAMPTZ');
+  await ensureColumn('deals', 'fee_payout_failed BOOLEAN DEFAULT false');
+  await ensureColumn('deals', 'fee_payout_error TEXT');
   await pool.query("UPDATE deals SET deal_type='P2P' WHERE deal_type IS NULL");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_deals_type ON deals(deal_type)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_deals_channel_id ON deals(channel_id) WHERE channel_id IS NOT NULL");

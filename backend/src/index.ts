@@ -1695,6 +1695,16 @@ async function boot() {
   }
   if (lastErr) throw lastErr;
 
+  // Crash-safety: flag PENDING payouts left by a crash for MANUAL admin review.
+  // Never auto-retries (the transfer may already have landed — see escrowService).
+  try {
+    const { reconcileStuckPayouts } = await import('./services/escrowService');
+    const stuck = await reconcileStuckPayouts(15);
+    if (stuck > 0) logger.warn(`Boot: ${stuck} deal(s) stuck in payout-pending — flagged for manual reconciliation`);
+  } catch (err) {
+    logger.warn('Boot payout reconciliation failed (non-fatal)', err);
+  }
+
   if (config.botToken) {
     try {
       await startBot();
