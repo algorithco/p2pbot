@@ -39,7 +39,7 @@ import {
 } from './services/dealService';
 import { depositComment, releaseComment } from './utils/comments';
 import { commentToPayloadB64, encryptedCommentToPayloadB64, jettonTransferPayload } from './utils/tonPayload';
-import { isEncryptionEnabled, getMasterKey, encryptField, decryptField } from './utils/encryption';
+import { isEncryptionEnabled, getMasterKey, encryptField, decryptField, assertEncryptionForStrictEnv, warnIfEncryptionDisabledOnce } from './utils/encryption';
 import { toBaseUnits } from './utils/money';
 import {
   identityAuth,
@@ -1670,6 +1670,15 @@ function startSchedulers() {
 }
 
 async function boot() {
+  // Fail-closed encryption: refuse to boot in production without a valid master key
+  // (would otherwise store chat keys/memos/phone in plaintext silently).
+  try {
+    assertEncryptionForStrictEnv();
+  } catch (err) {
+    logger.error(`FATAL: ${(err as Error).message}`);
+    process.exit(1);
+  }
+  warnIfEncryptionDisabledOnce();
   // Fix 3.3: fail closed in production if no auth configured and dev not explicitly allowed
   if (process.env.NODE_ENV === 'production' && !config.botToken && !config.apiKey && !config.allowDevAuth) {
     logger.error('FATAL: NODE_ENV=production but BOT_TOKEN and API_KEY are both unset and ALLOW_DEV_AUTH != true — would run with open auth. Refusing to start.');

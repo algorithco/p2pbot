@@ -89,6 +89,10 @@ function tryDecryptB64(b64: string, key: Buffer): string | null {
 export function encryptSession(plain: string): string {
   const key = getKey();
   if (!key) {
+    // Fail-closed in production: never silently persist a plaintext session.
+    if (process.env.NODE_ENV === 'production' || process.env.STRICT_ENCRYPTION === 'true') {
+      throw new Error('encryption_not_configured: ENCRYPTION_KEY missing or invalid — refusing to store plaintext session in production');
+    }
     if (!warnedInvalidKey) logger.warn('encryptSession: ENCRYPTION_KEY not set, storing plaintext (insecure)');
     return plain;
   }

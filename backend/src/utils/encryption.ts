@@ -27,6 +27,41 @@ export function isEncryptionEnabled(): boolean {
   return !!getMasterKey();
 }
 
+/**
+ * Strict mode: production, or explicit opt-in via STRICT_ENCRYPTION=true (for
+ * staging hosts where NODE_ENV is not reliably set — the backend Dockerfile sets
+ * NODE_ENV=production, but a bare `node dist/index.js` run may not).
+ */
+export function isStrictEncryptionEnv(): boolean {
+  return process.env.NODE_ENV === 'production' || process.env.STRICT_ENCRYPTION === 'true';
+}
+
+/**
+ * Fail-closed gate for boot: in strict mode a missing/malformed ENCRYPTION_KEY
+ * must refuse to start instead of silently falling back to plaintext.
+ * Non-strict envs keep the warn-and-fallback path so local dev isn't blocked.
+ */
+export function assertEncryptionForStrictEnv(): void {
+  if (!isStrictEncryptionEnv()) return;
+  if (!getMasterKey()) {
+    throw new Error(
+      'ENCRYPTION_KEY missing or malformed (need 64 or 128 hex chars) — refusing to boot with NODE_ENV=production / STRICT_ENCRYPTION=true (would store chat keys + memos in plaintext)'
+    );
+  }
+}
+
+let encryptionStatusWarned = false;
+/** Loud once-only startup banner for non-strict envs running without encryption. */
+export function warnIfEncryptionDisabledOnce(): void {
+  if (encryptionStatusWarned) return;
+  encryptionStatusWarned = true;
+  if (!getMasterKey()) {
+    console.warn(
+      '[encryption] WARNING: ENCRYPTION_KEY not set or invalid — chat keys, memos and phone fields FALL BACK TO PLAINTEXT. Dev-only posture; production refuses to boot like this.'
+    );
+  }
+}
+
 /** At-rest field encryption: iv(12) + tag(16) + ciphertext -> base64 */
 export function encryptField(plain: string): string {
   const key = getMasterKey();
