@@ -32,6 +32,7 @@ export function registerCommands(bot: Bot) {
   bot.command('start', async (ctx) => {
     const payload = ((ctx.match as string) || '').trim();
     if (payload.startsWith('join_')) {
+      let handled = false;
       const rest = payload.slice(5);
       const sep = rest.indexOf('_');
       if (sep !== -1) {
@@ -43,6 +44,7 @@ export function registerCommands(bot: Bot) {
           const joinUrl = `${base}/#/deal/${dealId}/join/${token}`;
           const kb = webAppButton(joinUrl, "Ilovani ochish — qo'shilish");
           await ctx.reply(`🤝 Sherik taklifini qabul qilish ilovada.\nPastdagi tugmani bosing.`, { reply_markup: kb });
+          handled = true;
         } else if (dealId && token) {
           // WEBAPP_URL not configured — fall back to the bot's Mini App link.
           // Needs the Mini App attached in BotFather; the startapp value arrives
@@ -52,10 +54,17 @@ export function registerCommands(bot: Bot) {
           const appLink = `https://t.me/${username}/app?startapp=${encodeURIComponent(`join_${dealId}_${token}`)}`;
           const kb = new InlineKeyboard().url("Ilovani ochish — qo'shilish", appLink);
           await ctx.reply(`🤝 Sherik taklifini qabul qilish ilovada.\nPastdagi tugmani bosing.`, { reply_markup: kb });
+          handled = true;
         } else {
-          await ctx.reply(`🤝 Sherik taklifini qabul qilish ilovada.\nIlovani oching.`);
+          await ctx.reply(`Taklif havolasi buzilgan — yangisini so'rang.`);
+          handled = true;
         }
+      } else {
+        await ctx.reply(`Taklif havolasi buzilgan — yangisini so'rang.`);
+        handled = true;
       }
+      // Join payload handled — don't pile the generic welcome on top of it.
+      if (handled) return;
     }
     await ctx.reply(welcomeText(), { parse_mode: 'HTML', reply_markup: welcomeKeyboard() });
   });
