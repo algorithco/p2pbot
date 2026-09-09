@@ -268,6 +268,133 @@
     ]);
   }
 
+  /* ============ Join requests — inline approve/reject (deal detail + chat) ============
+     Renders pending join requests with ✅/❌ right where the creator looks
+     (deal page + Mini App chat), not only the separate #/inbox page.
+     - Empty → renders nothing (no noise).
+     - Polls every pollMs; timer auto-cleared on route change via cleanupFns.
+     - onChange() fires after approve/reject so the host view reloads. */
+  function joinRequestsBox(dealId, opts) {
+    opts = opts || {};
+    var compact = !!opts.compact;
+    var pollMs = opts.pollMs || 8000;
+    var onChange = typeof opts.onChange === 'function' ? opts.onChange : function () {};
+    var notifyNew = opts.notifyNew !== false;
+    var box = UI.h('div', { class: 'join-req-box' });
+    var prevCount = null;
+    var stopped = false;
+
+    function setBusy(btns, busy) {
+      btns.forEach(function (b) {
+        if (!b) return;
+        if (busy) b.setAttribute('disabled', '');
+        else b.removeAttribute('disabled');
+      });
+    }
+
+    function doApprove(r, btns) {
+      setBusy(btns, true);
+      TG.haptic.medium();
+      Api.approveJoin(dealId, r.id)
+        .then(function () {
+          TG.haptic.success();
+          UI.toast("Tasdiqlandi — bitim boshlandi", 'ok');
+          onChange();
+          loadReqs();
+        })
+        .catch(function (err) {
+          TG.haptic.error();
+          var m = String((err && err.message) || '');
+          if (m.indexOf('already_handled') !== -1 || m.indexOf('request_already') !== -1) {
+            UI.toast("So'rov allaqachon ko'rib chiqilgan", 'err');
+            onChange();
+            loadReqs();
+          } else if (m.indexOf('not_authorized') !== -1) {
+            UI.toast("Faqat yaratuvchi (xaridor) tasdiqlay oladi", 'err');
+          } else {
+            UI.toast("Tasdiqlanmadi — qayta urinib ko'ring", 'err');
+          }
+          setBusy(btns, false);
+        });
+    }
+
+    function doReject(r, btns) {
+      setBusy(btns, true);
+      TG.haptic.medium();
+      Api.rejectJoin(dealId, r.id)
+        .then(function () {
+          TG.haptic.success();
+          UI.toast('So\'rov rad etildi', 'ok');
+          onChange();
+          loadReqs();
+        })
+        .catch(function () {
+          TG.haptic.error();
+          UI.toast("Rad etilmadi — qayta urinib ko'ring", 'err');
+          setBusy(btns, false);
+        });
+    }
+
+    function reqCard(r) {
+      var name = r.requester_first_name || r.requester_username || ('ID ' + r.requester_telegram_id);
+      var uname = r.requester_username ? '@' + r.requester_username : 'ID ' + r.requester_telegram_id;
+      var when = '';
+      try { when = UI.timeAgo(r.created_at); } catch (e) { when = ''; }
+      var approveBtn, rejectBtn;
+      approveBtn = UI.h('button', {
+        class: 'btn btn-primary',
+        style: compact ? 'flex:1;padding:10px;font-size:13.5px' : '',
+        onclick: function () { doApprove(r, [approveBtn, rejectBtn]); }
+      }, ['✅ Tasdiqlash']);
+      rejectBtn = UI.h('button', {
+        class: 'btn btn-ghost',
+        style: compact ? 'flex:1;padding:10px;font-size:13.5px' : '',
+        onclick: function () { doReject(r, [approveBtn, rejectBtn]); }
+      }, ['Rad etish']);
+      var card = UI.h('div', { class: 'studio-card inbox-card', style: compact ? 'margin-bottom:8px' : '' }, [
+        UI.h('div', { class: 'studio-head' }, [
+          r.requester_photo_url
+            ? UI.h('img', { src: r.requester_photo_url, alt: '', style: 'width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0' })
+            : UI.h('div', { class: 'avatar ' + UI.avatarClass(r.requester_telegram_id), style: 'width:40px;height:40px;font-size:15px;margin:0;flex-shrink:0', text: String(name).slice(0, 2) }),
+          UI.h('div', { style: 'min-width:0' }, [
+            UI.h('b', { text: name }),
+            UI.h('div', { class: 'small muted', text: uname + (when ? ' · ' + when : '') })
+          ])
+        ]),
+        UI.h('div', { class: 'inbox-actions', style: compact ? 'margin-top:8px' : '' }, [approveBtn, rejectBtn])
+      ]);
+      return card;
+    }
+
+    function render(list) {
+      box.innerHTML = '';
+      if (!list || !list.length) { prevCount = 0; return; }
+      if (notifyNew && prevCount !== null && list.length > prevCount) {
+        try { TG.haptic.success(); } catch (e) {}
+        UI.toast("Yangi qo'shilish so'rovi keldi", 'ok');
+      }
+      prevCount = list.length;
+      box.appendChild(UI.h('div', {
+        class: 'small muted',
+        style: 'margin:0 2px 8px;font-weight:700',
+        text: "Kutilayotgan so'rovlar (" + list.length + ") — shu yerda tasdiqlang"
+      }));
+      list.forEach(function (r) { box.appendChild(reqCard(r)); });
+    }
+
+    function loadReqs() {
+      if (stopped) return;
+      Api.joinRequests(dealId)
+        .then(function (rows) { if (!stopped) render(rows || []); })
+        .catch(function () { /* 403/401 → not a party: stay silent, host view shows its own banner */ });
+    }
+
+    loadReqs();
+    var timer = setInterval(loadReqs, pollMs);
+    App.cleanupFns.push(function () { stopped = true; if (timer) clearInterval(timer); });
+    return box;
+  }
+
   /* ================= Wallet ================= */
 
   function walletConnectSheet() {
@@ -1446,6 +1573,17 @@
         party('Sotuvchi', deal.seller_telegram_id, iAmSeller)
       ]));
 
+      // Inline join requests — buyer approves right here (not only #/inbox)
+      (function () {
+        var openSlot = !deal.buyer_telegram_id || !deal.seller_telegram_id;
+        if (!openSlot || UI.isFinalStatus(deal.status)) return;
+        if (!iAmBuyer) return; // only buyer (creator) can approve
+        var wrap = UI.h('div', {});
+        wrap.appendChild(UI.h('div', { class: 'section-title', text: "Qo'shilish so'rovlari" }));
+        wrap.appendChild(joinRequestsBox(deal.id, { pollMs: 8000, onChange: function () { load(); } }));
+        box.appendChild(wrap);
+      })();
+
       if (deal.terms) {
         box.appendChild(UI.h('div', { class: 'section-title', text: 'Shartlar' }));
         box.appendChild(UI.h('div', {
@@ -1489,9 +1627,11 @@
     });
     var statusBar = UI.h('div', { class: 'small muted', style: 'text-align:center;padding:6px;font-size:12px', text: '🔒 Shifrlangan kanal — yuklanmoqda…' });
 
+    var joinReqBar = UI.h('div', { style: 'padding:0 2px 6px' });
     document.getElementById('view').innerHTML = '';
     document.getElementById('view').appendChild(UI.h('div', { class: 'chat-wrap' }, [
       statusBar,
+      joinReqBar,
       scroller,
       UI.h('div', { class: 'composer' }, [input, sendBtn])
     ]));
@@ -1693,6 +1833,19 @@
     // Boot
     updateStatus();
     initKey();
+    // Inline join approvals at top of chat — buyer tasdiqlaydi, shu yerda (not only #/inbox)
+    Api.deal(id).then(function (deal) {
+      if (!deal) return;
+      var uid = App.state.meId;
+      var isBuyer = Number(deal.buyer_telegram_id) === uid;
+      var openSlot = !deal.buyer_telegram_id || !deal.seller_telegram_id;
+      if (!isBuyer || !openSlot || UI.isFinalStatus(deal.status)) return;
+      joinReqBar.appendChild(joinRequestsBox(id, {
+        compact: true,
+        pollMs: 5000,
+        onChange: function () { load(); }
+      }));
+    }).catch(function () { /* not a party / offline — chat shows its own banner */ });
     App.chatTimer = setInterval(load, 3500);
     App.cleanupFns.push(function () { if (App.chatTimer) clearInterval(App.chatTimer); });
     App.cleanupFns.push(function () { if (window.ChatCrypto) ChatCrypto.clearCache(id); });
@@ -1725,7 +1878,7 @@
       box.appendChild(UI.h('div', { class: 'success-panel' }, [
         UI.h('div', { class: 'check-ring', html: '<svg viewBox="0 0 34 34" width="44" height="44"><path d="M8 18l6 6L26 11"/></svg>' }),
         UI.h('h2', { text: "So'rov yuborildi" }),
-        UI.h('p', { text: "Yaratuvchi kiruvchi so'rovlarda tasdiqlaydi. Tasdiqlangach bitim boshlanadi." }),
+        UI.h('p', { text: "Yaratuvchi bitim chati ichida tasdiqlaydi — tasdiqlangach bitim boshlanadi." }),
         UI.h('div', { class: 'btn-row' }, [
           UI.h('button', { class: 'btn btn-primary', onclick: function () { go('#/home'); } }, ['Bosh sahifa'])
         ])
@@ -1750,7 +1903,7 @@
           class: 'btn btn-primary',
           onclick: doJoin
         }, ["Qo'shilish"]),
-        UI.h('div', { class: 'field-hint', style: 'text-align:center;margin-top:8px', text: "Yaratuvchi kiruvchi so'rovlarda tasdiqlaydi" })
+        UI.h('div', { class: 'field-hint', style: 'text-align:center;margin-top:8px', text: "Yaratuvchi bitim chati ichida tasdiqlaydi" })
       ]);
 
       UI.sheetOpen(content, {});
@@ -1764,7 +1917,7 @@
             TG.haptic.success();
             UI.sheetClose();
             if (res && (res.pending || res.requestId)) {
-              UI.toast("So'rov yuborildi — yaratuvchi kiruvchi so'rovlarda tasdiqlaydi", 'ok');
+              UI.toast("So'rov yuborildi — yaratuvchi bitim chatida tasdiqlaydi", 'ok');
               showPending();
             } else {
               UI.toast("Bitimga qo'shildingiz", 'ok');
