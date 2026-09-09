@@ -1,0 +1,9 @@
+{
+  "$schema": "https://github.com/googleapis/release-please/blob/main/schemas/config.json",
+  "release-type": "node",
+  "include-v-in-tag": true,
+  "changelog-type": "github",
+  "packages": {
+    ".": {}
+  }
+}
