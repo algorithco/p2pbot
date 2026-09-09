@@ -3,6 +3,10 @@
 [![CI](https://github.com/algorithco/p2pbot/actions/workflows/ci.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/algorithco/p2pbot/actions/workflows/codeql.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/codeql.yml)
 [![Docker Publish](https://github.com/algorithco/p2pbot/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/docker-publish.yml)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
+[![Telegram Mini App](https://img.shields.io/badge/Telegram-Mini_App-2CA5E0?logo=telegram)](https://core.telegram.org/bots/webapps)
+[![TON](https://img.shields.io/badge/TON-W5-0098EA?logo=ton)](https://ton.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
 
 A peer-to-peer escrow service for Telegram: a grammY bot plus a Telegram Mini
 App that lets two parties trade TON or USDT (jettons) safely. Funds are held by
@@ -164,3 +168,9 @@ Minimum for off-chain: `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL` (backen
 - Request bodies are capped at 256 KB. In-memory rate limits are active:
   deal creation 10/min, join 20/min, chat posts 60/min, bot notifications
   5/min per IP+route.
+
+## License
+
+**Proprietary — Strict, All Rights Reserved.** See [LICENSE](LICENSE).
+
+This repository and its contents are proprietary and confidential. No permission is granted to use, copy, modify, distribute, or host this Software without the prior express written consent of the licensor. Unauthorized use is strictly prohibited and will be pursued to the fullest extent permitted by law. For licensing inquiries, contact the repository owner via GitHub Issues.
