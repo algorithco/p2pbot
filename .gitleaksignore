@@ -1,0 +1,7 @@
+# Historical placeholder values in .env.example files (pre-date secret scanning,
+# never real credentials — verified: live .env files were never committed and
+# differ from these values). Do NOT add new findings here; fix them instead.
+ae861c9c9155df6ebd346947ba995c529f9b21a3:backend/.env.example:generic-api-key:87
+2c71c3d9cce43f0c530683d7dd7d9b17eaa6b4a8:utradebot/.env.example:generic-api-key:11
+2c71c3d9cce43f0c530683d7dd7d9b17eaa6b4a8:utradebot/.env.example:generic-api-key:21
+4d7a5c8ae0ef87ef2b4efe2d67bd22811806688a:ubot/.env.example:generic-api-key:8

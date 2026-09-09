@@ -1,0 +1,7 @@
+# Gitleaks config — extends default rules. CI runs `gitleaks detect` on every
+# push/PR, the pre-commit hook runs `gitleaks protect` on staged files.
+# Historical fingerprint allowlists live in `.gitleaksignore` (one per line).
+title = 'p2pbot gitleaks config'
+
+[extend]
+useDefault = true
