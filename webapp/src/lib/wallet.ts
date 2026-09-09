@@ -98,7 +98,9 @@ export const Wallet = {
     } catch {}
     return addr;
   },
-  chain(): number | null { const acc = getAccount(); return acc && acc.chain != null ? acc.chain : null; },
+  /* TON Connect reports chain as a string ("-239"); coerce once so every
+   * `chain === -239` label check sees a number (previously fell through to "Chain -239"). */
+  chain(): number | null { const acc = getAccount(); const c = acc && (acc as any).chain != null ? Number((acc as any).chain) : NaN; return Number.isFinite(c) ? c : null; },
   walletName(): string { return tc?.wallet ? (tc.wallet.name || tc.wallet.appName || '') : ''; },
   walletInfo(): any { return tc ? tc.wallet : null; },
   connect(): Promise<any> { return ensure().then(w => w.connectWallet()); },

@@ -279,7 +279,7 @@ a { color: var(--link); text-decoration: none; }
   margin-bottom:10px;
 }
 .hero-appicon svg{stroke:white}
-.wallet-row{display:flex;align-items:center;gap:8px;margin-top:12px}
+.wallet-row{display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;min-width:0}
 
 .stats-grid {
   display: grid;
@@ -363,6 +363,11 @@ a { color: var(--link); text-decoration: none; }
   z-index: 0; pointer-events: none;
   opacity: .6;
 }
+/* The canvas is inserted as a .hero child: without this override, `.hero > *`
+ * (higher specificity) forces it back to position:relative in-flow, where its
+ * 112%x128% box displaces the heading/text and paints the globe particles
+ * across them. This keeps it pinned behind the content (text is z-index 1). */
+.hero > canvas.hero-canvas { position: absolute; inset: -14% -6%; z-index: 0; }
 .hero-aurora::before {
   content: "";
   position: absolute; inset: -40% -20%;
@@ -885,6 +890,10 @@ body[data-theme-mode="light"] .toast { background: #1d2733; color: #fff; }
 .fab-inline:active { transform: scale(.9); }
 
 /* ---------------- Wallet ---------------- */
+/* Pill row must stack, never collide, on 320-390px screens: the connected label
+ * ("UQ…dsBA · 12.5 TON") plus the chain chip can exceed the hero width. */
+.wallet-pill-wrap{min-width:0;max-width:100%}
+.wallet-bal{white-space:nowrap;flex-shrink:0}
 .wallet-pill {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 8px 12px;
@@ -895,8 +904,10 @@ body[data-theme-mode="light"] .toast { background: #1d2733; color: #fff; }
   color: #93C5FD;
   backdrop-filter:blur(6px);
   transition: transform .15s var(--ease), border-color .2s;
+  max-width: 100%; min-width: 0;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-.wallet-pill.dot::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--success);box-shadow:0 0 0 4px var(--success-soft)}
+.wallet-pill.dot::before{content:"";flex-shrink:0;width:7px;height:7px;border-radius:50%;background:var(--success);box-shadow:0 0 0 4px var(--success-soft)}
 .wallet-pill:active { transform: scale(.96); }
 .wallet-pill.connected { border-color: var(--success); color: var(--success); }
 /* wallet sheet options (premium) */
