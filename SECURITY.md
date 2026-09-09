@@ -42,8 +42,14 @@ engineering of platform staff, and denial-of-service by volume.
 
 ## Supported versions
 
-Only the `main` branch receives security fixes. Always deploy the latest
-image from the `main` build.
+Security fixes go to the latest GitHub Release (`v*` tag) and `main`.
+Deploy release images (`ghcr.io/…/p2pbot-<service>:<version>` or `:latest`
+from a `v*` tag) — never floating `main`/`edge` builds in production.
+
+| Version        | Supported          |
+| -------------- | ------------------ |
+| Latest release | ✅                 |
+| Older releases | ❌ (upgrade first) |
 
 ## Operator security requirements
 
