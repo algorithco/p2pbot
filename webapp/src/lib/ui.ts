@@ -138,7 +138,11 @@ export function counterpartyLabel(deal: any): string {
 
 export function toast(message: string, type?: 'ok' | 'err') {
   const root = document.getElementById('toast-root')!;
-  while (root.children.length > 2) root.removeChild(root.firstChild);
+  while (root.children.length > 2) {
+    const first = root.firstChild;
+    if (!first) break;
+    root.removeChild(first);
+  }
   const cls = type === 'ok' ? 'ok' : type === 'err' ? 'err' : '';
   const t = h('div', { class: 'toast ' + cls, text: String(message) });
   root.appendChild(t);
