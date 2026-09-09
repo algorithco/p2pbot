@@ -1424,7 +1424,14 @@
     function render(deal) {
       var am = UI.assetMeta(deal.asset);
       var sm = UI.statusMeta(deal.status);
-      var uid = App.state.meId;
+      // Fresh uid: Telegram can inject the real user after boot, leaving App.state.meId stale.
+      var uid = (function () {
+        try {
+          var ru = (TG.realUser && TG.realUser()) || null;
+          if (ru && Number(ru.id)) return Number(ru.id);
+        } catch (e) {}
+        return Number(App.state.meId) || 0;
+      })();
       var iAmBuyer = Number(deal.buyer_telegram_id) === uid;
       var iAmSeller = Number(deal.seller_telegram_id) === uid;
       var link = App.state.createdLinks[deal.id] || '';
@@ -1834,18 +1841,39 @@
     initKey();
     // Inline join approvals at top of chat — creator (either side) approves here.
     // This is the ONLY approval place in the mini app (no separate page, no bot buttons).
-    Api.deal(id).then(function (deal) {
-      if (!deal) return;
-      var uid = App.state.meId;
-      var isParty = Number(deal.buyer_telegram_id) === uid || Number(deal.seller_telegram_id) === uid;
-      var openSlot = !deal.buyer_telegram_id || !deal.seller_telegram_id;
-      if (!isParty || !openSlot || UI.isFinalStatus(deal.status)) return;
-      joinReqBar.appendChild(joinRequestsBox(id, {
-        compact: true,
-        pollMs: 5000,
-        onChange: function () { load(); }
-      }));
-    }).catch(function () { /* not a party / offline — chat shows its own banner */ });
+    // Mounts once; re-checks after 1.5s in case Telegram injected the user late
+    // (App.state.meId can be a stale preview id on fast boot).
+    var joinBoxMounted = false;
+    function freshUid() {
+      try {
+        var ru = (TG.realUser && TG.realUser()) || null;
+        if (ru && Number(ru.id)) return Number(ru.id);
+      } catch (e) {}
+      return Number(App.state.meId) || 0;
+    }
+    function maybeMountJoinBox() {
+      if (joinBoxMounted) return;
+      Api.deal(id).then(function (deal) {
+        if (joinBoxMounted || !deal) return;
+        var uid = freshUid();
+        var isParty = Number(deal.buyer_telegram_id) === uid || Number(deal.seller_telegram_id) === uid;
+        var openSlot = !deal.buyer_telegram_id || !deal.seller_telegram_id;
+        if (!isParty || !openSlot || UI.isFinalStatus(deal.status)) return;
+        joinBoxMounted = true;
+        joinReqBar.appendChild(joinRequestsBox(id, {
+          compact: true,
+          pollMs: 5000,
+          onChange: function () { load(); }
+        }));
+        // Waiting hint while no request exists — so the creator knows where ✅/❌ will appear.
+        // joinRequestsBox renders nothing when empty, so this hint fills the silence.
+        var hint = UI.h('div', { class: 'small muted', style: 'text-align:center;padding:4px 8px 8px;font-size:12px', text: "Sherik havola orqali qo'shilganda so'rov shu yerda chiqadi — shu yerda ✅ / ❌ bosing" });
+        joinReqBar.appendChild(hint);
+      }).catch(function () { /* not a party / offline — chat shows its own banner */ });
+    }
+    maybeMountJoinBox();
+    var joinBoxRetry = setTimeout(maybeMountJoinBox, 1500);
+    App.cleanupFns.push(function () { try { clearTimeout(joinBoxRetry); } catch (e) {} });
     App.chatTimer = setInterval(load, 3500);
     App.cleanupFns.push(function () { if (App.chatTimer) clearInterval(App.chatTimer); });
     App.cleanupFns.push(function () { if (window.ChatCrypto) ChatCrypto.clearCache(id); });
