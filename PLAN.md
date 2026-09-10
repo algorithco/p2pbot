@@ -138,3 +138,7 @@ Written to `SECURITY_FIXES.md` at the end: every commit, risk closed, remaining 
 (listener excess-refund sends still single-phase but bounded to overpay excess;
 signer dedupe is memory-only; rate limits per-process; scheduler auto-close still uses
 unguarded `updateDealStatus` but only selects `AWAITING_DEPOSIT` rows — follow-ups, not this pass).
+
+ < ! - -   b r a n c h - p r o t e c t i o n   s m o k e   t e s t   - - > 
+ 
+ 
