@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { config } from '../../config';
-import logger from '../../logger';
+import logger, { sanitizeLogValue } from '../../logger';
 import { getMonthlyBuyerRating } from '../../db/queries';
 import { webAppButton } from '../keyboards';
 
@@ -58,7 +58,7 @@ export function registerCommands(bot: Bot) {
           // in the app as start_param and the app routes it to the join page.
           // Definitive fix: set WEBAPP_URL=https://<public-frontend> in backend/.env.
           logger.warn(
-            `Bot /start join_${dealId}_… without button-url: WEBAPP_URL empty, using t.me/${username}/app fallback`,
+            `Bot /start join_${sanitizeLogValue(dealId)}_… without button-url: WEBAPP_URL empty, using t.me/${username}/app fallback`,
           );
           const appLink = `https://t.me/${username}/app?startapp=${encodeURIComponent(`join_${dealId}_${token}`)}`;
           const kb = new InlineKeyboard().url("➕ Bitimga qo'shilish", appLink);
