@@ -107,10 +107,6 @@
   bottom: -8px;
 }
 
-body[data-theme-mode='light'] .focus-container.focus-loader .focus-word {
-  color: #0f172a;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .focus-container.focus-loader .focus-frame {
     transition-duration: 0.01ms;

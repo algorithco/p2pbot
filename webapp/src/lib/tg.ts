@@ -41,14 +41,12 @@ export const TG = {
     window.addEventListener('resize', applyVh);
     const applyScheme = () => {
       document.body.setAttribute('data-scheme', TG.colorScheme());
-      // Respect saved profile preference; fall back to Telegram scheme (dark default).
+      // Single dark theme — the white/light theme was removed from the project.
+      // Always force dark and migrate any previously saved preference.
       try {
-        const saved = window.localStorage.getItem('tonescrow:theme');
-        if (saved === 'light' || saved === 'dark') document.body.setAttribute('data-theme-mode', saved);
-        else document.body.setAttribute('data-theme-mode', TG.colorScheme() === 'light' ? 'light' : 'dark');
-      } catch {
-        document.body.setAttribute('data-theme-mode', TG.colorScheme() === 'light' ? 'light' : 'dark');
-      }
+        window.localStorage.setItem('tonescrow:theme', 'dark');
+      } catch {}
+      document.body.setAttribute('data-theme-mode', 'dark');
     };
     applyScheme();
     safe(() => wa.onEvent('themeChanged', applyScheme));

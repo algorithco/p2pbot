@@ -61,6 +61,9 @@ try {
     appEl.style.opacity = '0';
     appEl.style.transition = 'opacity .38s ease';
     loaderDone.then(() => {
+      // Reveal: overrides the inline critical CSS (#app{visibility:hidden})
+      // that kept the home shell out of the first paint before JS ran.
+      appEl.style.visibility = 'visible';
       appEl.style.opacity = '1';
       // trigger hero entrance after loader
       setTimeout(() => {
