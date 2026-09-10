@@ -1861,6 +1861,87 @@ img.avatar {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+
+/* ---------------- Home polish (scoped to #/home only) ----------------
+   Greeting, stats, filter tabs and search above the deal list.
+   Nothing below the search area or on other views is touched. */
+.home .hero {
+  padding: 14px 2px 4px;
+  margin-bottom: 8px;
+}
+.home .hero-appicon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+.home .hero h1 {
+  font-size: 20px;
+}
+.home .hero p {
+  font-size: 13px;
+  margin-top: 5px;
+  max-width: 44ch;
+}
+.home .wallet-row {
+  margin-top: 12px;
+}
+/* Stats as one connected card instead of three separate cards */
+.home .stats-grid {
+  gap: 0;
+  margin: 12px 0 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.home .stat {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 12px 6px 11px;
+}
+.home .stat + .stat {
+  border-left: 1px solid var(--border);
+}
+.home .stat b {
+  font-size: 19px;
+}
+.home .stat span {
+  font-size: 10px;
+}
+/* Filter tabs as one unified segmented track */
+.home .segmented {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px;
+  gap: 4px;
+  margin: 12px 0 4px;
+}
+.home .segmented button {
+  padding: 9px 4px;
+  font-size: 12.5px;
+}
+.home .segmented button.active {
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
+}
+/* Search: compact, aligned icon */
+.home .search-row {
+  margin: 10px 0 4px;
+}
+.home .search-input {
+  min-height: 44px;
+  padding: 10px 14px 10px 40px;
+  font-size: 13.5px;
+  background-position: 13px 50%;
+}
 .pill {
   font-size: 11px;
   font-weight: 800;

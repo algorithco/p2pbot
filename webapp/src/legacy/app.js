@@ -937,6 +937,18 @@
     setTabbar(true);
     setTopbar('TonEscrow');
 
+    // Home has no header: hide the global topbar while this view is mounted.
+    // router() runs cleanup() before every view change, which restores it,
+    // so other views are unaffected.
+    var topbarEl = document.getElementById('topbar');
+    var prevTopbarDisplay = topbarEl ? topbarEl.style.display : '';
+    if (topbarEl) topbarEl.style.display = 'none';
+    App.cleanupFns.push(function () {
+      try {
+        if (topbarEl) topbarEl.style.display = prevTopbarDisplay;
+      } catch (e) {}
+    });
+
     var s = App.state;
     var name = (s.user && (s.user.first_name || s.user.username)) || 'there';
 
@@ -993,7 +1005,7 @@
 
     var root = UI.h(
       'div',
-      {},
+      { class: 'home' },
       [
         ptr,
         !TG.realUser()
