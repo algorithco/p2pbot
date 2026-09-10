@@ -120,6 +120,16 @@ export const Api = {
   joinDeal(id: number | string, token: string): Promise<any> {
     return request('POST', '/api/deals/' + encodeURIComponent(String(id)) + '/join/' + encodeURIComponent(token), {});
   },
+  inviteLink(id: number | string): Promise<{ link: string; botLink: string; webappLink: string }> {
+    return request('POST', '/api/deals/' + encodeURIComponent(String(id)) + '/invite', {}).then((d) => {
+      d = d || {};
+      return {
+        link: d.botLink || d.link || d.webappLink || '',
+        botLink: d.botLink || d.link || '',
+        webappLink: d.webappLink || d.link || '',
+      };
+    });
+  },
   dealKey(dealId: number | string): Promise<string | null> {
     return request('GET', '/api/deals/' + encodeURIComponent(String(dealId)) + '/key').then((d) =>
       d && d.key ? d.key : null,

@@ -18,5 +18,5 @@ window.TONCONNECT_MANIFEST_URL =
 
 // TWA return URL — where wallet should return after approving in Telegram
 // For local dev, leave as undefined (SDK uses 'back'). For prod Mini App, set to https://t.me/<bot_username>/<app_shortname>
-// Known bot: @uzsavdochibot — adjust app shortname if different (check @BotFather -> /myapps)
-window.TONCONNECT_TWA_RETURN_URL = 'https://t.me/uzsavdochibot/app';
+// Known bot: @savdochi_uzbot — adjust app shortname if different (check @BotFather -> /myapps)
+window.TONCONNECT_TWA_RETURN_URL = 'https://t.me/savdochi_uzbot/app';

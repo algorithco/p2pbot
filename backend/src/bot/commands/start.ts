@@ -40,7 +40,7 @@ export function registerCommands(bot: Bot) {
         const dealId = rest.slice(0, sep);
         const token = rest.slice(sep + 1);
         const base = (config.webappUrl || '').replace(/\/$/, '');
-        const username = (config.botUsername || 'uzsavdochibot').replace(/^@/, '');
+        const username = (config.botUsername || 'savdochi_uzbot').replace(/^@/, '');
         if (dealId && token && base) {
           // Carry the invite twice: hash route (canonical) + ?startapp= query
           // (some clients drop the URL fragment when opening a web_app — the

@@ -5,7 +5,7 @@ import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import type { Server } from 'http';
 import { config } from './config';
-import { db, connectDB, listDeals } from './db/queries';
+import { db, connectDB, listDeals, getDealLinks } from './db/queries';
 import { Address, openContract } from '@ton/core';
 import { Escrow } from './contracts/wrappers/Escrow';
 import { client } from './blockchain/tonClient';
@@ -407,6 +407,50 @@ app.get(
     if (!check) return res.status(404).json({ error: 'deal_not_found' });
     if (!check.hasAccess) return res.status(403).json({ error: 'not_a_party_to_deal' });
     return res.json(check.deal);
+  }),
+);
+
+// Mint a fresh one-time invite link for a deal (deal-view share button).
+// Join tokens are single-use + expiring, so the view cannot reuse the
+// creation-time link — it requests a new one here (party only).
+app.post(
+  '/api/deals/:id/invite',
+  joinLimiter,
+  requireIdentity,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid_id' });
+    const caller = getIdentityId(req);
+    if (caller === null) return res.status(401).json({ error: 'identity_required' });
+    const check = await checkDealAccess(req, id);
+    if (!check) return res.status(404).json({ error: 'deal_not_found' });
+    if (!check.hasAccess) return res.status(403).json({ error: 'not_a_party_to_deal' });
+    const deal = check.deal as unknown as Record<string, unknown>;
+    const status = String(deal.status || '').toUpperCase();
+    if (status === 'RELEASED' || status === 'REFUNDED') return res.status(400).json({ error: 'deal_finished' });
+    const buyerId = (deal.buyer_telegram_id ?? (deal as Record<string, unknown>).buyerTelegramId) as
+      number | null | undefined;
+    const sellerId = (deal.seller_telegram_id ?? (deal as Record<string, unknown>).sellerTelegramId) as
+      number | null | undefined;
+    if (buyerId != null && sellerId != null) return res.status(400).json({ error: 'deal_full' });
+    // 15-minute window: reuse the latest still-live link instead of minting a
+    // new URL on every tap. A new token is created only when none is unexpired.
+    const INVITE_TTL_SECONDS = 15 * 60;
+    const existingLinks = await getDealLinks(id);
+    const liveLink = (existingLinks || []).find((l: { expires_at?: unknown; token?: unknown }) => {
+      try {
+        return new Date(l.expires_at as string).getTime() > Date.now();
+      } catch {
+        return false;
+      }
+    });
+    const linkToken =
+      liveLink && liveLink.token ? String(liveLink.token) : await generateDealLink(id, INVITE_TTL_SECONDS);
+    const baseUrl = config.webappUrl || config.frontendUrl || `${req.protocol}://${req.get('host')}`;
+    const webappLink = `${baseUrl.replace(/\/$/, '')}/#/deal/${id}/join/${linkToken}`;
+    const apiLink = `${req.protocol}://${req.get('host')}/api/deals/${id}/join/${linkToken}`;
+    const botLink = getBotDeepLink(id, linkToken, config.botUsername);
+    return res.json({ dealId: id, link: botLink, botLink, webappLink, apiLink });
   }),
 );
 
@@ -1850,12 +1894,17 @@ app.get(
   '/api/status/:address',
   publicTonLimiter,
   asyncHandler(async (req, res) => {
+    // Off-chain ledger mode (no escrow contracts deployed): there is nothing
+    // on-chain to query. Answer locally — calling Escrow.getStatus on a
+    // non-escrow address (e.g. the signer W5 wallet) always fails with
+    // exit_code 11 and only spams the log + wastes TON API quota.
+    if (!config.requireOnchain) return res.json({ status: null, onchain: false, mode: 'offchain' });
     try {
       const addr = Address.parse(String(req.params.address));
       const escrow = new Escrow(addr as any);
       const opened = openContract(escrow, ({ address: a }) => client.provider(a, null as any));
       const status = await opened.getStatus();
-      return res.json({ status });
+      return res.json({ status, onchain: true });
     } catch (err) {
       logger.warn('/api/status error', err);
       return res.status(500).json({ error: String(err) });
@@ -2021,6 +2070,12 @@ const API_DOCS = {
       path: '/api/deals/:id/join/:token',
       auth: 'Identity',
       desc: 'Request to join via link — creates pending request for creator approval in deal chat (joiner fills empty slot)',
+    },
+    {
+      method: 'POST',
+      path: '/api/deals/:id/invite',
+      auth: 'Identity (party)',
+      desc: 'Mint or reuse a 15-minute one-time invite link — for the deal-view share button',
     },
     {
       method: 'POST',
