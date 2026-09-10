@@ -1,0 +1,16 @@
+name: p2pbot code scanning config
+
+# Default + extended security suites (same as before; moved here from the
+# workflow so all CodeQL tuning lives in one place).
+queries:
+  - uses: security-extended
+
+# Vendored third-party code ships as-is and must not be rewritten:
+# - webapp/public/js/telegram-web-app.js is Telegram's official TWA SDK.
+#   (The js/remote-property-injection finding there is a false positive on
+#   top of it: __proto__/constructor/prototype keys are skipped and the
+#   object is null-prototype.)
+# - *.min.js bundles are generated artifacts.
+paths-ignore:
+  - webapp/public/js/telegram-web-app.js
+  - '**/*.min.js'
