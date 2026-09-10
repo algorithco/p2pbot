@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/algorithco/p2pbot/compare/v1.0.0...v1.0.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **ci:** let green dependabot PRs auto-merge to main ([#45](https://github.com/algorithco/p2pbot/issues/45)) ([2537c4e](https://github.com/algorithco/p2pbot/commit/2537c4e74b88d0533e3358424da021de2f6af56d))
+* **security:** codeql-recognized log sanitizer ([#42](https://github.com/algorithco/p2pbot/issues/42)) ([b3f2296](https://github.com/algorithco/p2pbot/commit/b3f22963eea1f07d1d317c5733fea6e68f98ce4b))
+
 ## 1.0.0 (2026-09-10)
 
 
