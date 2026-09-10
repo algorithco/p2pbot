@@ -121,11 +121,15 @@ export function sanitizeLogValue(v: unknown, max = 200): string {
       s = String(v);
     }
   }
+  // Strip newlines up front: CR/LF are the log-forging vector. The first
+  // `.replace(/\n/g, '')` step is exactly the shape CodeQL js/log-injection
+  // models as a barrier (StringReplaceSanitizer), so this helper keeps both
+  // runtime logs and static analysis clean. The \r strip covers lone carriage
+  // returns; remaining controls are hex-escaped below.
+  const singleLine = s.replace(/\n/g, '').replace(/\r/g, '');
   // Control-char class is intentional here: this IS the log-injection sanitizer.
   // eslint-disable-next-line no-control-regex
-  const escaped = s.replace(/[\x00-\x1F\x7F]/g, (c) => {
-    if (c === '\n') return '\\n';
-    if (c === '\r') return '\\r';
+  const escaped = singleLine.replace(/[\x00-\x1F\x7F]/g, (c) => {
     return `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`;
   });
   return escaped.length > max ? escaped.slice(0, max) + '…' : escaped;

@@ -421,38 +421,6 @@
   outline-offset: 3px;
 }
 
-/* Light theme: dark goo pill, dark idle icons, white icon on the pill. */
-body[data-theme-mode='light'] .gooey-nav-container.float-nav {
-  --color-1: #0b0e14;
-  --color-2: #3b82f6;
-  --color-3: #0b0e14;
-  --color-4: #6366f1;
-  --nav-fg: rgba(15, 23, 42, 0.72);
-  --nav-plus-bg: #0b0e14;
-  --nav-plus-fg: #ffffff;
-}
-
-body[data-theme-mode='light'] .gooey-nav-container.float-nav .float-item.active {
-  color: #ffffff;
-}
-
-body[data-theme-mode='light'] .gooey-nav-container.float-nav .float-item.active .float-circle {
-  background: #0b0e14;
-  color: #ffffff;
-}
-
-body[data-theme-mode='light'] .gooey-nav-container.float-nav .float-item.active .float-label {
-  color: #0f172a;
-}
-
-body[data-theme-mode='light'] .gooey-nav-container.float-nav .effect.filter::after {
-  background: #0b0e14;
-}
-
-body[data-theme-mode='light'] .gooey-nav-container.float-nav .float-item.is-create .float-circle {
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.25);
-}
-
 /* Small phones: keep 5 circles fitted, generous but compact. */
 @media (max-width: 360px) {
   .gooey-nav-container.float-nav .float-list {

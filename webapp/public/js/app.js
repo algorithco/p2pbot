@@ -2234,22 +2234,19 @@
 
   /* ================= Profile ================= */
 
-  function applyThemeMode(mode) {
+  // Single dark theme — the white/light theme was removed from the project.
+  // Kept as no-op aliases so existing call sites keep working; always dark.
+  function applyThemeMode() {
     try {
-      if (mode && mode !== 'auto') document.body.setAttribute('data-theme-mode', mode);
-      else document.body.removeAttribute('data-theme-mode');
-      localStorage.setItem('tonescrow:theme', mode);
+      document.body.setAttribute('data-theme-mode', 'dark');
+      localStorage.setItem('tonescrow:theme', 'dark');
     } catch (e) {
       /* ignore */
     }
   }
 
   function getThemeMode() {
-    try {
-      return localStorage.getItem('tonescrow:theme') || 'auto';
-    } catch (e) {
-      return 'auto';
-    }
+    return 'dark';
   }
 
   function viewProfile() {
@@ -2275,31 +2272,6 @@
     });
     var connDot = UI.h('span', { class: 'dot ' + (App.state.apiOk ? 'on' : 'off') });
 
-    var themeSeg = UI.h('div', { class: 'theme-seg' });
-    [
-      ['auto', 'Avto'],
-      ['light', "Yorug'"],
-      ['dark', "Qorong'u"],
-    ].forEach(function (pair) {
-      themeSeg.appendChild(
-        UI.h(
-          'button',
-          {
-            class: getThemeMode() === pair[0] ? 'active' : '',
-            onclick: function () {
-              TG.haptic.tap();
-              applyThemeMode(pair[0]);
-              Array.prototype.forEach.call(themeSeg.children, function (b) {
-                b.classList.remove('active');
-              });
-              this.classList.add('active');
-            },
-          },
-          [pair[1]],
-        ),
-      );
-    });
-
     var root = UI.h('div', {}, [
       UI.h('div', { class: 'card profile-card' }, [
         u.photo_url
@@ -2314,10 +2286,9 @@
           UI.h('div', { class: 'li-icon', text: '🎨' }),
           UI.h('div', { class: 'li-main' }, [
             UI.h('b', { text: "Ko'rinish" }),
-            UI.h('span', { text: 'Telegram mavzusiga avtomatik moslash' }),
+            UI.h('span', { text: "Qorong'u mavzu" }),
           ]),
         ]),
-        themeSeg,
       ]),
       UI.h('div', { class: 'section-title', text: 'Xizmat' }),
       UI.h(
@@ -2621,7 +2592,7 @@
         App.state.meId = Number(r2.id);
       }
     }, 800);
-    applyThemeMode(getThemeMode());
+    applyThemeMode();
     bindChrome();
 
     var sp = TG.startParam();

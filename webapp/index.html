@@ -5,6 +5,42 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>TonEscrow — Xavfsiz P2P Bitimlar</title>
     <meta name="theme-color" content="#0b0e14" />
+    <meta name="color-scheme" content="dark" />
+    <style>
+      /* Critical first-paint: dark bg, hide app shell until boot, show loader instantly.
+         Full styling arrives with app.css (JS-injected); this only prevents the
+         home-shell flash before JS runs. JS reveals #app when the loader finishes. */
+      html {
+        background: #0b0e14;
+      }
+      body {
+        margin: 0;
+        background: #0b0e14;
+        color: #f2f5fa;
+      }
+      #app {
+        visibility: hidden;
+      }
+      #app-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        max-width: 560px;
+        left: 50%;
+        transform: translateX(-50%);
+        height: 100vh;
+        background: linear-gradient(180deg, #0e121c 0%, #0b0e14 52%);
+      }
+      #app-loader .loader-center {
+        text-align: center;
+        padding: 0 12px;
+      }
+    </style>
     <link rel="manifest" href="/manifest.json" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon.svg" />
