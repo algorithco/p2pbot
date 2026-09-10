@@ -3,7 +3,7 @@ dotenv.config();
 
 export const config = {
   botToken: process.env.BOT_TOKEN || '',
-  botUsername: process.env.BOT_USERNAME || 'uzsavdochibot',
+  botUsername: process.env.BOT_USERNAME || 'savdochi_uzbot',
   adminTelegramIds: (process.env.ADMIN_TELEGRAM_IDS || '')
     .split(',')
     .map((s) => Number(s.trim()))

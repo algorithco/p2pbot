@@ -36,7 +36,7 @@ import { mountLoader } from './lib/loader';
 // TON Connect config (GitHub raw, no cloudflared)
 (window as any).TONCONNECT_MANIFEST_URL =
   'https://raw.githubusercontent.com/Hamroqulovv/raw-ton-m/main/tonconnect-manifest.json';
-(window as any).TONCONNECT_TWA_RETURN_URL = 'https://t.me/uzsavdochibot/app';
+(window as any).TONCONNECT_TWA_RETURN_URL = 'https://t.me/savdochi_uzbot/app';
 (window as any).APP_CONFIG = {
   manifestUrl: (window as any).TONCONNECT_MANIFEST_URL,
   twaReturnUrl: (window as any).TONCONNECT_TWA_RETURN_URL,

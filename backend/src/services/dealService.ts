@@ -412,7 +412,7 @@ export async function addEncryptedMessage(dealId: number, senderTelegramId: numb
 
 /** Build bot deep link for deal invite — t.me bot link, not website */
 export function getBotDeepLink(dealId: number | string, token: string, botUsername?: string): string {
-  const username = (botUsername || process.env.BOT_USERNAME || 'uzsavdochibot').replace(/^@/, '');
+  const username = (botUsername || process.env.BOT_USERNAME || 'savdochi_uzbot').replace(/^@/, '');
   // Telegram start param max 64 chars, allowed A-Za-z0-9_- ; token is uuid with hyphens, so use join_<id>_<token>
   return `https://t.me/${username}?start=join_${dealId}_${token}`;
 }

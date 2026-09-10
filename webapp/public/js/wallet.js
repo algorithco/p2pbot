@@ -95,10 +95,10 @@
     try {
       if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
         // Use bot username if known, else current origin
-        // For uzsavdochibot, the Mini App short name is likely 'app' — fallback to t.me link
+        // For savdochi_uzbot, the Mini App short name is likely 'app' — fallback to t.me link
         var bot = window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user ? null : null;
-        // Default to t.me link for this bot (known from logs: @uzsavdochibot)
-        return 'https://t.me/uzsavdochibot/app';
+        // Default to t.me link for this bot (known from logs: @savdochi_uzbot)
+        return 'https://t.me/savdochi_uzbot/app';
       }
     } catch (e) {}
     // 3) Fallback to current page — works for browser testing and when wallet supports 'back' strategy
