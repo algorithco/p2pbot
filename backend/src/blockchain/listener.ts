@@ -508,7 +508,10 @@ async function handleTransaction(addr: string, tx: Transaction) {
 }
 
 async function pollAddress(addr: string) {
-  const txs = await client.getTransactions(Address.parse(addr), { limit: 10 });
+  // Limit 30 (still a single API call): the payment address is one shared
+  // signer wallet for all deals, so a tight window could skip deposits and the
+  // cursor would jump past them forever.
+  const txs = await client.getTransactions(Address.parse(addr), { limit: 30 });
 
   const cursor = cursors.get(addr);
   let maxSeen: { lt: string; hash: string } | null = cursor ? { ...cursor } : null;

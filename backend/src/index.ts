@@ -1894,12 +1894,17 @@ app.get(
   '/api/status/:address',
   publicTonLimiter,
   asyncHandler(async (req, res) => {
+    // Off-chain ledger mode (no escrow contracts deployed): there is nothing
+    // on-chain to query. Answer locally — calling Escrow.getStatus on a
+    // non-escrow address (e.g. the signer W5 wallet) always fails with
+    // exit_code 11 and only spams the log + wastes TON API quota.
+    if (!config.requireOnchain) return res.json({ status: null, onchain: false, mode: 'offchain' });
     try {
       const addr = Address.parse(String(req.params.address));
       const escrow = new Escrow(addr as any);
       const opened = openContract(escrow, ({ address: a }) => client.provider(a, null as any));
       const status = await opened.getStatus();
-      return res.json({ status });
+      return res.json({ status, onchain: true });
     } catch (err) {
       logger.warn('/api/status error', err);
       return res.status(500).json({ error: String(err) });
