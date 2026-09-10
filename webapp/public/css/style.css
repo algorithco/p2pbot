@@ -1,10 +1,10 @@
 /* ============================================================
-   TonEscrow — Telegram Mini App design system
-   Colors sync automatically with the Telegram client theme via
-   the --tg-theme-* variables; falls back to a dark palette.
+   TonEscrow — Telegram Mini App design system (dark theme only)
+   The white/light theme was removed; dark palette is always used.
    ============================================================ */
 
 :root {
+  color-scheme: dark;
   /* Telegram theme bridge (with fallbacks) */
   --bg: var(--tg-theme-bg-color, #0b1220);
   --surface: var(--tg-theme-secondary-bg-color, #101a2e);
@@ -43,21 +43,7 @@
   --ease: cubic-bezier(0.25, 0.8, 0.35, 1);
 }
 
-/* Forced palettes (Profile → Appearance) */
-body[data-theme-mode='light'] {
-  --bg: #ffffff;
-  --surface: #f1f4f9;
-  --surface-2: #e8edf5;
-  --text: #14212e;
-  --hint: #7d8da1;
-  --link: #2482e0;
-  --btn: #3390ec;
-  --btn-text: #fff;
-  --destructive: #df4059;
-  --border: rgba(20, 40, 70, 0.12);
-  --accent-soft: rgba(51, 144, 236, 0.1);
-  --shadow-card: 0 6px 22px rgba(30, 50, 90, 0.1);
-}
+/* Dark theme is the only theme. data-theme-mode is always 'dark'. */
 body[data-theme-mode='dark'] {
   --bg: #0b1220;
   --surface: #101a2e;
@@ -1231,11 +1217,6 @@ img.avatar {
   color: var(--danger);
   font-weight: 800;
 }
-body[data-scheme='light'] .toast,
-body[data-theme-mode='light'] .toast {
-  background: #1d2733;
-  color: #fff;
-}
 @keyframes toastIn {
   from {
     opacity: 0;
@@ -1447,26 +1428,6 @@ body[data-theme-mode='light'] .toast {
 .dot.off {
   background: var(--danger);
   box-shadow: 0 0 0 3px var(--danger-soft);
-}
-
-.theme-seg {
-  display: flex;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 3px;
-}
-.theme-seg button {
-  flex: 1;
-  padding: 8px;
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--hint);
-}
-.theme-seg button.active {
-  background: var(--accent-soft);
-  color: var(--accent);
 }
 
 .notif-item {
