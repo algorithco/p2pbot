@@ -1079,6 +1079,35 @@ select.input option {
   font-size: 16px;
   margin-left: 4px;
 }
+/* Circular share button, top-right of the deal header */
+.deal-head {
+  position: relative;
+}
+.deal-share-fab {
+  position: absolute;
+  top: 12px;
+  right: 4px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--accent-grad);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 8px 20px rgba(59, 130, 246, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition:
+    transform 0.15s var(--ease),
+    opacity 0.2s;
+}
+.deal-share-fab:active {
+  transform: scale(0.9);
+}
+.deal-share-fab:disabled {
+  opacity: 0.6;
+}
 
 .timeline {
   margin: 20px 4px 6px;
