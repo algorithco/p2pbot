@@ -46,7 +46,7 @@ export function assertEncryptionForStrictEnv(): void {
   if (!isStrictEncryptionEnv()) return;
   if (!getMasterKey()) {
     throw new Error(
-      'ENCRYPTION_KEY missing or malformed (need 64 or 128 hex chars) — refusing to boot with NODE_ENV=production / STRICT_ENCRYPTION=true (would store chat keys + memos in plaintext)'
+      'ENCRYPTION_KEY missing or malformed (need 64 or 128 hex chars) — refusing to boot with NODE_ENV=production / STRICT_ENCRYPTION=true (would store chat keys + memos in plaintext)',
     );
   }
 }
@@ -58,7 +58,7 @@ export function warnIfEncryptionDisabledOnce(): void {
   encryptionStatusWarned = true;
   if (!getMasterKey()) {
     console.warn(
-      '[encryption] WARNING: ENCRYPTION_KEY not set or invalid — chat keys, memos and phone fields FALL BACK TO PLAINTEXT. Dev-only posture; production refuses to boot like this.'
+      '[encryption] WARNING: ENCRYPTION_KEY not set or invalid — chat keys, memos and phone fields FALL BACK TO PLAINTEXT. Dev-only posture; production refuses to boot like this.',
     );
   }
 }

@@ -3,7 +3,7 @@ import { Address, Cell } from '@ton/core';
 import type { Transaction } from '@ton/core';
 import { updateDealStatus, dealLike } from '../services/dealService';
 import { db } from '../db/queries';
-import { toBaseUnits, fromBaseUnits, dealPricing } from '../utils/money';
+import { fromBaseUnits, dealPricing } from '../utils/money';
 import { parseDepositComment, parseTonComment, parseJettonForwardComment } from '../utils/comments';
 import { decryptCommentString } from '../utils/tonPayload';
 import { encryptField } from '../utils/encryption';
@@ -35,7 +35,7 @@ async function persistCursor(address: string, lt: string, hash: string) {
     await db.query(
       `INSERT INTO listener_cursors (address, lt, hash, updated_at) VALUES ($1,$2,$3,now())
        ON CONFLICT (address) DO UPDATE SET lt = EXCLUDED.lt, hash = EXCLUDED.hash, updated_at = now()`,
-      [address, lt, hash]
+      [address, lt, hash],
     );
   } catch (e) {
     logger.warn(`Listener: could not persist cursor for ${address}`, e);
@@ -44,7 +44,9 @@ async function persistCursor(address: string, lt: string, hash: string) {
 
 async function seedMonitoredAddressesFromDB() {
   try {
-    const res = await db.query(`SELECT DISTINCT payment_address FROM deals WHERE status = 'AWAITING_DEPOSIT' AND payment_address IS NOT NULL AND payment_address <> ''`);
+    const res = await db.query(
+      `SELECT DISTINCT payment_address FROM deals WHERE status = 'AWAITING_DEPOSIT' AND payment_address IS NOT NULL AND payment_address <> ''`,
+    );
     let added = 0;
     for (const r of res.rows) {
       const addr = String(r.payment_address).trim();
@@ -82,7 +84,7 @@ async function findAwaitingDealById(dealId: number, paymentAddress?: string): Pr
   const res = await db.query(
     `SELECT id, asset, amount, fee_bps, buyer_telegram_id, seller_telegram_id, payment_address, terms
      FROM deals WHERE id = $1 AND status = $2 LIMIT 1`,
-    [dealId, 'AWAITING_DEPOSIT']
+    [dealId, 'AWAITING_DEPOSIT'],
   );
   const row = res.rows[0] as DealRow | undefined;
   if (!row) return null;
@@ -104,7 +106,7 @@ function expectedForDeal(deal: DealRow): bigint {
   return dealPricing(
     String(deal.amount ?? '0'),
     String(deal.asset ?? 'TON'),
-    (deal as { fee_bps?: unknown }).fee_bps as number | undefined ?? config.feeBps ?? 100
+    ((deal as { fee_bps?: unknown }).fee_bps as number | undefined) ?? config.feeBps ?? 100,
   ).expectedDeposit;
 }
 
@@ -117,7 +119,12 @@ async function postChatSystemMessage(dealId: number, text: string) {
   }
 }
 
-async function unknownToAdminsAndSave(info: { amount: string | number; asset: string; address: string; memo: string }): Promise<void> {
+async function unknownToAdminsAndSave(info: {
+  amount: string | number;
+  asset: string;
+  address: string;
+  memo: string;
+}): Promise<void> {
   try {
     await notify.unknownDepositToAdmins(info);
   } catch (e) {
@@ -126,7 +133,12 @@ async function unknownToAdminsAndSave(info: { amount: string | number; asset: st
   try {
     const { saveAdminAlert } = await import('../db/queries');
     const text = `Noma'lum to'lov: ${info.amount} ${info.asset} — ${info.memo}`.slice(0, 500);
-    await saveAdminAlert('unknown_deposit', text, { amount: String(info.amount), asset: info.asset, address: info.address, memo: info.memo });
+    await saveAdminAlert('unknown_deposit', text, {
+      amount: String(info.amount),
+      asset: info.asset,
+      address: info.address,
+      memo: info.memo,
+    });
   } catch {} // best-effort: Telegram notify above already attempted; alert persistence must not break deposit handling.
 }
 
@@ -137,10 +149,19 @@ async function notifySellerDeposit(deal: DealRow) {
   } catch (e) {
     logger.warn(`depositToSeller notify failed for deal #${deal.id}`, e);
   }
-  void postChatSystemMessage(deal.id, `Tizim: To'lov qabul qilindi (Deal #${deal.id}) — ${String(deal.amount)} ${String(deal.asset)}.`);
+  void postChatSystemMessage(
+    deal.id,
+    `Tizim: To'lov qabul qilindi (Deal #${deal.id}) — ${String(deal.amount)} ${String(deal.asset)}.`,
+  );
 }
 
-async function processTonDeposit(addr: string, src: Address | null, value: bigint, txHash: string, comment: string | null) {
+async function processTonDeposit(
+  addr: string,
+  src: Address | null,
+  value: bigint,
+  txHash: string,
+  comment: string | null,
+) {
   const decrypted = decryptCommentString(comment) ?? comment ?? '';
   const raw = comment ?? '';
   const dealId = parseDepositComment(decrypted) ?? parseDepositComment(raw);
@@ -152,7 +173,9 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
     } catch {
       human = value.toString();
     }
-    logger.warn(`Unknown TON deposit to ${addr} value ${value} memo "${decrypted || raw || '(memosiz)'}" — no memo match`);
+    logger.warn(
+      `Unknown TON deposit to ${addr} value ${value} memo "${decrypted || raw || '(memosiz)'}" — no memo match`,
+    );
     try {
       await unknownToAdminsAndSave({
         amount: human,
@@ -224,7 +247,9 @@ async function processTonDeposit(addr: string, src: Address | null, value: bigin
   if (value > expected) {
     const excess = value - expected;
     await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
-    logger.info(`Deal #${deal.id}: TON overpay got ${value} expected ${expected}, excess ${excess} — confirming + refunding`);
+    logger.info(
+      `Deal #${deal.id}: TON overpay got ${value} expected ${expected}, excess ${excess} — confirming + refunding`,
+    );
     if (src) {
       try {
         const excessHuman = fromBaseUnits(excess, 'TON');
@@ -291,7 +316,12 @@ function parseJettonNotification(body: Cell): JettonNotification | null {
   }
 }
 
-async function processJettonDeposit(addr: string, note: JettonNotification, forwardComment: string | null, txHash: string) {
+async function processJettonDeposit(
+  addr: string,
+  note: JettonNotification,
+  forwardComment: string | null,
+  txHash: string,
+) {
   const decrypted = decryptCommentString(forwardComment) ?? forwardComment ?? '';
   const raw = forwardComment ?? '';
   const dealId = parseDepositComment(decrypted) ?? parseDepositComment(raw);
@@ -480,7 +510,7 @@ async function handleTransaction(addr: string, tx: Transaction) {
 async function pollAddress(addr: string) {
   const txs = await client.getTransactions(Address.parse(addr), { limit: 10 });
 
-  let cursor = cursors.get(addr);
+  const cursor = cursors.get(addr);
   let maxSeen: { lt: string; hash: string } | null = cursor ? { ...cursor } : null;
 
   for (const tx of txs) {

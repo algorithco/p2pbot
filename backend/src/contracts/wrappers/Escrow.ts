@@ -14,15 +14,7 @@
  * Tact serializes `X?` fields as a MAYBE-REF: one selector bit followed by the
  * value in a cell reference (1 + ref when Some, bare 0 bit when None).
  */
-import {
-  Address,
-  Builder,
-  beginCell,
-  Cell,
-  Contract,
-  ContractProvider,
-  contractAddress,
-} from '@ton/core';
+import { Address, Builder, beginCell, Cell, Contract, ContractProvider, contractAddress } from '@ton/core';
 
 /** Placeholder until `tact build` output is wired through env/config. */
 export const ESCROW_CODE_HEX = '';
@@ -142,10 +134,7 @@ export function escrowTextOp(op: EscrowTextOp): Cell {
 
 /** message(0x65787464) ExtendDeadline body. */
 export function extendDeadlineMsg(newDeadline: number): Cell {
-  return beginCell()
-    .storeUint(OP_EXTEND_DEADLINE, 32)
-    .storeUint(newDeadline, 32)
-    .endCell();
+  return beginCell().storeUint(OP_EXTEND_DEADLINE, 32).storeUint(newDeadline, 32).endCell();
 }
 
 /** Deployable trait expects Deploy{queryId}: op = 0 (u32), then queryId (u64). */
@@ -154,9 +143,6 @@ export function deployBody(queryId: bigint = 0n): Cell {
 }
 
 /** Opens an Escrow handle against any client exposing `open()` (TonClient, sandbox…). */
-export function openEscrow<C extends { open<T extends Contract>(c: T): T }>(
-  clientLike: C,
-  escrow: Escrow,
-): Escrow {
+export function openEscrow<C extends { open<T extends Contract>(c: T): T }>(clientLike: C, escrow: Escrow): Escrow {
   return clientLike.open(escrow);
 }

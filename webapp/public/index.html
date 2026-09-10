@@ -1,99 +1,173 @@
 <!doctype html>
 <html lang="uz">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>TonEscrow — Xavfsiz P2P Bitimlar</title>
-  <meta name="theme-color" content="#0b1220" />
-  <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/icon.svg" />
-  <link rel="stylesheet" href="/css/style.css?v=10" />
-  <script src="/js/telegram-web-app.js?v=10"></script>
-  <!-- TON Connect SDK — local first (no external dependency), CDN fallback -->
-  <script src="/js/tonconnect-ui.min.js?v=10"></script>
-  <script>
-    // Fallback to CDN if local failed (e.g., old cached frontend without the file)
-    if (!window.TonConnectUI) {
-      var s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/@tonconnect/ui@2/dist/tonconnect-ui.min.js';
-      s.async = false;
-      document.head.appendChild(s);
-    }
-  </script>
-</head>
-<body data-scheme="dark">
-  <div id="app">
-    <header id="topbar" class="topbar">
-      <button id="tb-back" class="icon-btn hidden" aria-label="Back">
-        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M15.5 19.5 8 12l7.5-7.5 1.4 1.4L10.8 12l6.1 6.1z"/></svg>
-      </button>
-      <div id="tb-title" class="topbar-title">TonEscrow</div>
-      <button id="tb-action" class="icon-btn hidden" aria-label="Action"></button>
-    </header>
-
-    <main id="view" class="view-root" aria-live="polite"></main>
-
-    <nav id="tabbar" class="tabbar" role="navigation" aria-label="Main navigation">
-      <button class="tab-btn tab-create" data-tab="#/create" aria-label="Yangi">
-        <span class="tab-circle"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>
-        <span class="tab-label">Yangi</span>
-      </button>
-      <button class="tab-btn active" data-tab="#/home" aria-label="Bosh sahifa">
-        <span class="tab-circle"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5"/><path d="M6 9.8V20h12V9.8"/><path d="M10 20v-5.5h4V20"/></svg></span>
-        <span class="tab-label">Bosh sahifa</span>
-      </button>
-      <button class="tab-btn" data-tab="#/rating" aria-label="Reyting">
-        <span class="tab-circle"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4.5A4 4 0 0 0 8.5 11"/><path d="M17 6h2.5A4 4 0 0 1 15.5 11"/><path d="M12 14v3.5"/><path d="M9 20.5h6"/></svg></span>
-        <span class="tab-label">Reyting</span>
-      </button>
-      <button class="tab-btn" data-tab="#/channels" aria-label="Kanallar">
-        <span class="tab-circle"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5v3a1 1 0 0 0 1 1h2l5 3.5v-11L7 9.5H5a1 1 0 0 0-1 1Z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/></svg></span>
-        <span class="tab-label">Kanallar</span>
-      </button>
-      <button class="tab-btn" data-tab="#/profile" aria-label="Hisob">
-        <span class="tab-circle"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.8"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></span>
-        <span class="tab-label">Hisob</span>
-      </button>
-    </nav>
-  </div>
-
-  <div id="toast-root"></div>
-  <div id="sheet-root"></div>
-
-  <script src="/js/app-config.js?v=10"></script>
-  <script src="/js/tg.js?v=10"></script>
-  <script src="/js/crypto.js?v=12"></script>
-  <script src="/js/api.js?v=12"></script>
-  <script src="/js/ui.js?v=10"></script>
-  <script src="/js/wallet.js?v=10"></script>
-  <script src="/js/app.js?v=12"></script>
-  <script>
-    // Floating nav active-state sync (circular highlight, no panel).
-    (function () {
-      function order(h) {
-        h = h || '#/home';
-        if (h.indexOf('#/create') === 0) return 0;
-        if (h === '#/home' || h === '') return 1;
-        if (h.indexOf('#/rating') === 0) return 2;
-        if (h.indexOf('#/channels') === 0) return 3;
-        if (h.indexOf('#/profile') === 0) return 4;
-        return 1;
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>TonEscrow — Xavfsiz P2P Bitimlar</title>
+    <meta name="theme-color" content="#0b1220" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="stylesheet" href="/css/style.css?v=10" />
+    <script src="/js/telegram-web-app.js?v=10"></script>
+    <!-- TON Connect SDK — local first (no external dependency), CDN fallback -->
+    <script src="/js/tonconnect-ui.min.js?v=10"></script>
+    <script>
+      // Fallback to CDN if local failed (e.g., old cached frontend without the file)
+      if (!window.TonConnectUI) {
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/@tonconnect/ui@2/dist/tonconnect-ui.min.js';
+        s.async = false;
+        document.head.appendChild(s);
       }
-      function sync() {
-        var btns = document.querySelectorAll('#tabbar .tab-btn');
-        if (!btns.length) return;
-        var idx = order(location.hash);
-        Array.prototype.forEach.call(btns, function (b, i) {
-          b.classList.toggle('active', i === idx);
-          if (i === idx) b.setAttribute('aria-current', 'page');
-          else b.removeAttribute('aria-current');
-        });
-      }
-      window.addEventListener('hashchange', sync);
-      document.addEventListener('DOMContentLoaded', sync);
-      sync();
-    })();
-  </script>
-</body>
+    </script>
+  </head>
+  <body data-scheme="dark">
+    <div id="app">
+      <header id="topbar" class="topbar">
+        <button id="tb-back" class="icon-btn hidden" aria-label="Back">
+          <svg viewBox="0 0 24 24" width="22" height="22">
+            <path fill="currentColor" d="M15.5 19.5 8 12l7.5-7.5 1.4 1.4L10.8 12l6.1 6.1z" />
+          </svg>
+        </button>
+        <div id="tb-title" class="topbar-title">TonEscrow</div>
+        <button id="tb-action" class="icon-btn hidden" aria-label="Action"></button>
+      </header>
+
+      <main id="view" class="view-root" aria-live="polite"></main>
+
+      <nav id="tabbar" class="tabbar" role="navigation" aria-label="Main navigation">
+        <button class="tab-btn tab-create" data-tab="#/create" aria-label="Yangi">
+          <span class="tab-circle"
+            ><svg
+              viewBox="0 0 24 24"
+              width="22"
+              height="22"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" /></svg
+          ></span>
+          <span class="tab-label">Yangi</span>
+        </button>
+        <button class="tab-btn active" data-tab="#/home" aria-label="Bosh sahifa">
+          <span class="tab-circle"
+            ><svg
+              viewBox="0 0 24 24"
+              width="22"
+              height="22"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 10.5 12 4l8 6.5" />
+              <path d="M6 9.8V20h12V9.8" />
+              <path d="M10 20v-5.5h4V20" /></svg
+          ></span>
+          <span class="tab-label">Bosh sahifa</span>
+        </button>
+        <button class="tab-btn" data-tab="#/rating" aria-label="Reyting">
+          <span class="tab-circle"
+            ><svg
+              viewBox="0 0 24 24"
+              width="22"
+              height="22"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M7 4h10v5a5 5 0 0 1-10 0V4Z" />
+              <path d="M7 6H4.5A4 4 0 0 0 8.5 11" />
+              <path d="M17 6h2.5A4 4 0 0 1 15.5 11" />
+              <path d="M12 14v3.5" />
+              <path d="M9 20.5h6" /></svg
+          ></span>
+          <span class="tab-label">Reyting</span>
+        </button>
+        <button class="tab-btn" data-tab="#/channels" aria-label="Kanallar">
+          <span class="tab-circle"
+            ><svg
+              viewBox="0 0 24 24"
+              width="22"
+              height="22"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 10.5v3a1 1 0 0 0 1 1h2l5 3.5v-11L7 9.5H5a1 1 0 0 0-1 1Z" />
+              <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5" /></svg
+          ></span>
+          <span class="tab-label">Kanallar</span>
+        </button>
+        <button class="tab-btn" data-tab="#/profile" aria-label="Hisob">
+          <span class="tab-circle"
+            ><svg
+              viewBox="0 0 24 24"
+              width="22"
+              height="22"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="8" r="3.8" />
+              <path d="M5 20a7 7 0 0 1 14 0" /></svg
+          ></span>
+          <span class="tab-label">Hisob</span>
+        </button>
+      </nav>
+    </div>
+
+    <div id="toast-root"></div>
+    <div id="sheet-root"></div>
+
+    <script src="/js/app-config.js?v=10"></script>
+    <script src="/js/tg.js?v=10"></script>
+    <script src="/js/crypto.js?v=12"></script>
+    <script src="/js/api.js?v=12"></script>
+    <script src="/js/ui.js?v=10"></script>
+    <script src="/js/wallet.js?v=10"></script>
+    <script src="/js/app.js?v=12"></script>
+    <script>
+      // Floating nav active-state sync (circular highlight, no panel).
+      (function () {
+        function order(h) {
+          h = h || '#/home';
+          if (h.indexOf('#/create') === 0) return 0;
+          if (h === '#/home' || h === '') return 1;
+          if (h.indexOf('#/rating') === 0) return 2;
+          if (h.indexOf('#/channels') === 0) return 3;
+          if (h.indexOf('#/profile') === 0) return 4;
+          return 1;
+        }
+        function sync() {
+          var btns = document.querySelectorAll('#tabbar .tab-btn');
+          if (!btns.length) return;
+          var idx = order(location.hash);
+          Array.prototype.forEach.call(btns, function (b, i) {
+            b.classList.toggle('active', i === idx);
+            if (i === idx) b.setAttribute('aria-current', 'page');
+            else b.removeAttribute('aria-current');
+          });
+        }
+        window.addEventListener('hashchange', sync);
+        document.addEventListener('DOMContentLoaded', sync);
+        sync();
+      })();
+    </script>
+  </body>
 </html>

@@ -3,7 +3,7 @@ import { prefersReducedMotion } from './motion';
 export function h(tag: string, attrs: Record<string, any> | null, children?: any): HTMLElement {
   const el = document.createElement(tag);
   if (attrs) {
-    Object.keys(attrs).forEach(k => {
+    Object.keys(attrs).forEach((k) => {
       const v = attrs[k];
       if (v === null || v === undefined || v === false) return;
       if (k === 'class') el.className = v;
@@ -16,7 +16,7 @@ export function h(tag: string, attrs: Record<string, any> | null, children?: any
   }
   if (children !== undefined && children !== null) {
     const arr = Array.isArray(children) ? children : [children];
-    arr.forEach(c => {
+    arr.forEach((c) => {
       if (c === null || c === undefined || c === false) return;
       el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
     });
@@ -84,7 +84,9 @@ export function toFriendly(raw: string): string {
     let bin = '';
     for (let j = 0; j < bytes.length; j++) bin += String.fromCharCode(bytes[j]);
     return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  } catch { return String(raw || ''); }
+  } catch {
+    return String(raw || '');
+  }
 }
 export function shortAddr(a: string): string {
   a = String(a || '');
@@ -106,7 +108,13 @@ export function statusMeta(status: string, deal?: any) {
   try {
     if (u === 'REFUNDED' && deal) {
       let conf: any = (deal as any).confirmations;
-      if (typeof conf === 'string' && conf) { try { conf = JSON.parse(conf); } catch { conf = null; } }
+      if (typeof conf === 'string' && conf) {
+        try {
+          conf = JSON.parse(conf);
+        } catch {
+          conf = null;
+        }
+      }
       if (conf && (conf as any).autoClosed === true) {
         return { label: 'Yopildi', cls: 'st-refunded', step: 3 };
       }
@@ -126,7 +134,9 @@ export function assetMeta(asset: string) {
   return { name: a || 'Aktiv', symbol: a || '?', glyph: '◆', cls: 'asset-any' };
 }
 export const feeBpsEstimate = 100;
-export function avatarClass(seed: any): string { return 'av-' + (Math.abs(Number(seed) || 0) % 4); }
+export function avatarClass(seed: any): string {
+  return 'av-' + (Math.abs(Number(seed) || 0) % 4);
+}
 export function counterpartyLabel(deal: any): string {
   try {
     const uid = Number((window as any).TG?.user()?.id);
@@ -138,14 +148,21 @@ export function counterpartyLabel(deal: any): string {
 
 export function toast(message: string, type?: 'ok' | 'err') {
   const root = document.getElementById('toast-root')!;
-  while (root.children.length > 2) root.removeChild(root.firstChild);
+  while (root.children.length > 2) {
+    const first = root.firstChild;
+    if (!first) break;
+    root.removeChild(first);
+  }
   const cls = type === 'ok' ? 'ok' : type === 'err' ? 'err' : '';
   const t = h('div', { class: 'toast ' + cls, text: String(message) });
   root.appendChild(t);
-  setTimeout(() => {
-    t.classList.add('out');
-    setTimeout(() => t.remove(), 260);
-  }, type === 'err' ? 3400 : 2200);
+  setTimeout(
+    () => {
+      t.classList.add('out');
+      setTimeout(() => t.remove(), 260);
+    },
+    type === 'err' ? 3400 : 2200,
+  );
 }
 export function copy(text: string, label = 'Nusxalandi') {
   function fallbackCopy(t: string) {
@@ -154,13 +171,24 @@ export function copy(text: string, label = 'Nusxalandi') {
     ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
     document.body.appendChild(ta);
     ta.select();
-    try { document.execCommand('copy'); } catch {}
+    try {
+      document.execCommand('copy');
+    } catch {}
     ta.remove();
   }
-  function done() { toast(label, 'ok'); (window as any).TG?.haptic?.success?.(); }
+  function done() {
+    toast(label, 'ok');
+    (window as any).TG?.haptic?.success?.();
+  }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(done, () => { fallbackCopy(text); done(); });
-  } else { fallbackCopy(text); done(); }
+    navigator.clipboard.writeText(text).then(done, () => {
+      fallbackCopy(text);
+      done();
+    });
+  } else {
+    fallbackCopy(text);
+    done();
+  }
 }
 export function skeletonDeals(n = 4): DocumentFragment {
   const frag = document.createDocumentFragment();
@@ -176,11 +204,19 @@ export function sheetClose() {
     root.innerHTML = '';
     (window as any).TG?.preventClose?.(false);
   };
-  if (!sheet || prefersReducedMotion()) { finish(); return; }
+  if (!sheet || prefersReducedMotion()) {
+    finish();
+    return;
+  }
   if (sheet.dataset.closing) return;
   sheet.dataset.closing = '1';
   let finished = false;
-  const done = () => { if (!finished) { finished = true; finish(); } };
+  const done = () => {
+    if (!finished) {
+      finished = true;
+      finish();
+    }
+  };
   try {
     const anim = sheet.animate(
       [
@@ -192,18 +228,23 @@ export function sheetClose() {
     anim.onfinish = done;
     anim.oncancel = done;
     if (backdrop) {
-      backdrop.animate(
-        [{ opacity: getComputedStyle(backdrop).opacity || '1' }, { opacity: '0' }],
-        { duration: 190, fill: 'forwards' },
-      );
+      backdrop.animate([{ opacity: getComputedStyle(backdrop).opacity || '1' }, { opacity: '0' }], {
+        duration: 190,
+        fill: 'forwards',
+      });
     }
-  } catch { /* WAAPI unavailable */ }
+  } catch {
+    /* WAAPI unavailable */
+  }
   setTimeout(done, 280); // safety net
 }
 
 function attachSheetDrag(sheet: HTMLElement) {
   if (prefersReducedMotion()) return;
-  let startY = 0, curY = 0, dragging = false, t0 = 0;
+  let startY = 0,
+    curY = 0,
+    dragging = false,
+    t0 = 0;
   const onDown = (e: TouchEvent) => {
     if (dragging || e.touches.length !== 1) return;
     const target = e.target as HTMLElement;
@@ -211,7 +252,9 @@ function attachSheetDrag(sheet: HTMLElement) {
     const atTop = sheet.scrollTop <= 2;
     // start drag from grabber, or anywhere when the sheet isn't scrollable / is at top
     if (!(target.closest('.sheet-grabber') || !scrollable || atTop)) return;
-    dragging = true; startY = curY = e.touches[0].clientY; t0 = performance.now();
+    dragging = true;
+    startY = curY = e.touches[0].clientY;
+    t0 = performance.now();
   };
   const onMove = (e: TouchEvent) => {
     if (!dragging) return;
@@ -247,7 +290,9 @@ function attachSheetDrag(sheet: HTMLElement) {
           ],
           { duration: 320, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)' },
         );
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   };
   sheet.addEventListener('touchstart', onDown, { passive: true });
@@ -260,23 +305,52 @@ export function sheetOpen(contentEl: HTMLElement, opts: any = {}) {
   const root = document.getElementById('sheet-root')!;
   root.innerHTML = '';
   const sheet = h('div', { class: 'sheet', role: 'dialog' } as any, [h('div', { class: 'sheet-grabber' }), contentEl]);
-  const backdrop = h('div', { class: 'sheet-backdrop', onclick: () => { if (!opts.locked) sheetClose(); } });
+  const backdrop = h('div', {
+    class: 'sheet-backdrop',
+    onclick: () => {
+      if (!opts.locked) sheetClose();
+    },
+  });
   root.appendChild(backdrop);
   root.appendChild(sheet);
   root.classList.add('open');
   // once the entrance animation settles, clear fill state so drag transforms apply cleanly
-  setTimeout(() => { try { sheet.style.animation = 'none'; } catch {} }, 420);
+  setTimeout(() => {
+    try {
+      sheet.style.animation = 'none';
+    } catch {}
+  }, 420);
   attachSheetDrag(sheet);
   if ((window as any).TG?.available) {
-    (window as any).TG.showBack(() => { if (!opts.locked) sheetClose(); });
+    (window as any).TG.showBack(() => {
+      if (!opts.locked) sheetClose();
+    });
     (window as any).TG.preventClose(!!opts.locked);
   }
   return { close: sheetClose, el: sheet };
 }
 
 export const UI = {
-  h, fmtAmount, fmtDate, fmtDateTime, fmtTime, timeAgo, countdown, truncate, toFriendly, shortAddr,
-  statusMeta, isFinalStatus, assetMeta, feeBpsEstimate, avatarClass, counterpartyLabel,
-  toast, copy, skeletonDeals, sheetOpen, sheetClose,
+  h,
+  fmtAmount,
+  fmtDate,
+  fmtDateTime,
+  fmtTime,
+  timeAgo,
+  countdown,
+  truncate,
+  toFriendly,
+  shortAddr,
+  statusMeta,
+  isFinalStatus,
+  assetMeta,
+  feeBpsEstimate,
+  avatarClass,
+  counterpartyLabel,
+  toast,
+  copy,
+  skeletonDeals,
+  sheetOpen,
+  sheetClose,
 };
 export default UI;

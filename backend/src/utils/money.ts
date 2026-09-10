@@ -63,7 +63,7 @@ export function toBaseUnits(amount: number | string, asset: string): string {
 export function dealPricing(
   amount: number | string,
   asset: string,
-  feeBpsRaw: number | string | null | undefined
+  feeBpsRaw: number | string | null | undefined,
 ): {
   priceBase: bigint;
   feeBase: bigint;

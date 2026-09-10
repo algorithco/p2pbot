@@ -2,12 +2,7 @@
 import { db } from '../db/queries';
 import { v4 as uuidv4 } from 'uuid';
 import { QueryResult } from 'pg';
-import {
-  generateDealChatKey,
-  encryptDealKey,
-  decryptDealKey,
-  encryptWithDealKey,
-} from '../utils/encryption';
+import { generateDealChatKey, encryptDealKey, decryptDealKey, encryptWithDealKey } from '../utils/encryption';
 import { dealPricing, fromBaseUnits } from '../utils/money';
 
 /** Canonical deal status strings.
@@ -37,7 +32,12 @@ export const DEAL_TYPE = {
 const FINAL_STATUSES = new Set<string>([DEAL_STATUS.RELEASED, DEAL_STATUS.REFUNDED]);
 
 /** Shape used by every Telegram notification helper (single source of truth). */
-export function dealLike(deal: { id: number | string; amount: string | number | null; asset: string | null; terms?: string | null }): {
+export function dealLike(deal: {
+  id: number | string;
+  amount: string | number | null;
+  asset: string | null;
+  terms?: string | null;
+}): {
   id: number | string;
   amount: string | number;
   asset: string;
@@ -73,7 +73,11 @@ export function normalizeChannelUsername(v: unknown): string | null {
   if (!v) return null;
   let s = String(v).trim();
   if (!s) return null;
-  s = s.replace(/^https?:\/\/t\.me\//i, '').replace(/^t\.me\//i, '').replace(/^@/, '').trim();
+  s = s
+    .replace(/^https?:\/\/t\.me\//i, '')
+    .replace(/^t\.me\//i, '')
+    .replace(/^@/, '')
+    .trim();
   s = s.split('/')[0].split('?')[0].trim();
   if (!s) return null;
   if (!/^[@A-Za-z0-9_]{1,64}$/.test(s.startsWith('@') ? s : `@${s}`)) return null;
@@ -126,7 +130,9 @@ export async function createDealRecord(params: {
     escrowHolderId = null,
   } = params;
 
-  const normalizedType = ['P2P','CHANNEL','GROUP'].includes(String(dealType).toUpperCase()) ? String(dealType).toUpperCase() : DEAL_TYPE.P2P;
+  const normalizedType = ['P2P', 'CHANNEL', 'GROUP'].includes(String(dealType).toUpperCase())
+    ? String(dealType).toUpperCase()
+    : DEAL_TYPE.P2P;
   // Single source for fee + expected-deposit math (see utils/money.dealPricing).
   const assetUpper = String(asset || 'TON').toUpperCase();
   const feeBase = dealPricing(amount, assetUpper, feeBps).feeBase;
@@ -183,7 +189,7 @@ export async function createDealRecord(params: {
       channelTitle,
       channelSnapshot ? JSON.stringify(channelSnapshot) : '{}',
       escrowHolderId,
-    ]
+    ],
   );
   return res.rows[0];
 }
@@ -217,11 +223,16 @@ export async function getDealChatKey(dealId: number | string): Promise<string | 
     // Backfill: generate & persist if missing (legacy deals) — still under the lock.
     const newKey = generateDealChatKey();
     const enc = encryptDealKey(newKey);
-    await client.query('UPDATE deals SET chat_key = $1, chat_key_created_at = now(), updated_at = now() WHERE id = $2', [enc, id]);
+    await client.query(
+      'UPDATE deals SET chat_key = $1, chat_key_created_at = now(), updated_at = now() WHERE id = $2',
+      [enc, id],
+    );
     await client.query('COMMIT');
     return newKey;
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
+    try {
+      await client.query('ROLLBACK');
+    } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
     throw e;
   } finally {
     client.release();
@@ -256,10 +267,7 @@ export async function updateDealStatus(dealId: number | string, status: string, 
 export async function generateDealLink(dealId: number, ttlSeconds: number = 86400) {
   const token = uuidv4();
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
-  await db.query(
-    `INSERT INTO deal_links (deal_id, token, expires_at) VALUES ($1,$2,$3)`,
-    [dealId, token, expiresAt]
-  );
+  await db.query(`INSERT INTO deal_links (deal_id, token, expires_at) VALUES ($1,$2,$3)`, [dealId, token, expiresAt]);
   return token;
 }
 
@@ -268,7 +276,7 @@ export async function validateDealLink(token: string) {
   const res = await db.query(
     `SELECT d.* FROM deal_links dl JOIN deals d ON dl.deal_id = d.id
      WHERE dl.token = $1 AND dl.expires_at > now()`,
-    [token]
+    [token],
   );
   return res.rows[0] || null;
 }
@@ -288,7 +296,7 @@ export async function assignRoleToDeal(dealId: number | string, role: 'buyer' | 
   const column = role === 'buyer' ? 'buyer_telegram_id' : 'seller_telegram_id';
   const res = await db.query(
     `UPDATE deals SET ${column} = $1, updated_at = now() WHERE id = $2 AND ${column} IS NULL RETURNING id`,
-    [telegramId, Number(dealId)]
+    [telegramId, Number(dealId)],
   );
   if (res.rowCount === 0) {
     const deal = await getDealById(dealId);
@@ -305,14 +313,21 @@ export async function atomicJoinDeal(dealId: number, token: string, telegramId: 
   try {
     await client.query('BEGIN');
     // Lock deal row
-    const dealRes = await client.query('SELECT buyer_telegram_id, seller_telegram_id FROM deals WHERE id = $1 FOR UPDATE', [dealId]);
+    const dealRes = await client.query(
+      'SELECT buyer_telegram_id, seller_telegram_id FROM deals WHERE id = $1 FOR UPDATE',
+      [dealId],
+    );
     if (dealRes.rows.length === 0) throw new Error('deal_not_found');
     const deal = dealRes.rows[0];
     if (
       (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === Number(telegramId)) ||
       (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === Number(telegramId))
-    ) throw new Error('already_party_to_deal');
-    const linkRes = await client.query('SELECT * FROM deal_links WHERE token = $1 AND deal_id = $2 AND expires_at > now() FOR UPDATE', [token, dealId]);
+    )
+      throw new Error('already_party_to_deal');
+    const linkRes = await client.query(
+      'SELECT * FROM deal_links WHERE token = $1 AND deal_id = $2 AND expires_at > now() FOR UPDATE',
+      [token, dealId],
+    );
     if (linkRes.rows.length === 0) throw new Error('invalid_token');
     let role: 'buyer' | 'seller';
     if (deal.buyer_telegram_id != null && deal.seller_telegram_id == null) role = 'seller';
@@ -326,7 +341,9 @@ export async function atomicJoinDeal(dealId: number, token: string, telegramId: 
     return role;
   } catch (e) {
     // best-effort: never let a rollback failure mask the original join error.
-    try { await client.query('ROLLBACK'); } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
+    try {
+      await client.query('ROLLBACK');
+    } catch {} // best-effort: already handling a failure; a rollback error must not mask it.
     throw e;
   } finally {
     client.release();
@@ -334,11 +351,15 @@ export async function atomicJoinDeal(dealId: number, token: string, telegramId: 
 }
 
 /** Record a party confirmation in the confirmations JSONB column. */
-export async function setConfirmation(dealId: number | string, party: 'buyer' | 'seller', confirmations: Record<string, boolean>) {
-  await db.query(
-    'UPDATE deals SET confirmations = $1::jsonb, updated_at = now() WHERE id = $2',
-    [JSON.stringify(confirmations), Number(dealId)]
-  );
+export async function setConfirmation(
+  dealId: number | string,
+  party: 'buyer' | 'seller',
+  confirmations: Record<string, boolean>,
+) {
+  await db.query('UPDATE deals SET confirmations = $1::jsonb, updated_at = now() WHERE id = $2', [
+    JSON.stringify(confirmations),
+    Number(dealId),
+  ]);
 }
 
 /** Retrieve chat messages for a deal — returns ciphertext-aware rows */
@@ -346,7 +367,7 @@ export async function getDealMessages(dealId: number, limit: number = 100) {
   const res = await db.query(
     `SELECT id, deal_id, sender_telegram_id, content, encrypted_content, is_encrypted, created_at
      FROM messages WHERE deal_id = $1 ORDER BY created_at ASC LIMIT $2`,
-    [dealId, limit]
+    [dealId, limit],
   );
   return res.rows;
 }
@@ -359,13 +380,14 @@ export async function addDealMessage(dealId: number, senderTelegramId: number, c
     const encrypted = encryptWithDealKey(content, chatKey);
     await db.query(
       `INSERT INTO messages (deal_id, sender_telegram_id, content, encrypted_content, is_encrypted) VALUES ($1,$2,$3,$4,true)`,
-      [dealId, senderTelegramId, '', encrypted]
+      [dealId, senderTelegramId, '', encrypted],
     );
   } else {
-    await db.query(
-      `INSERT INTO messages (deal_id, sender_telegram_id, content) VALUES ($1,$2,$3)`,
-      [dealId, senderTelegramId, content]
-    );
+    await db.query(`INSERT INTO messages (deal_id, sender_telegram_id, content) VALUES ($1,$2,$3)`, [
+      dealId,
+      senderTelegramId,
+      content,
+    ]);
   }
 }
 
@@ -384,7 +406,7 @@ export async function addEncryptedMessage(dealId: number, senderTelegramId: numb
   }
   await db.query(
     `INSERT INTO messages (deal_id, sender_telegram_id, content, encrypted_content, is_encrypted) VALUES ($1,$2,$3,$4,true)`,
-    [dealId, senderTelegramId, '', encryptedContentB64]
+    [dealId, senderTelegramId, '', encryptedContentB64],
   );
 }
 
@@ -410,18 +432,34 @@ export async function createJoinRequest(params: {
   requesterPhotoUrl?: string | null;
   requesterPhotoFileId?: string | null;
 }): Promise<{ request: any; created: boolean }> {
-  const { dealId, token, requesterTelegramId, requesterUsername, requesterFirstName, requesterPhotoUrl, requesterPhotoFileId } = params;
+  const {
+    dealId,
+    token,
+    requesterTelegramId,
+    requesterUsername,
+    requesterFirstName,
+    requesterPhotoUrl,
+    requesterPhotoFileId,
+  } = params;
   // Upsert: if same requester already pending for same deal+token, return existing
   const existing = await db.query(
     `SELECT * FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND requester_telegram_id = $3 AND status = 'pending' LIMIT 1`,
-    [dealId, token, requesterTelegramId]
+    [dealId, token, requesterTelegramId],
   );
   if (existing.rows[0]) return { request: existing.rows[0], created: false };
   try {
     const res = await db.query(
       `INSERT INTO deal_join_requests (deal_id, token, requester_telegram_id, requester_username, requester_first_name, requester_photo_url, requester_photo_file_id, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING *`,
-      [dealId, token, requesterTelegramId, requesterUsername || null, requesterFirstName || null, requesterPhotoUrl || null, requesterPhotoFileId || null]
+      [
+        dealId,
+        token,
+        requesterTelegramId,
+        requesterUsername || null,
+        requesterFirstName || null,
+        requesterPhotoUrl || null,
+        requesterPhotoFileId || null,
+      ],
     );
     return { request: res.rows[0], created: true };
   } catch (e) {
@@ -431,7 +469,7 @@ export async function createJoinRequest(params: {
     if ((e as { code?: string }).code === '23505') {
       const winner = await db.query(
         `SELECT * FROM deal_join_requests WHERE deal_id = $1 AND requester_telegram_id = $2 AND status = 'pending' ORDER BY id ASC LIMIT 1`,
-        [dealId, requesterTelegramId]
+        [dealId, requesterTelegramId],
       );
       if (winner.rows[0]) return { request: winner.rows[0], created: false };
     }
@@ -447,7 +485,7 @@ export async function getJoinRequestById(id: number) {
 export async function getPendingRequest(dealId: number, token: string, requesterId: number) {
   const res = await db.query(
     `SELECT * FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND requester_telegram_id = $3 AND status = 'pending' LIMIT 1`,
-    [dealId, token, requesterId]
+    [dealId, token, requesterId],
   );
   return res.rows[0] || null;
 }
@@ -463,7 +501,7 @@ export async function updateJoinRequestStatus(id: number, status: 'approved' | '
 export async function getMyJoinStatus(dealId: number, token: string, requesterId: number) {
   const res = await db.query(
     `SELECT * FROM deal_join_requests WHERE deal_id = $1 AND token = $2 AND requester_telegram_id = $3 ORDER BY id DESC LIMIT 1`,
-    [dealId, token, requesterId]
+    [dealId, token, requesterId],
   );
   return res.rows[0] || null;
 }
@@ -476,7 +514,7 @@ export async function rejectOtherPendingRequests(dealId: number, exceptId: numbe
   const res = await db.query(
     `UPDATE deal_join_requests SET status = 'rejected', updated_at = now()
      WHERE deal_id = $1 AND status = 'pending' AND id <> $2 RETURNING *`,
-    [dealId, exceptId]
+    [dealId, exceptId],
   );
   return res.rows;
 }
@@ -487,7 +525,10 @@ export async function rejectOtherPendingRequests(dealId: number, exceptId: numbe
  *  Also closes sibling pending requests (deal is full after this) and reports
  *  them so the caller can notify the losers.
  */
-export async function approveJoinRequest(requestId: number, approverTelegramId: number): Promise<{ role: 'buyer' | 'seller'; autoRejected: any[] }> {
+export async function approveJoinRequest(
+  requestId: number,
+  approverTelegramId: number,
+): Promise<{ role: 'buyer' | 'seller'; autoRejected: any[] }> {
   const req = await getJoinRequestById(requestId);
   if (!req) throw new Error('request_not_found');
   if (req.status !== 'pending') throw new Error('request_already_handled');
@@ -502,7 +543,8 @@ export async function approveJoinRequest(requestId: number, approverTelegramId: 
   // The invite link must still be alive — otherwise the join below fails with a
   // cryptic invalid_token. Fail early with a clear, mappable error instead.
   const link = await getDealLink(String(req.token)).catch(() => null);
-  if (!link || Number(link.deal_id) !== Number(req.deal_id)) throw new Error('link_expired: invite link already used or revoked');
+  if (!link || Number(link.deal_id) !== Number(req.deal_id))
+    throw new Error('link_expired: invite link already used or revoked');
   if (new Date(link.expires_at).getTime() <= Date.now()) throw new Error('link_expired: invite link expired');
   // Perform atomic join (assigns the empty slot; still the final race guard)
   const role = await atomicJoinDeal(req.deal_id, req.token, req.requester_telegram_id);
@@ -533,17 +575,40 @@ export async function purgeExpiredLinks() {
  *  Their links are long dead — keeping them only confuses counts and badges.
  */
 export async function purgeStaleJoinRequests(maxAgeHours = 48) {
-  await db.query(`DELETE FROM deal_join_requests WHERE status = 'pending' AND created_at < now() - ($1 || ' hours')::interval`, [String(Math.max(1, Math.floor(maxAgeHours)))]);
+  await db.query(
+    `DELETE FROM deal_join_requests WHERE status = 'pending' AND created_at < now() - ($1 || ' hours')::interval`,
+    [String(Math.max(1, Math.floor(maxAgeHours)))],
+  );
 }
 
 // ── CHANNEL/GROUP escrow helpers (custodial via @gramchioka) ──
-export async function updateChannelVerification(dealId: number, opts: { channelId?: string | null; channelTitle?: string | null; channelSnapshot?: Record<string, unknown> | null; verified?: boolean }) {
-  const sets: string[] = []; const params: unknown[] = []; let idx=1;
-  if (opts.channelId !== undefined) { sets.push(`channel_id = $${idx++}`); params.push(opts.channelId); }
-  if (opts.channelTitle !== undefined) { sets.push(`channel_title = $${idx++}`); params.push(opts.channelTitle); }
-  if (opts.channelSnapshot !== undefined) { sets.push(`channel_snapshot = $${idx++}::jsonb`); params.push(JSON.stringify(opts.channelSnapshot || {})); }
+export async function updateChannelVerification(
+  dealId: number,
+  opts: {
+    channelId?: string | null;
+    channelTitle?: string | null;
+    channelSnapshot?: Record<string, unknown> | null;
+    verified?: boolean;
+  },
+) {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+  if (opts.channelId !== undefined) {
+    sets.push(`channel_id = $${idx++}`);
+    params.push(opts.channelId);
+  }
+  if (opts.channelTitle !== undefined) {
+    sets.push(`channel_title = $${idx++}`);
+    params.push(opts.channelTitle);
+  }
+  if (opts.channelSnapshot !== undefined) {
+    sets.push(`channel_snapshot = $${idx++}::jsonb`);
+    params.push(JSON.stringify(opts.channelSnapshot || {}));
+  }
   if (opts.verified !== undefined) {
-    sets.push(`channel_verified = $${idx++}`); params.push(!!opts.verified);
+    sets.push(`channel_verified = $${idx++}`);
+    params.push(!!opts.verified);
     if (opts.verified) sets.push(`channel_verified_at = now()`);
   }
   if (!sets.length) return;
@@ -558,7 +623,10 @@ export async function setTransferToEscrow(dealId: number) {
   await db.query('UPDATE deals SET transfer_to_escrow_at = now(), updated_at = now() WHERE id = $1', [dealId]);
 }
 export async function setTransferToBuyer(dealId: number, newOwner: string) {
-  await db.query('UPDATE deals SET transfer_to_buyer_at = now(), pending_new_owner = $1, updated_at = now() WHERE id = $2', [newOwner, dealId]);
+  await db.query(
+    'UPDATE deals SET transfer_to_buyer_at = now(), pending_new_owner = $1, updated_at = now() WHERE id = $2',
+    [newOwner, dealId],
+  );
 }
 export async function setPendingNewOwner(dealId: number, newOwner: string) {
   await db.query('UPDATE deals SET pending_new_owner = $1, updated_at = now() WHERE id = $2', [newOwner, dealId]);

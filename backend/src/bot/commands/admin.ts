@@ -36,7 +36,7 @@ export function registerAdminCommands(bot: Bot) {
   bot.command('disputes', async (ctx) => {
     if (!isAdminCtx(ctx)) return ctx.reply(`❌ Ruxsat yo'q.\nBu buyruq faqat admin uchun.`);
     const res = await db.query(
-      `SELECT * FROM deals WHERE confirmations->>'disputed' = 'true' AND status NOT IN ('RELEASED','REFUNDED') ORDER BY id DESC LIMIT 20`
+      `SELECT * FROM deals WHERE confirmations->>'disputed' = 'true' AND status NOT IN ('RELEASED','REFUNDED') ORDER BY id DESC LIMIT 20`,
     );
     if (res.rows.length === 0) {
       await ctx.reply(`✅ Ochilgan nizolar yo'q.\nHammasi joyida.`);
@@ -44,7 +44,7 @@ export function registerAdminCommands(bot: Bot) {
       for (const d of res.rows) {
         await ctx.reply(
           `⚖️ Nizo #${d.id} — ${d.amount} ${d.asset}\nXaridor ${d.buyer_telegram_id} ↔ Sotuvchi ${d.seller_telegram_id}.\nQaror uchun tugmani bosing.`,
-          { parse_mode: 'HTML', reply_markup: adminKeyboard(d.id) }
+          { parse_mode: 'HTML', reply_markup: adminKeyboard(d.id) },
         );
       }
     }
@@ -66,7 +66,9 @@ export function registerAdminCommands(bot: Bot) {
     } catch (e) {
       // Was silent: an admin tapping "alerts" with a failing DB saw nothing. Log it.
       logger.warn('disputes/alerts handler failed', e);
-      try { await ctx.reply(`❌ Ogohlantirishlarni o'qib bo'lmadi, keyinroq urinib ko'ring.`); } catch {}
+      try {
+        await ctx.reply(`❌ Ogohlantirishlarni o'qib bo'lmadi, keyinroq urinib ko'ring.`);
+      } catch {}
     }
   });
 

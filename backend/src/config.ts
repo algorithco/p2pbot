@@ -19,7 +19,7 @@ export const config = {
   jettonWalletCodeHash: (() => {
     try {
       return BigInt(process.env.JETTON_WALLET_CODE_HASH || '0');
-    } catch (e) {
+    } catch {
       return BigInt(0);
     }
   })(),
@@ -52,8 +52,14 @@ export const config = {
 if (!config.databaseUrl) {
   console.warn('[config] DATABASE_URL not set — backend will fail to connect to Postgres');
 }
-if (config.encryptionKey && !/^[0-9a-fA-F]{64}$/.test(config.encryptionKey) && !/^[0-9a-fA-F]{128}$/.test(config.encryptionKey)) {
-  console.warn('[config] ENCRYPTION_KEY is set but not 64 or 128 hex chars — encryption will be disabled (fail-closed for utrade)');
+if (
+  config.encryptionKey &&
+  !/^[0-9a-fA-F]{64}$/.test(config.encryptionKey) &&
+  !/^[0-9a-fA-F]{128}$/.test(config.encryptionKey)
+) {
+  console.warn(
+    '[config] ENCRYPTION_KEY is set but not 64 or 128 hex chars — encryption will be disabled (fail-closed for utrade)',
+  );
 }
 if (config.feeBps < 0 || config.feeBps > 10000) {
   console.warn(`[config] FEE_BPS ${config.feeBps} out of range 0-10000, clamping may occur`);

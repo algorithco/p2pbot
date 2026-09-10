@@ -27,9 +27,10 @@
   }
   sessionStorageSet('initParams', initParams);
 
-  var isIframe = false, iFrameStyle;
+  var isIframe = false,
+    iFrameStyle;
   try {
-    isIframe = (window.parent != null && window != window.parent);
+    isIframe = window.parent != null && window != window.parent;
     if (isIframe) {
       window.addEventListener('message', function (event) {
         if (event.source !== window.parent) return;
@@ -47,7 +48,7 @@
           }
         } else if (dataParsed.eventType == 'reload_iframe') {
           try {
-            window.parent.postMessage(JSON.stringify({eventType: 'iframe_will_reload'}), '*');
+            window.parent.postMessage(JSON.stringify({ eventType: 'iframe_will_reload' }), '*');
           } catch (e) {}
           location.reload();
         } else {
@@ -57,7 +58,10 @@
       iFrameStyle = document.createElement('style');
       document.head.appendChild(iFrameStyle);
       try {
-        window.parent.postMessage(JSON.stringify({eventType: 'iframe_ready', eventData: {reload_supported: true}}), '*');
+        window.parent.postMessage(
+          JSON.stringify({ eventType: 'iframe_ready', eventData: { reload_supported: true } }),
+          '*',
+        );
       } catch (e) {}
     }
   } catch (e) {}
@@ -148,38 +152,34 @@
     if (window.TelegramWebviewProxy !== undefined) {
       TelegramWebviewProxy.postEvent(eventType, JSON.stringify(eventData));
       callback();
-    }
-    else if (window.external && 'notify' in window.external) {
-      window.external.notify(JSON.stringify({eventType: eventType, eventData: eventData}));
+    } else if (window.external && 'notify' in window.external) {
+      window.external.notify(JSON.stringify({ eventType: eventType, eventData: eventData }));
       callback();
-    }
-    else if (isIframe) {
+    } else if (isIframe) {
       try {
         var trustedTarget = 'https://web.telegram.org';
         // For now we don't restrict target, for testing purposes
         trustedTarget = '*';
-        window.parent.postMessage(JSON.stringify({eventType: eventType, eventData: eventData}), trustedTarget);
+        window.parent.postMessage(JSON.stringify({ eventType: eventType, eventData: eventData }), trustedTarget);
         callback();
       } catch (e) {
         callback(e);
       }
+    } else {
+      callback({ notAvailable: true });
     }
-    else {
-      callback({notAvailable: true});
-    }
-  };
+  }
 
   function receiveEvent(eventType, eventData) {
     console.log('[Telegram.WebView] < receiveEvent', eventType, eventData);
-    callEventCallbacks(eventType, function(callback) {
+    callEventCallbacks(eventType, function (callback) {
       callback(eventType, eventData);
     });
   }
 
   function callEventCallbacks(eventType, func) {
     var curEventHandlers = eventHandlers[eventType];
-    if (curEventHandlers === undefined ||
-        !curEventHandlers.length) {
+    if (curEventHandlers === undefined || !curEventHandlers.length) {
       return;
     }
     for (var i = 0; i < curEventHandlers.length; i++) {
@@ -197,7 +197,7 @@
     if (index === -1) {
       eventHandlers[eventType].push(callback);
     }
-  };
+  }
 
   function offEvent(eventType, callback) {
     if (eventHandlers[eventType] === undefined) {
@@ -208,7 +208,7 @@
       return;
     }
     eventHandlers[eventType].splice(index, 1);
-  };
+  }
 
   function openProtoUrl(url) {
     if (!url.match(/^(web\+)?tgb?:\/\/./)) {
@@ -228,15 +228,14 @@
       if (iframeEl !== null) {
         iframeEl.src = url;
       }
-      setTimeout(function() {
+      setTimeout(function () {
         if (!pageHidden) {
           window.location = url;
         }
         window.removeEventListener('pagehide', enableHidden, false);
         window.removeEventListener('blur', enableHidden, false);
       }, 2000);
-    }
-    else {
+    } else {
       window.location = url;
     }
     return true;
@@ -246,13 +245,13 @@
     try {
       window.sessionStorage.setItem('__telegram__' + key, JSON.stringify(value));
       return true;
-    } catch(e) {}
+    } catch (e) {}
     return false;
   }
   function sessionStorageGet(key) {
     try {
       return JSON.parse(window.sessionStorage.getItem('__telegram__' + key));
-    } catch(e) {}
+    } catch (e) {}
     return null;
   }
 
@@ -266,7 +265,7 @@
     offEvent: offEvent,
     postEvent: postEvent,
     receiveEvent: receiveEvent,
-    callEventCallbacks: callEventCallbacks
+    callEventCallbacks: callEventCallbacks,
   };
 
   window.Telegram.Utils = {
@@ -275,7 +274,7 @@
     urlParseHashParams: urlParseHashParams,
     urlAppendHashParams: urlAppendHashParams,
     sessionStorageSet: sessionStorageSet,
-    sessionStorageGet: sessionStorageGet
+    sessionStorageGet: sessionStorageGet,
   };
 
   // For Windows Phone app
@@ -283,7 +282,7 @@
 
   // App backward compatibility
   window.TelegramGameProxy = {
-    receiveEvent: receiveEvent
+    receiveEvent: receiveEvent,
   };
 })();
 
@@ -295,8 +294,10 @@
   var isIframe = WebView.isIframe;
 
   var WebApp = {};
-  var webAppInitData = '', webAppInitDataUnsafe = {};
-  var themeParams = {}, colorScheme = 'light';
+  var webAppInitData = '',
+    webAppInitDataUnsafe = {};
+  var themeParams = {},
+    colorScheme = 'light';
   var webAppVersion = '6.0';
   var webAppPlatform = 'unknown';
   var webAppIsActive = true;
@@ -312,8 +313,7 @@
     for (var key in webAppInitDataUnsafe) {
       var val = webAppInitDataUnsafe[key];
       try {
-        if (val.substr(0, 1) == '{' && val.substr(-1) == '}' ||
-            val.substr(0, 1) == '[' && val.substr(-1) == ']') {
+        if ((val.substr(0, 1) == '{' && val.substr(-1) == '}') || (val.substr(0, 1) == '[' && val.substr(-1) == ']')) {
           webAppInitDataUnsafe[key] = JSON.parse(val);
         }
       } catch (e) {}
@@ -389,7 +389,7 @@
     if (lastWindowHeight != window.innerHeight) {
       lastWindowHeight = window.innerHeight;
       receiveWebViewEvent('viewportChanged', {
-        isStateStable: true
+        isStateStable: true,
       });
     }
   }
@@ -421,10 +421,12 @@
     while (el.tagName != 'A' && el.parentNode) {
       el = el.parentNode;
     }
-    if (el.tagName == 'A' &&
-        el.target != '_blank' &&
-        (el.protocol == 'http:' || el.protocol == 'https:') &&
-        isTmeHostname(el.hostname)) {
+    if (
+      el.tagName == 'A' &&
+      el.target != '_blank' &&
+      (el.protocol == 'http:' || el.protocol == 'https:') &&
+      isTmeHostname(el.hostname)
+    ) {
       WebApp.openTelegramLink(el.href);
       e.preventDefault();
     }
@@ -442,18 +444,18 @@
   function receiveWebViewEvent(eventType) {
     var args = Array.prototype.slice.call(arguments);
     eventType = args.shift();
-    WebView.callEventCallbacks('webview:' + eventType, function(callback) {
+    WebView.callEventCallbacks('webview:' + eventType, function (callback) {
       callback.apply(WebApp, args);
     });
   }
 
   function onWebViewEvent(eventType, callback) {
     WebView.onEvent('webview:' + eventType, callback);
-  };
+  }
 
   function offWebViewEvent(eventType, callback) {
     WebView.offEvent('webview:' + eventType, callback);
-  };
+  }
 
   function setCssProperty(name, value) {
     var root = document.documentElement;
@@ -474,16 +476,15 @@
 
   function setThemeParams(theme_params) {
     // temp iOS fix
-    if (theme_params.bg_color == '#1c1c1d' &&
-        theme_params.bg_color == theme_params.secondary_bg_color) {
+    if (theme_params.bg_color == '#1c1c1d' && theme_params.bg_color == theme_params.secondary_bg_color) {
       theme_params.secondary_bg_color = '#2c2c2e';
     }
     var color;
     for (var key in theme_params) {
-      if (color = parseColorToHex(theme_params[key])) {
+      if ((color = parseColorToHex(theme_params[key]))) {
         themeParams[key] = color;
         if (key == 'bg_color') {
-          colorScheme = isColorDark(color) ? 'dark' : 'light'
+          colorScheme = isColorDark(color) ? 'dark' : 'light';
           setCssProperty('color-scheme', colorScheme);
         }
         key = 'theme-' + key.split('_').join('-');
@@ -518,7 +519,9 @@
   function generateCallbackId(len) {
     var tries = 100;
     while (--tries) {
-      var id = '', chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', chars_len = chars.length;
+      var id = '',
+        chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+        chars_len = chars.length;
       for (var i = 0; i < len; i++) {
         id += chars[Math.floor(Math.random() * chars_len)];
       }
@@ -530,7 +533,9 @@
     throw Error('WebAppCallbackIdGenerateFailed');
   }
 
-  var viewportHeight = false, viewportStableHeight = false, isExpanded = true;
+  var viewportHeight = false,
+    viewportStableHeight = false,
+    isExpanded = true;
   function setViewportHeight(data) {
     if (typeof data !== 'undefined') {
       isExpanded = !!data.is_expanded;
@@ -539,17 +544,17 @@
         viewportStableHeight = data.height;
       }
       receiveWebViewEvent('viewportChanged', {
-        isStateStable: !!data.is_state_stable
+        isStateStable: !!data.is_state_stable,
       });
     }
     var height, stable_height;
     if (viewportHeight !== false) {
-      height = (viewportHeight - bottomBarHeight) + 'px';
+      height = viewportHeight - bottomBarHeight + 'px';
     } else {
       height = bottomBarHeight ? 'calc(100vh - ' + bottomBarHeight + 'px)' : '100vh';
     }
     if (viewportStableHeight !== false) {
-      stable_height = (viewportStableHeight - bottomBarHeight) + 'px';
+      stable_height = viewportStableHeight - bottomBarHeight + 'px';
     } else {
       stable_height = bottomBarHeight ? 'calc(100vh - ' + bottomBarHeight + 'px)' : '100vh';
     }
@@ -557,7 +562,7 @@
     setCssProperty('viewport-stable-height', stable_height);
   }
 
-  var safeAreaInset = {top: 0, bottom: 0, left: 0, right: 0};
+  var safeAreaInset = { top: 0, bottom: 0, left: 0, right: 0 };
   function setSafeAreaInset(data) {
     if (typeof data !== 'undefined') {
       if (typeof data.top !== 'undefined') {
@@ -580,7 +585,7 @@
     setCssProperty('safe-area-inset-right', safeAreaInset.right + 'px');
   }
 
-  var contentSafeAreaInset = {top: 0, bottom: 0, left: 0, right: 0};
+  var contentSafeAreaInset = { top: 0, bottom: 0, left: 0, right: 0 };
   function setContentSafeAreaInset(data) {
     if (typeof data !== 'undefined') {
       if (typeof data.top !== 'undefined') {
@@ -610,7 +615,7 @@
       return;
     }
     isClosingConfirmationEnabled = !!need_confirmation;
-    WebView.postEvent('web_app_setup_closing_behavior', false, {need_confirmation: isClosingConfirmationEnabled});
+    WebView.postEvent('web_app_setup_closing_behavior', false, { need_confirmation: isClosingConfirmationEnabled });
   }
 
   var isVerticalSwipesEnabled = true;
@@ -620,7 +625,7 @@
       return;
     }
     isVerticalSwipesEnabled = !!enable_swipes;
-    WebView.postEvent('web_app_setup_swipe_behavior', false, {allow_vertical_swipe: isVerticalSwipesEnabled});
+    WebView.postEvent('web_app_setup_swipe_behavior', false, { allow_vertical_swipe: isVerticalSwipesEnabled });
   }
 
   function onFullscreenChanged(eventType, eventData) {
@@ -632,7 +637,7 @@
       setFullscreen(true);
     }
     receiveWebViewEvent('fullscreenFailed', {
-      error: eventData.error
+      error: eventData.error,
     });
   }
 
@@ -642,7 +647,7 @@
       return;
     }
     setOrientationLock(locked);
-    WebView.postEvent('web_app_toggle_orientation_lock', false, {locked: webAppIsOrientationLocked});
+    WebView.postEvent('web_app_toggle_orientation_lock', false, { locked: webAppIsOrientationLocked });
   }
 
   var homeScreenCallbacks = [];
@@ -659,7 +664,7 @@
       homeScreenCallbacks = [];
     }
     receiveWebViewEvent('homeScreenChecked', {
-      status: status
+      status: status,
     });
   }
 
@@ -682,7 +687,7 @@
         requestData.callback(false);
       }
       receiveWebViewEvent('shareMessageFailed', {
-        error: eventData.error
+        error: eventData.error,
       });
     }
   }
@@ -706,7 +711,7 @@
         requestData.callback(false);
       }
       receiveWebViewEvent('requestedChatFailed', {
-        error: eventData.error
+        error: eventData.error,
       });
     }
   }
@@ -730,7 +735,7 @@
         requestData.callback(false);
       }
       receiveWebViewEvent('emojiStatusFailed', {
-        error: eventData.error
+        error: eventData.error,
       });
     }
   }
@@ -743,7 +748,7 @@
         requestData.callback(eventData.status == 'allowed');
       }
       receiveWebViewEvent('emojiStatusAccessRequested', {
-        status: eventData.status
+        status: eventData.status,
       });
     }
   }
@@ -761,11 +766,10 @@
         popupData.callback(button_id);
       }
       receiveWebViewEvent('popupClosed', {
-        button_id: button_id
+        button_id: button_id,
       });
     }
   }
-
 
   function getHeaderColor() {
     if (webAppHeaderColorKey == 'secondary_bg_color') {
@@ -781,15 +785,14 @@
       return;
     }
     if (!versionAtLeast('6.9')) {
-      if (themeParams.bg_color &&
-          themeParams.bg_color == color) {
+      if (themeParams.bg_color && themeParams.bg_color == color) {
         color = 'bg_color';
-      } else if (themeParams.secondary_bg_color &&
-                 themeParams.secondary_bg_color == color) {
+      } else if (themeParams.secondary_bg_color && themeParams.secondary_bg_color == color) {
         color = 'secondary_bg_color';
       }
     }
-    var head_color = null, color_key = null;
+    var head_color = null,
+      color_key = null;
     if (color == 'bg_color' || color == 'secondary_bg_color') {
       color_key = color;
     } else if (versionAtLeast('6.9')) {
@@ -799,26 +802,27 @@
         throw Error('WebAppHeaderColorInvalid');
       }
     }
-    if (!versionAtLeast('6.9') &&
-        color_key != 'bg_color' &&
-        color_key != 'secondary_bg_color') {
-      console.error('[Telegram.WebApp] Header color key should be one of Telegram.WebApp.themeParams.bg_color, Telegram.WebApp.themeParams.secondary_bg_color, \'bg_color\', \'secondary_bg_color\'', color);
+    if (!versionAtLeast('6.9') && color_key != 'bg_color' && color_key != 'secondary_bg_color') {
+      console.error(
+        "[Telegram.WebApp] Header color key should be one of Telegram.WebApp.themeParams.bg_color, Telegram.WebApp.themeParams.secondary_bg_color, 'bg_color', 'secondary_bg_color'",
+        color,
+      );
       throw Error('WebAppHeaderColorKeyInvalid');
     }
     webAppHeaderColorKey = color_key;
     webAppHeaderColor = head_color;
     updateHeaderColor();
   }
-  var appHeaderColorKey = null, appHeaderColor = null;
+  var appHeaderColorKey = null,
+    appHeaderColor = null;
   function updateHeaderColor() {
-    if (appHeaderColorKey != webAppHeaderColorKey ||
-        appHeaderColor != webAppHeaderColor) {
+    if (appHeaderColorKey != webAppHeaderColorKey || appHeaderColor != webAppHeaderColor) {
       appHeaderColorKey = webAppHeaderColorKey;
       appHeaderColor = webAppHeaderColor;
       if (appHeaderColor) {
-        WebView.postEvent('web_app_set_header_color', false, {color: webAppHeaderColor});
+        WebView.postEvent('web_app_set_header_color', false, { color: webAppHeaderColor });
       } else {
-        WebView.postEvent('web_app_set_header_color', false, {color_key: webAppHeaderColorKey});
+        WebView.postEvent('web_app_set_header_color', false, { color_key: webAppHeaderColorKey });
       }
     }
   }
@@ -854,7 +858,7 @@
     var color = getBackgroundColor();
     if (appBackgroundColor != color) {
       appBackgroundColor = color;
-      WebView.postEvent('web_app_set_background_color', false, {color: color});
+      WebView.postEvent('web_app_set_background_color', false, { color: color });
     }
   }
 
@@ -893,25 +897,24 @@
     var color = getBottomBarColor();
     if (appBottomBarColor != color) {
       appBottomBarColor = color;
-      WebView.postEvent('web_app_set_bottom_bar_color', false, {color: color});
+      WebView.postEvent('web_app_set_bottom_bar_color', false, { color: color });
     }
     if (initParams.tgWebAppDebug) {
       updateDebugBottomBar();
     }
   }
 
-
   function parseColorToHex(color) {
     color += '';
     var match;
-    if (match = /^\s*#([0-9a-f]{6})\s*$/i.exec(color)) {
+    if ((match = /^\s*#([0-9a-f]{6})\s*$/i.exec(color))) {
       return '#' + match[1].toLowerCase();
-    }
-    else if (match = /^\s*#([0-9a-f])([0-9a-f])([0-9a-f])\s*$/i.exec(color)) {
+    } else if ((match = /^\s*#([0-9a-f])([0-9a-f])([0-9a-f])\s*$/i.exec(color))) {
       return ('#' + match[1] + match[1] + match[2] + match[2] + match[3] + match[3]).toLowerCase();
-    }
-    else if (match = /^\s*rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+\.{0,1}\d*))?\)\s*$/.exec(color)) {
-      var r = parseInt(match[1]), g = parseInt(match[2]), b = parseInt(match[3]);
+    } else if ((match = /^\s*rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+\.{0,1}\d*))?\)\s*$/.exec(color))) {
+      var r = parseInt(match[1]),
+        g = parseInt(match[2]),
+        b = parseInt(match[3]);
       r = (r < 16 ? '0' : '') + r.toString(16);
       g = (g < 16 ? '0' : '') + g.toString(16);
       b = (b < 16 ? '0' : '') + b.toString(16);
@@ -937,7 +940,10 @@
     if (typeof v2 !== 'string') v2 = '';
     v1 = v1.replace(/^\s+|\s+$/g, '').split('.');
     v2 = v2.replace(/^\s+|\s+$/g, '').split('.');
-    var a = Math.max(v1.length, v2.length), i, p1, p2;
+    var a = Math.max(v1.length, v2.length),
+      i,
+      p1,
+      p2;
     for (i = 0; i < a; i++) {
       p1 = parseInt(v1[i]) || 0;
       p2 = parseInt(v2[i]) || 0;
@@ -954,26 +960,32 @@
 
   function byteLength(str) {
     if (window.Blob) {
-      try { return new Blob([str]).size; } catch (e) {}
+      try {
+        return new Blob([str]).size;
+      } catch (e) {}
     }
     var s = str.length;
-    for (var i=str.length-1; i>=0; i--) {
+    for (var i = str.length - 1; i >= 0; i--) {
       var code = str.charCodeAt(i);
       if (code > 0x7f && code <= 0x7ff) s++;
-      else if (code > 0x7ff && code <= 0xffff) s+=2;
+      else if (code > 0x7ff && code <= 0xffff) s += 2;
       if (code >= 0xdc00 && code <= 0xdfff) i--;
     }
     return s;
   }
 
-  var BackButton = (function() {
+  var BackButton = (function () {
     var isVisible = false;
 
     var backButton = {};
     Object.defineProperty(backButton, 'isVisible', {
-      set: function(val){ setParams({is_visible: val}); },
-      get: function(){ return isVisible; },
-      enumerable: true
+      set: function (val) {
+        setParams({ is_visible: val });
+      },
+      get: function () {
+        return isVisible;
+      },
+      enumerable: true,
     });
 
     var curButtonState = null;
@@ -985,7 +997,7 @@
     }
 
     function buttonParams() {
-      return {is_visible: isVisible};
+      return { is_visible: isVisible };
     }
 
     function buttonState(btn_params) {
@@ -1024,28 +1036,30 @@
       return backButton;
     }
 
-    backButton.onClick = function(callback) {
+    backButton.onClick = function (callback) {
       if (buttonCheckVersion()) {
         onWebViewEvent('backButtonClicked', callback);
       }
       return backButton;
     };
-    backButton.offClick = function(callback) {
+    backButton.offClick = function (callback) {
       if (buttonCheckVersion()) {
         offWebViewEvent('backButtonClicked', callback);
       }
       return backButton;
     };
-    backButton.show = function() {
-      return setParams({is_visible: true});
+    backButton.show = function () {
+      return setParams({ is_visible: true });
     };
-    backButton.hide = function() {
-      return setParams({is_visible: false});
+    backButton.hide = function () {
+      return setParams({ is_visible: false });
     };
     return backButton;
   })();
 
-  var debugBottomBar = null, debugBottomBarBtns = {}, bottomBarHeight = 0;
+  var debugBottomBar = null,
+    debugBottomBarBtns = {},
+    bottomBarHeight = 0;
   if (initParams.tgWebAppDebug) {
     debugBottomBar = document.createElement('tg-bottom-bar');
     var debugBottomBarStyle = {
@@ -1062,7 +1076,7 @@
       padding: '7px',
       textAlign: 'center',
       boxSizing: 'border-box',
-      zIndex: '10000'
+      zIndex: '10000',
     };
     for (var k in debugBottomBarStyle) {
       debugBottomBar.style[k] = debugBottomBarStyle[k];
@@ -1072,7 +1086,8 @@
       document.body.appendChild(debugBottomBar);
     });
     var animStyle = document.createElement('style');
-    animStyle.innerHTML = 'tg-bottom-button.shine { position: relative; overflow: hidden; } tg-bottom-button.shine:before { content:""; position: absolute; top: 0; width: 100%; height: 100%; background: linear-gradient(120deg, transparent, rgba(255, 255, 255, .2), transparent); animation: tg-bottom-button-shine 5s ease-in-out infinite; } @-webkit-keyframes tg-bottom-button-shine { 0% {left: -100%;} 12%,100% {left: 100%}} @keyframes tg-bottom-button-shine { 0% {left: -100%;} 12%,100% {left: 100%}}';
+    animStyle.innerHTML =
+      'tg-bottom-button.shine { position: relative; overflow: hidden; } tg-bottom-button.shine:before { content:""; position: absolute; top: 0; width: 100%; height: 100%; background: linear-gradient(120deg, transparent, rgba(255, 255, 255, .2), transparent); animation: tg-bottom-button-shine 5s ease-in-out infinite; } @-webkit-keyframes tg-bottom-button-shine { 0% {left: -100%;} 12%,100% {left: 100%}} @keyframes tg-bottom-button-shine { 0% {left: -100%;} 12%,100% {left: 100%}}';
     debugBottomBar.appendChild(animStyle);
   }
   function updateDebugBottomBar() {
@@ -1106,23 +1121,30 @@
     setViewportHeight();
   }
 
-
-  var BottomButtonConstructor = function(type) {
-    var isMainButton = (type == 'main');
+  var BottomButtonConstructor = function (type) {
+    var isMainButton = type == 'main';
     if (isMainButton) {
       var setupFnName = 'web_app_setup_main_button';
       var tgEventName = 'main_button_pressed';
       var webViewEventName = 'mainButtonClicked';
       var buttonTextDefault = 'Continue';
-      var buttonColorDefault = function(){ return themeParams.button_color || '#2481cc'; };
-      var buttonTextColorDefault = function(){ return themeParams.button_text_color || '#ffffff'; };
+      var buttonColorDefault = function () {
+        return themeParams.button_color || '#2481cc';
+      };
+      var buttonTextColorDefault = function () {
+        return themeParams.button_text_color || '#ffffff';
+      };
     } else {
       var setupFnName = 'web_app_setup_secondary_button';
       var tgEventName = 'secondary_button_pressed';
       var webViewEventName = 'secondaryButtonClicked';
       var buttonTextDefault = 'Cancel';
-      var buttonColorDefault = function(){ return getBottomBarColor(); };
-      var buttonTextColorDefault = function(){ return themeParams.button_color || '#2481cc'; };
+      var buttonColorDefault = function () {
+        return getBottomBarColor();
+      };
+      var buttonTextColorDefault = function () {
+        return themeParams.button_color || '#2481cc';
+      };
     }
 
     var isVisible = false;
@@ -1138,53 +1160,89 @@
 
     var bottomButton = {};
     Object.defineProperty(bottomButton, 'type', {
-      get: function(){ return buttonType; },
-      enumerable: true
+      get: function () {
+        return buttonType;
+      },
+      enumerable: true,
     });
     Object.defineProperty(bottomButton, 'iconCustomEmojiId', {
-      set: function(val){ bottomButton.setParams({icon_custom_emoji_id: val}); },
-      get: function(){ return iconCustomEmojiId; },
-      enumerable: true
+      set: function (val) {
+        bottomButton.setParams({ icon_custom_emoji_id: val });
+      },
+      get: function () {
+        return iconCustomEmojiId;
+      },
+      enumerable: true,
     });
     Object.defineProperty(bottomButton, 'text', {
-      set: function(val){ bottomButton.setParams({text: val}); },
-      get: function(){ return buttonText; },
-      enumerable: true
+      set: function (val) {
+        bottomButton.setParams({ text: val });
+      },
+      get: function () {
+        return buttonText;
+      },
+      enumerable: true,
     });
     Object.defineProperty(bottomButton, 'color', {
-      set: function(val){ bottomButton.setParams({color: val}); },
-      get: function(){ return buttonColor || buttonColorDefault(); },
-      enumerable: true
+      set: function (val) {
+        bottomButton.setParams({ color: val });
+      },
+      get: function () {
+        return buttonColor || buttonColorDefault();
+      },
+      enumerable: true,
     });
     Object.defineProperty(bottomButton, 'textColor', {
-      set: function(val){ bottomButton.setParams({text_color: val}); },
-      get: function(){ return buttonTextColor || buttonTextColorDefault(); },
-      enumerable: true
+      set: function (val) {
+        bottomButton.setParams({ text_color: val });
+      },
+      get: function () {
+        return buttonTextColor || buttonTextColorDefault();
+      },
+      enumerable: true,
     });
     Object.defineProperty(bottomButton, 'isVisible', {
-      set: function(val){ bottomButton.setParams({is_visible: val}); },
-      get: function(){ return isVisible; },
-      enumerable: true
+      set: function (val) {
+        bottomButton.setParams({ is_visible: val });
+      },
+      get: function () {
+        return isVisible;
+      },
+      enumerable: true,
     });
     Object.defineProperty(bottomButton, 'isProgressVisible', {
-      get: function(){ return isProgressVisible; },
-      enumerable: true
+      get: function () {
+        return isProgressVisible;
+      },
+      enumerable: true,
     });
     Object.defineProperty(bottomButton, 'isActive', {
-      set: function(val){ bottomButton.setParams({is_active: val}); },
-      get: function(){ return isActive; },
-      enumerable: true
+      set: function (val) {
+        bottomButton.setParams({ is_active: val });
+      },
+      get: function () {
+        return isActive;
+      },
+      enumerable: true,
     });
     Object.defineProperty(bottomButton, 'hasShineEffect', {
-      set: function(val){ bottomButton.setParams({has_shine_effect: val}); },
-      get: function(){ return hasShineEffect; },
-      enumerable: true
+      set: function (val) {
+        bottomButton.setParams({ has_shine_effect: val });
+      },
+      get: function () {
+        return hasShineEffect;
+      },
+      enumerable: true,
     });
     if (!isMainButton) {
       Object.defineProperty(bottomButton, 'position', {
-        set: function(val){ bottomButton.setParams({position: val}); },
-        get: function(){ return buttonPosition; },
-        enumerable: true
+        set: function (val) {
+          bottomButton.setParams({ position: val });
+        },
+        get: function () {
+          return buttonPosition;
+        },
+        enumerable: true,
       });
     }
 
@@ -1203,7 +1261,7 @@
         background: 'no-repeat right center',
         padding: '13px 15px',
         textAlign: 'center',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
       };
       for (var k in debugBtnStyle) {
         debugBtn.style[k] = debugBtnStyle[k];
@@ -1232,14 +1290,14 @@
           text: buttonText,
           color: color,
           text_color: text_color,
-          has_shine_effect: hasShineEffect && isActive && !isProgressVisible
+          has_shine_effect: hasShineEffect && isActive && !isProgressVisible,
         };
         if (!isMainButton) {
           params.position = buttonPosition;
         }
       } else {
         var params = {
-          is_visible: false
+          is_visible: false,
         };
       }
       return params;
@@ -1274,7 +1332,15 @@
         debugBtn.disabled = !btn_params.is_active;
         debugBtn.innerText = btn_params.text;
         debugBtn.className = btn_params.has_shine_effect ? 'shine' : '';
-        debugBtn.style.backgroundImage = btn_params.is_progress_visible ? "url('data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewport="0 0 48 48" width="48px" height="48px"><circle cx="50%" cy="50%" stroke="' + btn_params.text_color + '" stroke-width="2.25" stroke-linecap="round" fill="none" stroke-dashoffset="106" r="9" stroke-dasharray="56.52" rotate="-90"><animate attributeName="stroke-dashoffset" attributeType="XML" dur="360s" from="0" to="12500" repeatCount="indefinite"></animate><animateTransform attributeName="transform" attributeType="XML" type="rotate" dur="1s" from="-90 24 24" to="630 24 24" repeatCount="indefinite"></animateTransform></circle></svg>') + "')" : 'none';
+        debugBtn.style.backgroundImage = btn_params.is_progress_visible
+          ? "url('data:image/svg+xml," +
+            encodeURIComponent(
+              '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewport="0 0 48 48" width="48px" height="48px"><circle cx="50%" cy="50%" stroke="' +
+                btn_params.text_color +
+                '" stroke-width="2.25" stroke-linecap="round" fill="none" stroke-dashoffset="106" r="9" stroke-dasharray="56.52" rotate="-90"><animate attributeName="stroke-dashoffset" attributeType="XML" dur="360s" from="0" to="12500" repeatCount="indefinite"></animate><animateTransform attributeName="transform" attributeType="XML" type="rotate" dur="1s" from="-90 24 24" to="630 24 24" repeatCount="indefinite"></animateTransform></circle></svg>',
+            ) +
+            "')"
+          : 'none';
         debugBtn.style.backgroundColor = btn_params.color;
         debugBtn.style.color = btn_params.text_color;
       } else {
@@ -1308,8 +1374,7 @@
         buttonText = text;
       }
       if (typeof params.color !== 'undefined') {
-        if (params.color === false ||
-            params.color === null) {
+        if (params.color === false || params.color === null) {
           buttonColor = false;
         } else {
           var color = parseColorToHex(params.color);
@@ -1321,8 +1386,7 @@
         }
       }
       if (typeof params.text_color !== 'undefined') {
-        if (params.text_color === false ||
-            params.text_color === null) {
+        if (params.text_color === false || params.text_color === null) {
           buttonTextColor = false;
         } else {
           var text_color = parseColorToHex(params.text_color);
@@ -1334,8 +1398,7 @@
         }
       }
       if (typeof params.is_visible !== 'undefined') {
-        if (params.is_visible &&
-            !bottomButton.text.length) {
+        if (params.is_visible && !bottomButton.text.length) {
           console.error('[Telegram.WebApp] Bottom button text is required');
           throw Error('WebAppBottomButtonParamInvalid');
         }
@@ -1345,8 +1408,12 @@
         hasShineEffect = !!params.has_shine_effect;
       }
       if (!isMainButton && typeof params.position !== 'undefined') {
-        if (params.position != 'left' && params.position != 'right' &&
-            params.position != 'top' && params.position != 'bottom') {
+        if (
+          params.position != 'left' &&
+          params.position != 'right' &&
+          params.position != 'top' &&
+          params.position != 'bottom'
+        ) {
           console.error('[Telegram.WebApp] Bottom button posiition is invalid', params.position);
           throw Error('WebAppBottomButtonParamInvalid');
         }
@@ -1359,57 +1426,61 @@
       return bottomButton;
     }
 
-    bottomButton.setText = function(text) {
-      return bottomButton.setParams({text: text});
+    bottomButton.setText = function (text) {
+      return bottomButton.setParams({ text: text });
     };
-    bottomButton.onClick = function(callback) {
+    bottomButton.onClick = function (callback) {
       onWebViewEvent(webViewEventName, callback);
       return bottomButton;
     };
-    bottomButton.offClick = function(callback) {
+    bottomButton.offClick = function (callback) {
       offWebViewEvent(webViewEventName, callback);
       return bottomButton;
     };
-    bottomButton.show = function() {
-      return bottomButton.setParams({is_visible: true});
+    bottomButton.show = function () {
+      return bottomButton.setParams({ is_visible: true });
     };
-    bottomButton.hide = function() {
-      return bottomButton.setParams({is_visible: false});
+    bottomButton.hide = function () {
+      return bottomButton.setParams({ is_visible: false });
     };
-    bottomButton.enable = function() {
-      return bottomButton.setParams({is_active: true});
+    bottomButton.enable = function () {
+      return bottomButton.setParams({ is_active: true });
     };
-    bottomButton.disable = function() {
-      return bottomButton.setParams({is_active: false});
+    bottomButton.disable = function () {
+      return bottomButton.setParams({ is_active: false });
     };
-    bottomButton.showProgress = function(leaveActive) {
+    bottomButton.showProgress = function (leaveActive) {
       isActive = !!leaveActive;
       isProgressVisible = true;
       updateButton();
       return bottomButton;
     };
-    bottomButton.hideProgress = function() {
+    bottomButton.hideProgress = function () {
       if (!bottomButton.isActive) {
         isActive = true;
       }
       isProgressVisible = false;
       updateButton();
       return bottomButton;
-    }
+    };
     bottomButton.setParams = setParams;
     return bottomButton;
   };
   var MainButton = BottomButtonConstructor('main');
   var SecondaryButton = BottomButtonConstructor('secondary');
 
-  var SettingsButton = (function() {
+  var SettingsButton = (function () {
     var isVisible = false;
 
     var settingsButton = {};
     Object.defineProperty(settingsButton, 'isVisible', {
-      set: function(val){ setParams({is_visible: val}); },
-      get: function(){ return isVisible; },
-      enumerable: true
+      set: function (val) {
+        setParams({ is_visible: val });
+      },
+      get: function () {
+        return isVisible;
+      },
+      enumerable: true,
     });
 
     var curButtonState = null;
@@ -1421,7 +1492,7 @@
     }
 
     function buttonParams() {
-      return {is_visible: isVisible};
+      return { is_visible: isVisible };
     }
 
     function buttonState(btn_params) {
@@ -1460,28 +1531,28 @@
       return settingsButton;
     }
 
-    settingsButton.onClick = function(callback) {
+    settingsButton.onClick = function (callback) {
       if (buttonCheckVersion()) {
         onWebViewEvent('settingsButtonClicked', callback);
       }
       return settingsButton;
     };
-    settingsButton.offClick = function(callback) {
+    settingsButton.offClick = function (callback) {
       if (buttonCheckVersion()) {
         offWebViewEvent('settingsButtonClicked', callback);
       }
       return settingsButton;
     };
-    settingsButton.show = function() {
-      return setParams({is_visible: true});
+    settingsButton.show = function () {
+      return setParams({ is_visible: true });
     };
-    settingsButton.hide = function() {
-      return setParams({is_visible: false});
+    settingsButton.hide = function () {
+      return setParams({ is_visible: false });
     };
     return settingsButton;
   })();
 
-  var HapticFeedback = (function() {
+  var HapticFeedback = (function () {
     var hapticFeedback = {};
 
     function triggerFeedback(params) {
@@ -1490,18 +1561,22 @@
         return hapticFeedback;
       }
       if (params.type == 'impact') {
-        if (params.impact_style != 'light' &&
-            params.impact_style != 'medium' &&
-            params.impact_style != 'heavy' &&
-            params.impact_style != 'rigid' &&
-            params.impact_style != 'soft') {
+        if (
+          params.impact_style != 'light' &&
+          params.impact_style != 'medium' &&
+          params.impact_style != 'heavy' &&
+          params.impact_style != 'rigid' &&
+          params.impact_style != 'soft'
+        ) {
           console.error('[Telegram.WebApp] Haptic impact style is invalid', params.impact_style);
           throw Error('WebAppHapticImpactStyleInvalid');
         }
       } else if (params.type == 'notification') {
-        if (params.notification_type != 'error' &&
-            params.notification_type != 'success' &&
-            params.notification_type != 'warning') {
+        if (
+          params.notification_type != 'error' &&
+          params.notification_type != 'success' &&
+          params.notification_type != 'warning'
+        ) {
           console.error('[Telegram.WebApp] Haptic notification type is invalid', params.notification_type);
           throw Error('WebAppHapticNotificationTypeInvalid');
         }
@@ -1515,19 +1590,19 @@
       return hapticFeedback;
     }
 
-    hapticFeedback.impactOccurred = function(style) {
-      return triggerFeedback({type: 'impact', impact_style: style});
+    hapticFeedback.impactOccurred = function (style) {
+      return triggerFeedback({ type: 'impact', impact_style: style });
     };
-    hapticFeedback.notificationOccurred = function(type) {
-      return triggerFeedback({type: 'notification', notification_type: type});
+    hapticFeedback.notificationOccurred = function (type) {
+      return triggerFeedback({ type: 'notification', notification_type: type });
     };
-    hapticFeedback.selectionChanged = function() {
-      return triggerFeedback({type: 'selection_change'});
+    hapticFeedback.selectionChanged = function () {
+      return triggerFeedback({ type: 'selection_change' });
     };
     return hapticFeedback;
   })();
 
-  var CloudStorage = (function() {
+  var CloudStorage = (function () {
     var cloudStorage = {};
 
     function invokeStorageMethod(method, params, callback) {
@@ -1539,43 +1614,49 @@
       return cloudStorage;
     }
 
-    cloudStorage.setItem = function(key, value, callback) {
-      return invokeStorageMethod('saveStorageValue', {key: key, value: value}, callback);
+    cloudStorage.setItem = function (key, value, callback) {
+      return invokeStorageMethod('saveStorageValue', { key: key, value: value }, callback);
     };
-    cloudStorage.getItem = function(key, callback) {
-      return cloudStorage.getItems([key], callback ? function(err, res) {
-        if (err) callback(err);
-        else callback(null, res[key]);
-      } : null);
+    cloudStorage.getItem = function (key, callback) {
+      return cloudStorage.getItems(
+        [key],
+        callback
+          ? function (err, res) {
+              if (err) callback(err);
+              else callback(null, res[key]);
+            }
+          : null,
+      );
     };
-    cloudStorage.getItems = function(keys, callback) {
-      return invokeStorageMethod('getStorageValues', {keys: keys}, callback);
+    cloudStorage.getItems = function (keys, callback) {
+      return invokeStorageMethod('getStorageValues', { keys: keys }, callback);
     };
-    cloudStorage.removeItem = function(key, callback) {
+    cloudStorage.removeItem = function (key, callback) {
       return cloudStorage.removeItems([key], callback);
     };
-    cloudStorage.removeItems = function(keys, callback) {
-      return invokeStorageMethod('deleteStorageValues', {keys: keys}, callback);
+    cloudStorage.removeItems = function (keys, callback) {
+      return invokeStorageMethod('deleteStorageValues', { keys: keys }, callback);
     };
-    cloudStorage.getKeys = function(callback) {
+    cloudStorage.getKeys = function (callback) {
       return invokeStorageMethod('getStorageKeys', {}, callback);
     };
     return cloudStorage;
   })();
 
-  var DeviceStorage = (function() {
+  var DeviceStorage = (function () {
     var deviceStorage = {};
 
-    WebView.onEvent('device_storage_key_saved',  onDeviceStorageEvent);
+    WebView.onEvent('device_storage_key_saved', onDeviceStorageEvent);
     WebView.onEvent('device_storage_key_received', onDeviceStorageEvent);
-    WebView.onEvent('device_storage_cleared',  onDeviceStorageEvent);
-    WebView.onEvent('device_storage_failed',  onDeviceStorageEvent);
+    WebView.onEvent('device_storage_cleared', onDeviceStorageEvent);
+    WebView.onEvent('device_storage_failed', onDeviceStorageEvent);
 
     function onDeviceStorageEvent(eventType, eventData) {
       if (eventData.req_id && webAppCallbacks[eventData.req_id]) {
         var requestData = webAppCallbacks[eventData.req_id];
         delete webAppCallbacks[eventData.req_id];
-        var res = null, err = null;
+        var res = null,
+          err = null;
         if (eventType == 'device_storage_failed') {
           err = eventData.error || 'UNKNOWN_ERROR';
         } else if (eventType == 'device_storage_key_received') {
@@ -1595,46 +1676,48 @@
         throw Error('WebAppMethodUnsupported');
       }
       var req_id = generateCallbackId(16);
-      var req_params = {req_id: req_id};
+      var req_params = { req_id: req_id };
       for (var k in params) {
         req_params[k] = params[k];
       }
       webAppCallbacks[req_id] = {
-        callback: callback
+        callback: callback,
       };
       WebView.postEvent(method, false, req_params);
       return deviceStorage;
     }
 
-    deviceStorage.setItem = function(key, value, callback) {
-      return invokeStorageMethod('web_app_device_storage_save_key', {key: key, value: value}, callback);
+    deviceStorage.setItem = function (key, value, callback) {
+      return invokeStorageMethod('web_app_device_storage_save_key', { key: key, value: value }, callback);
     };
-    deviceStorage.getItem = function(key, callback) {
-      return invokeStorageMethod('web_app_device_storage_get_key', {key: key}, callback);
+    deviceStorage.getItem = function (key, callback) {
+      return invokeStorageMethod('web_app_device_storage_get_key', { key: key }, callback);
     };
-    deviceStorage.removeItem = function(key, callback) {
-      return invokeStorageMethod('web_app_device_storage_save_key', {key: key, value: null}, callback);
+    deviceStorage.removeItem = function (key, callback) {
+      return invokeStorageMethod('web_app_device_storage_save_key', { key: key, value: null }, callback);
     };
-    deviceStorage.clear = function(callback) {
+    deviceStorage.clear = function (callback) {
       return invokeStorageMethod('web_app_device_storage_clear', {}, callback);
     };
     return deviceStorage;
   })();
 
-  var SecureStorage = (function() {
+  var SecureStorage = (function () {
     var secureStorage = {};
 
-    WebView.onEvent('secure_storage_key_saved',  onSecureStorageEvent);
+    WebView.onEvent('secure_storage_key_saved', onSecureStorageEvent);
     WebView.onEvent('secure_storage_key_received', onSecureStorageEvent);
     WebView.onEvent('secure_storage_key_restored', onSecureStorageEvent);
-    WebView.onEvent('secure_storage_cleared',  onSecureStorageEvent);
-    WebView.onEvent('secure_storage_failed',  onSecureStorageEvent);
+    WebView.onEvent('secure_storage_cleared', onSecureStorageEvent);
+    WebView.onEvent('secure_storage_failed', onSecureStorageEvent);
 
     function onSecureStorageEvent(eventType, eventData) {
       if (eventData.req_id && webAppCallbacks[eventData.req_id]) {
         var requestData = webAppCallbacks[eventData.req_id];
         delete webAppCallbacks[eventData.req_id];
-        var res = null, err = null, can_restore = null;
+        var res = null,
+          err = null,
+          can_restore = null;
         if (eventType == 'secure_storage_failed') {
           err = eventData.error || 'UNKNOWN_ERROR';
         } else if (eventType == 'secure_storage_key_received') {
@@ -1659,36 +1742,36 @@
         throw Error('WebAppMethodUnsupported');
       }
       var req_id = generateCallbackId(16);
-      var req_params = {req_id: req_id};
+      var req_params = { req_id: req_id };
       for (var k in params) {
         req_params[k] = params[k];
       }
       webAppCallbacks[req_id] = {
-        callback: callback
+        callback: callback,
       };
       WebView.postEvent(method, false, req_params);
       return secureStorage;
     }
 
-    secureStorage.setItem = function(key, value, callback) {
-      return invokeStorageMethod('web_app_secure_storage_save_key', {key: key, value: value}, callback);
+    secureStorage.setItem = function (key, value, callback) {
+      return invokeStorageMethod('web_app_secure_storage_save_key', { key: key, value: value }, callback);
     };
-    secureStorage.getItem = function(key, callback) {
-      return invokeStorageMethod('web_app_secure_storage_get_key', {key: key}, callback);
+    secureStorage.getItem = function (key, callback) {
+      return invokeStorageMethod('web_app_secure_storage_get_key', { key: key }, callback);
     };
-    secureStorage.restoreItem = function(key, callback) {
-      return invokeStorageMethod('web_app_secure_storage_restore_key', {key: key}, callback);
+    secureStorage.restoreItem = function (key, callback) {
+      return invokeStorageMethod('web_app_secure_storage_restore_key', { key: key }, callback);
     };
-    secureStorage.removeItem = function(key, callback) {
-      return invokeStorageMethod('web_app_secure_storage_save_key', {key: key, value: null}, callback);
+    secureStorage.removeItem = function (key, callback) {
+      return invokeStorageMethod('web_app_secure_storage_save_key', { key: key, value: null }, callback);
     };
-    secureStorage.clear = function(callback) {
+    secureStorage.clear = function (callback) {
       return invokeStorageMethod('web_app_secure_storage_clear', {}, callback);
     };
     return secureStorage;
   })();
 
-  var BiometricManager = (function() {
+  var BiometricManager = (function () {
     var isInited = false;
     var isBiometricAvailable = false;
     var biometricType = 'unknown';
@@ -1699,42 +1782,56 @@
 
     var biometricManager = {};
     Object.defineProperty(biometricManager, 'isInited', {
-      get: function(){ return isInited; },
-      enumerable: true
+      get: function () {
+        return isInited;
+      },
+      enumerable: true,
     });
     Object.defineProperty(biometricManager, 'isBiometricAvailable', {
-      get: function(){ return isInited && isBiometricAvailable; },
-      enumerable: true
+      get: function () {
+        return isInited && isBiometricAvailable;
+      },
+      enumerable: true,
     });
     Object.defineProperty(biometricManager, 'biometricType', {
-      get: function(){ return biometricType || 'unknown'; },
-      enumerable: true
+      get: function () {
+        return biometricType || 'unknown';
+      },
+      enumerable: true,
     });
     Object.defineProperty(biometricManager, 'isAccessRequested', {
-      get: function(){ return isAccessRequested; },
-      enumerable: true
+      get: function () {
+        return isAccessRequested;
+      },
+      enumerable: true,
     });
     Object.defineProperty(biometricManager, 'isAccessGranted', {
-      get: function(){ return isAccessRequested && isAccessGranted; },
-      enumerable: true
+      get: function () {
+        return isAccessRequested && isAccessGranted;
+      },
+      enumerable: true,
     });
     Object.defineProperty(biometricManager, 'isBiometricTokenSaved', {
-      get: function(){ return isBiometricTokenSaved; },
-      enumerable: true
+      get: function () {
+        return isBiometricTokenSaved;
+      },
+      enumerable: true,
     });
     Object.defineProperty(biometricManager, 'deviceId', {
-      get: function(){ return deviceId || ''; },
-      enumerable: true
+      get: function () {
+        return deviceId || '';
+      },
+      enumerable: true,
     });
 
-    var initRequestState = {callbacks: []};
+    var initRequestState = { callbacks: [] };
     var accessRequestState = false;
     var authRequestState = false;
     var tokenRequestState = false;
 
-    WebView.onEvent('biometry_info_received',  onBiometryInfoReceived);
+    WebView.onEvent('biometry_info_received', onBiometryInfoReceived);
     WebView.onEvent('biometry_auth_requested', onBiometryAuthRequested);
-    WebView.onEvent('biometry_token_updated',  onBiometryTokenUpdated);
+    WebView.onEvent('biometry_token_updated', onBiometryTokenUpdated);
 
     function onBiometryInfoReceived(eventType, eventData) {
       isInited = true;
@@ -1776,8 +1873,8 @@
       receiveWebViewEvent('biometricManagerUpdated');
     }
     function onBiometryAuthRequested(eventType, eventData) {
-      var isAuthenticated = (eventData.status == 'authorized'),
-          biometricToken = eventData.token || '';
+      var isAuthenticated = eventData.status == 'authorized',
+        biometricToken = eventData.token || '';
       if (authRequestState) {
         var state = authRequestState;
         authRequestState = false;
@@ -1785,22 +1882,25 @@
           state.callback(isAuthenticated, isAuthenticated ? biometricToken : null);
         }
       }
-      receiveWebViewEvent('biometricAuthRequested', isAuthenticated ? {
-        isAuthenticated: true,
-        biometricToken: biometricToken
-      } : {
-        isAuthenticated: false
-      });
+      receiveWebViewEvent(
+        'biometricAuthRequested',
+        isAuthenticated
+          ? {
+              isAuthenticated: true,
+              biometricToken: biometricToken,
+            }
+          : {
+              isAuthenticated: false,
+            },
+      );
     }
     function onBiometryTokenUpdated(eventType, eventData) {
       var applied = false;
-      if (isBiometricAvailable &&
-          isAccessRequested) {
+      if (isBiometricAvailable && isAccessRequested) {
         if (eventData.status == 'updated') {
           isBiometricTokenSaved = true;
           applied = true;
-        }
-        else if (eventData.status == 'removed') {
+        } else if (eventData.status == 'removed') {
           isBiometricTokenSaved = false;
           applied = true;
         }
@@ -1813,7 +1913,7 @@
         }
       }
       receiveWebViewEvent('biometricTokenUpdated', {
-        isUpdated: applied
+        isUpdated: applied,
       });
     }
 
@@ -1833,7 +1933,7 @@
       return true;
     }
 
-    biometricManager.init = function(callback) {
+    biometricManager.init = function (callback) {
       if (!checkVersion()) {
         return biometricManager;
       }
@@ -1846,7 +1946,7 @@
       WebView.postEvent('web_app_biometry_get_info', false);
       return biometricManager;
     };
-    biometricManager.requestAccess = function(params, callback) {
+    biometricManager.requestAccess = function (params, callback) {
       if (!checkVersion()) {
         return biometricManager;
       }
@@ -1872,12 +1972,12 @@
       }
 
       accessRequestState = {
-        callback: callback
+        callback: callback,
       };
       WebView.postEvent('web_app_biometry_request_access', false, popup_params);
       return biometricManager;
     };
-    biometricManager.authenticate = function(params, callback) {
+    biometricManager.authenticate = function (params, callback) {
       if (!checkVersion()) {
         return biometricManager;
       }
@@ -1907,12 +2007,12 @@
       }
 
       authRequestState = {
-        callback: callback
+        callback: callback,
       };
       WebView.postEvent('web_app_biometry_request_auth', false, popup_params);
       return biometricManager;
     };
-    biometricManager.updateBiometricToken = function(token, callback) {
+    biometricManager.updateBiometricToken = function (token, callback) {
       if (!checkVersion()) {
         return biometricManager;
       }
@@ -1935,12 +2035,12 @@
         throw Error('WebAppBiometricManagerTokenUpdateRequested');
       }
       tokenRequestState = {
-        callback: callback
+        callback: callback,
       };
-      WebView.postEvent('web_app_biometry_update_token', false, {token: token});
+      WebView.postEvent('web_app_biometry_update_token', false, { token: token });
       return biometricManager;
     };
-    biometricManager.openSettings = function() {
+    biometricManager.openSettings = function () {
       if (!checkVersion()) {
         return biometricManager;
       }
@@ -1963,7 +2063,7 @@
     return biometricManager;
   })();
 
-  var LocationManager = (function() {
+  var LocationManager = (function () {
     var isInited = false;
     var isLocationAvailable = false;
     var isAccessRequested = false;
@@ -1971,26 +2071,34 @@
 
     var locationManager = {};
     Object.defineProperty(locationManager, 'isInited', {
-      get: function(){ return isInited; },
-      enumerable: true
+      get: function () {
+        return isInited;
+      },
+      enumerable: true,
     });
     Object.defineProperty(locationManager, 'isLocationAvailable', {
-      get: function(){ return isInited && isLocationAvailable; },
-      enumerable: true
+      get: function () {
+        return isInited && isLocationAvailable;
+      },
+      enumerable: true,
     });
     Object.defineProperty(locationManager, 'isAccessRequested', {
-      get: function(){ return isAccessRequested; },
-      enumerable: true
+      get: function () {
+        return isAccessRequested;
+      },
+      enumerable: true,
     });
     Object.defineProperty(locationManager, 'isAccessGranted', {
-      get: function(){ return isAccessRequested && isAccessGranted; },
-      enumerable: true
+      get: function () {
+        return isAccessRequested && isAccessGranted;
+      },
+      enumerable: true,
     });
 
-    var initRequestState = {callbacks: []};
-    var getRequestState = {callbacks: []};
+    var initRequestState = { callbacks: [] };
+    var getRequestState = { callbacks: [] };
 
-    WebView.onEvent('location_checked',  onLocationChecked);
+    WebView.onEvent('location_checked', onLocationChecked);
     WebView.onEvent('location_requested', onLocationRequested);
 
     function onLocationChecked(eventType, eventData) {
@@ -2056,11 +2164,8 @@
           locationData.speed_accuracy = eventData.speed_accuracy;
         }
       }
-      if (!eventData.available ||
-          !isLocationAvailable ||
-          !isAccessRequested ||
-          !isAccessGranted) {
-        initRequestState.callbacks.push(function() {
+      if (!eventData.available || !isLocationAvailable || !isAccessRequested || !isAccessGranted) {
+        initRequestState.callbacks.push(function () {
           locationResponse(locationData);
         });
         WebView.postEvent('web_app_check_location', false);
@@ -2078,7 +2183,7 @@
       }
       if (response !== null) {
         receiveWebViewEvent('locationRequested', {
-          locationData: response
+          locationData: response,
         });
       }
     }
@@ -2099,7 +2204,7 @@
       return true;
     }
 
-    locationManager.init = function(callback) {
+    locationManager.init = function (callback) {
       if (!checkVersion()) {
         return locationManager;
       }
@@ -2112,7 +2217,7 @@
       WebView.postEvent('web_app_check_location', false);
       return locationManager;
     };
-    locationManager.getLocation = function(callback) {
+    locationManager.getLocation = function (callback) {
       if (!checkVersion()) {
         return locationManager;
       }
@@ -2126,7 +2231,7 @@
       WebView.postEvent('web_app_request_location');
       return locationManager;
     };
-    locationManager.openSettings = function() {
+    locationManager.openSettings = function () {
       if (!checkVersion()) {
         return locationManager;
       }
@@ -2149,33 +2254,44 @@
     return locationManager;
   })();
 
-  var Accelerometer = (function() {
+  var Accelerometer = (function () {
     var isStarted = false;
-    var valueX = null, valueY = null, valueZ = null;
-    var startCallbacks = [], stopCallbacks = [];
+    var valueX = null,
+      valueY = null,
+      valueZ = null;
+    var startCallbacks = [],
+      stopCallbacks = [];
 
     var accelerometer = {};
     Object.defineProperty(accelerometer, 'isStarted', {
-      get: function(){ return isStarted; },
-      enumerable: true
+      get: function () {
+        return isStarted;
+      },
+      enumerable: true,
     });
     Object.defineProperty(accelerometer, 'x', {
-      get: function(){ return valueX; },
-      enumerable: true
+      get: function () {
+        return valueX;
+      },
+      enumerable: true,
     });
     Object.defineProperty(accelerometer, 'y', {
-      get: function(){ return valueY; },
-      enumerable: true
+      get: function () {
+        return valueY;
+      },
+      enumerable: true,
     });
     Object.defineProperty(accelerometer, 'z', {
-      get: function(){ return valueZ; },
-      enumerable: true
+      get: function () {
+        return valueZ;
+      },
+      enumerable: true,
     });
 
     WebView.onEvent('accelerometer_started', onAccelerometerStarted);
     WebView.onEvent('accelerometer_stopped', onAccelerometerStopped);
     WebView.onEvent('accelerometer_changed', onAccelerometerChanged);
-    WebView.onEvent('accelerometer_failed',  onAccelerometerFailed);
+    WebView.onEvent('accelerometer_failed', onAccelerometerFailed);
 
     function onAccelerometerStarted(eventType, eventData) {
       isStarted = true;
@@ -2214,7 +2330,7 @@
         startCallbacks = [];
       }
       receiveWebViewEvent('accelerometerFailed', {
-        error: eventData.error
+        error: eventData.error,
       });
     }
 
@@ -2226,7 +2342,7 @@
       return true;
     }
 
-    accelerometer.start = function(params, callback) {
+    accelerometer.start = function (params, callback) {
       params = params || {};
       if (!checkVersion()) {
         return accelerometer;
@@ -2245,7 +2361,7 @@
       WebView.postEvent('web_app_start_accelerometer', false, req_params);
       return accelerometer;
     };
-    accelerometer.stop = function(callback) {
+    accelerometer.stop = function (callback) {
       if (!checkVersion()) {
         return accelerometer;
       }
@@ -2258,37 +2374,51 @@
     return accelerometer;
   })();
 
-  var DeviceOrientation = (function() {
+  var DeviceOrientation = (function () {
     var isStarted = false;
-    var valueAlpha = null, valueBeta = null, valueGamma = null, valueAbsolute = false;
-    var startCallbacks = [], stopCallbacks = [];
+    var valueAlpha = null,
+      valueBeta = null,
+      valueGamma = null,
+      valueAbsolute = false;
+    var startCallbacks = [],
+      stopCallbacks = [];
 
     var deviceOrientation = {};
     Object.defineProperty(deviceOrientation, 'isStarted', {
-      get: function(){ return isStarted; },
-      enumerable: true
+      get: function () {
+        return isStarted;
+      },
+      enumerable: true,
     });
     Object.defineProperty(deviceOrientation, 'absolute', {
-      get: function(){ return valueAbsolute; },
-      enumerable: true
+      get: function () {
+        return valueAbsolute;
+      },
+      enumerable: true,
     });
     Object.defineProperty(deviceOrientation, 'alpha', {
-      get: function(){ return valueAlpha; },
-      enumerable: true
+      get: function () {
+        return valueAlpha;
+      },
+      enumerable: true,
     });
     Object.defineProperty(deviceOrientation, 'beta', {
-      get: function(){ return valueBeta; },
-      enumerable: true
+      get: function () {
+        return valueBeta;
+      },
+      enumerable: true,
     });
     Object.defineProperty(deviceOrientation, 'gamma', {
-      get: function(){ return valueGamma; },
-      enumerable: true
+      get: function () {
+        return valueGamma;
+      },
+      enumerable: true,
     });
 
-    WebView.onEvent('device_orientation_started',  onDeviceOrientationStarted);
-    WebView.onEvent('device_orientation_stopped',  onDeviceOrientationStopped);
+    WebView.onEvent('device_orientation_started', onDeviceOrientationStarted);
+    WebView.onEvent('device_orientation_stopped', onDeviceOrientationStopped);
     WebView.onEvent('device_orientation_changed', onDeviceOrientationChanged);
-    WebView.onEvent('device_orientation_failed',  onDeviceOrientationFailed);
+    WebView.onEvent('device_orientation_failed', onDeviceOrientationFailed);
 
     function onDeviceOrientationStarted(eventType, eventData) {
       isStarted = true;
@@ -2315,7 +2445,7 @@
     function onDeviceOrientationChanged(eventType, eventData) {
       valueAbsolute = !!eventData.absolute;
       valueAlpha = eventData.alpha;
-      valueBeta  = eventData.beta;
+      valueBeta = eventData.beta;
       valueGamma = eventData.gamma;
       receiveWebViewEvent('deviceOrientationChanged');
     }
@@ -2328,7 +2458,7 @@
         startCallbacks = [];
       }
       receiveWebViewEvent('deviceOrientationFailed', {
-        error: eventData.error
+        error: eventData.error,
       });
     }
 
@@ -2340,7 +2470,7 @@
       return true;
     }
 
-    deviceOrientation.start = function(params, callback) {
+    deviceOrientation.start = function (params, callback) {
       params = params || {};
       if (!checkVersion()) {
         return deviceOrientation;
@@ -2360,7 +2490,7 @@
       WebView.postEvent('web_app_start_device_orientation', false, req_params);
       return deviceOrientation;
     };
-    deviceOrientation.stop = function(callback) {
+    deviceOrientation.stop = function (callback) {
       if (!checkVersion()) {
         return deviceOrientation;
       }
@@ -2373,33 +2503,44 @@
     return deviceOrientation;
   })();
 
-  var Gyroscope = (function() {
+  var Gyroscope = (function () {
     var isStarted = false;
-    var valueX = null, valueY = null, valueZ = null;
-    var startCallbacks = [], stopCallbacks = [];
+    var valueX = null,
+      valueY = null,
+      valueZ = null;
+    var startCallbacks = [],
+      stopCallbacks = [];
 
     var gyroscope = {};
     Object.defineProperty(gyroscope, 'isStarted', {
-      get: function(){ return isStarted; },
-      enumerable: true
+      get: function () {
+        return isStarted;
+      },
+      enumerable: true,
     });
     Object.defineProperty(gyroscope, 'x', {
-      get: function(){ return valueX; },
-      enumerable: true
+      get: function () {
+        return valueX;
+      },
+      enumerable: true,
     });
     Object.defineProperty(gyroscope, 'y', {
-      get: function(){ return valueY; },
-      enumerable: true
+      get: function () {
+        return valueY;
+      },
+      enumerable: true,
     });
     Object.defineProperty(gyroscope, 'z', {
-      get: function(){ return valueZ; },
-      enumerable: true
+      get: function () {
+        return valueZ;
+      },
+      enumerable: true,
     });
 
-    WebView.onEvent('gyroscope_started',  onGyroscopeStarted);
-    WebView.onEvent('gyroscope_stopped',  onGyroscopeStopped);
+    WebView.onEvent('gyroscope_started', onGyroscopeStarted);
+    WebView.onEvent('gyroscope_stopped', onGyroscopeStopped);
     WebView.onEvent('gyroscope_changed', onGyroscopeChanged);
-    WebView.onEvent('gyroscope_failed',  onGyroscopeFailed);
+    WebView.onEvent('gyroscope_failed', onGyroscopeFailed);
 
     function onGyroscopeStarted(eventType, eventData) {
       isStarted = true;
@@ -2438,7 +2579,7 @@
         startCallbacks = [];
       }
       receiveWebViewEvent('gyroscopeFailed', {
-        error: eventData.error
+        error: eventData.error,
       });
     }
 
@@ -2450,7 +2591,7 @@
       return true;
     }
 
-    gyroscope.start = function(params, callback) {
+    gyroscope.start = function (params, callback) {
       params = params || {};
       if (!checkVersion()) {
         return gyroscope;
@@ -2469,7 +2610,7 @@
       WebView.postEvent('web_app_start_gyroscope', false, req_params);
       return gyroscope;
     };
-    gyroscope.stop = function(callback) {
+    gyroscope.stop = function (callback) {
       if (!checkVersion()) {
         return gyroscope;
       }
@@ -2492,7 +2633,7 @@
       }
       receiveWebViewEvent('invoiceClosed', {
         url: invoiceData.url,
-        status: eventData.status
+        status: eventData.status,
       });
     }
   }
@@ -2510,7 +2651,7 @@
         popupData.callback(button_id);
       }
       receiveWebViewEvent('popupClosed', {
-        button_id: button_id
+        button_id: button_id,
       });
     }
   }
@@ -2530,7 +2671,7 @@
         }
       }
       receiveWebViewEvent('qrTextReceived', {
-        data: data
+        data: data,
       });
     }
   }
@@ -2551,7 +2692,7 @@
         requestData.callback(data);
       }
       receiveWebViewEvent('clipboardTextReceived', {
-        data: data
+        data: data,
       });
     }
   }
@@ -2565,16 +2706,19 @@
         requestData.callback(eventData.status == 'allowed');
       }
       receiveWebViewEvent('writeAccessRequested', {
-        status: eventData.status
+        status: eventData.status,
       });
     }
   }
 
   function getRequestedContact(callback, timeout) {
-    var reqTo, fallbackTo, reqDelay = 0;
-    var reqInvoke = function() {
-      invokeCustomMethod('getRequestedContact', {}, function(err, res) {
-        if (res.substr(0, 1) == '"' && res.substr(-1) == '"') { // macos fix
+    var reqTo,
+      fallbackTo,
+      reqDelay = 0;
+    var reqInvoke = function () {
+      invokeCustomMethod('getRequestedContact', {}, function (err, res) {
+        if (res.substr(0, 1) == '"' && res.substr(-1) == '"') {
+          // macos fix
           res = JSON.parse(res);
         }
         if (res && res.length) {
@@ -2586,7 +2730,7 @@
         }
       });
     };
-    var fallbackInvoke = function() {
+    var fallbackInvoke = function () {
       clearTimeout(reqTo);
       callback('');
     };
@@ -2601,18 +2745,20 @@
       WebAppContactRequested = false;
       var requestSent = eventData.status == 'sent';
       var webViewEvent = {
-        status: eventData.status
+        status: eventData.status,
       };
       if (requestSent) {
-        getRequestedContact(function(res) {
+        getRequestedContact(function (res) {
           if (res && res.length) {
             webViewEvent.response = res;
             webViewEvent.responseUnsafe = Utils.urlParseQueryString(res);
             for (var key in webViewEvent.responseUnsafe) {
               var val = webViewEvent.responseUnsafe[key];
               try {
-                if (val.substr(0, 1) == '{' && val.substr(-1) == '}' ||
-                    val.substr(0, 1) == '[' && val.substr(-1) == ']') {
+                if (
+                  (val.substr(0, 1) == '{' && val.substr(-1) == '}') ||
+                  (val.substr(0, 1) == '[' && val.substr(-1) == ']')
+                ) {
                   webViewEvent.responseUnsafe[key] = JSON.parse(val);
                 }
               } catch (e) {}
@@ -2642,7 +2788,7 @@
         requestData.callback(isDownloading);
       }
       receiveWebViewEvent('fileDownloadRequested', {
-        status: isDownloading ? 'downloading' : 'cancelled'
+        status: isDownloading ? 'downloading' : 'cancelled',
       });
     }
   }
@@ -2651,7 +2797,8 @@
     if (eventData.req_id && webAppCallbacks[eventData.req_id]) {
       var requestData = webAppCallbacks[eventData.req_id];
       delete webAppCallbacks[eventData.req_id];
-      var res = null, err = null;
+      var res = null,
+        err = null;
       if (typeof eventData.result !== 'undefined') {
         res = eventData.result;
       }
@@ -2670,203 +2817,253 @@
       throw Error('WebAppMethodUnsupported');
     }
     var req_id = generateCallbackId(16);
-    var req_params = {req_id: req_id, method: method, params: params || {}};
+    var req_params = { req_id: req_id, method: method, params: params || {} };
     webAppCallbacks[req_id] = {
-      callback: callback
+      callback: callback,
     };
     WebView.postEvent('web_app_invoke_custom_method', false, req_params);
-  };
+  }
 
   if (!window.Telegram) {
     window.Telegram = {};
   }
 
   Object.defineProperty(WebApp, 'initData', {
-    get: function(){ return webAppInitData; },
-    enumerable: true
+    get: function () {
+      return webAppInitData;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'initDataUnsafe', {
-    get: function(){ return webAppInitDataUnsafe; },
-    enumerable: true
+    get: function () {
+      return webAppInitDataUnsafe;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'version', {
-    get: function(){ return webAppVersion; },
-    enumerable: true
+    get: function () {
+      return webAppVersion;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'platform', {
-    get: function(){ return webAppPlatform; },
-    enumerable: true
+    get: function () {
+      return webAppPlatform;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'colorScheme', {
-    get: function(){ return colorScheme; },
-    enumerable: true
+    get: function () {
+      return colorScheme;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'themeParams', {
-    get: function(){ return themeParams; },
-    enumerable: true
+    get: function () {
+      return themeParams;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'isExpanded', {
-    get: function(){ return isExpanded; },
-    enumerable: true
+    get: function () {
+      return isExpanded;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'viewportHeight', {
-    get: function(){ return (viewportHeight === false ? window.innerHeight : viewportHeight) - bottomBarHeight; },
-    enumerable: true
+    get: function () {
+      return (viewportHeight === false ? window.innerHeight : viewportHeight) - bottomBarHeight;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'viewportStableHeight', {
-    get: function(){ return (viewportStableHeight === false ? window.innerHeight : viewportStableHeight) - bottomBarHeight; },
-    enumerable: true
+    get: function () {
+      return (viewportStableHeight === false ? window.innerHeight : viewportStableHeight) - bottomBarHeight;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'safeAreaInset', {
-    get: function(){ return safeAreaInset; },
-    enumerable: true
+    get: function () {
+      return safeAreaInset;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'contentSafeAreaInset', {
-    get: function(){ return contentSafeAreaInset; },
-    enumerable: true
+    get: function () {
+      return contentSafeAreaInset;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'isClosingConfirmationEnabled', {
-    set: function(val){ setClosingConfirmation(val); },
-    get: function(){ return isClosingConfirmationEnabled; },
-    enumerable: true
+    set: function (val) {
+      setClosingConfirmation(val);
+    },
+    get: function () {
+      return isClosingConfirmationEnabled;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'isVerticalSwipesEnabled', {
-    set: function(val){ toggleVerticalSwipes(val); },
-    get: function(){ return isVerticalSwipesEnabled; },
-    enumerable: true
+    set: function (val) {
+      toggleVerticalSwipes(val);
+    },
+    get: function () {
+      return isVerticalSwipesEnabled;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'isFullscreen', {
-    get: function(){ return webAppIsFullscreen; },
-    enumerable: true
+    get: function () {
+      return webAppIsFullscreen;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'isOrientationLocked', {
-    set: function(val){ toggleOrientationLock(val); },
-    get: function(){ return webAppIsOrientationLocked; },
-    enumerable: true
+    set: function (val) {
+      toggleOrientationLock(val);
+    },
+    get: function () {
+      return webAppIsOrientationLocked;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'isActive', {
-    get: function(){ return webAppIsActive; },
-    enumerable: true
+    get: function () {
+      return webAppIsActive;
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'headerColor', {
-    set: function(val){ setHeaderColor(val); },
-    get: function(){ return getHeaderColor(); },
-    enumerable: true
+    set: function (val) {
+      setHeaderColor(val);
+    },
+    get: function () {
+      return getHeaderColor();
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'backgroundColor', {
-    set: function(val){ setBackgroundColor(val); },
-    get: function(){ return getBackgroundColor(); },
-    enumerable: true
+    set: function (val) {
+      setBackgroundColor(val);
+    },
+    get: function () {
+      return getBackgroundColor();
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'bottomBarColor', {
-    set: function(val){ setBottomBarColor(val); },
-    get: function(){ return getBottomBarColor(); },
-    enumerable: true
+    set: function (val) {
+      setBottomBarColor(val);
+    },
+    get: function () {
+      return getBottomBarColor();
+    },
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'BackButton', {
     value: BackButton,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'MainButton', {
     value: MainButton,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'SecondaryButton', {
     value: SecondaryButton,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'SettingsButton', {
     value: SettingsButton,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'HapticFeedback', {
     value: HapticFeedback,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'CloudStorage', {
     value: CloudStorage,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'DeviceStorage', {
     value: DeviceStorage,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'SecureStorage', {
     value: SecureStorage,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'BiometricManager', {
     value: BiometricManager,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'Accelerometer', {
     value: Accelerometer,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'DeviceOrientation', {
     value: DeviceOrientation,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'Gyroscope', {
     value: Gyroscope,
-    enumerable: true
+    enumerable: true,
   });
   Object.defineProperty(WebApp, 'LocationManager', {
     value: LocationManager,
-    enumerable: true
+    enumerable: true,
   });
-  WebApp.isVersionAtLeast = function(ver) {
+  WebApp.isVersionAtLeast = function (ver) {
     return versionAtLeast(ver);
   };
-  WebApp.setHeaderColor = function(color_key) {
+  WebApp.setHeaderColor = function (color_key) {
     WebApp.headerColor = color_key;
   };
-  WebApp.setBackgroundColor = function(color) {
+  WebApp.setBackgroundColor = function (color) {
     WebApp.backgroundColor = color;
   };
-  WebApp.setBottomBarColor = function(color) {
+  WebApp.setBottomBarColor = function (color) {
     WebApp.bottomBarColor = color;
   };
-  WebApp.enableClosingConfirmation = function() {
+  WebApp.enableClosingConfirmation = function () {
     WebApp.isClosingConfirmationEnabled = true;
   };
-  WebApp.disableClosingConfirmation = function() {
+  WebApp.disableClosingConfirmation = function () {
     WebApp.isClosingConfirmationEnabled = false;
   };
-  WebApp.enableVerticalSwipes = function() {
+  WebApp.enableVerticalSwipes = function () {
     WebApp.isVerticalSwipesEnabled = true;
   };
-  WebApp.disableVerticalSwipes = function() {
+  WebApp.disableVerticalSwipes = function () {
     WebApp.isVerticalSwipesEnabled = false;
   };
-  WebApp.lockOrientation = function() {
+  WebApp.lockOrientation = function () {
     WebApp.isOrientationLocked = true;
   };
-  WebApp.unlockOrientation = function() {
+  WebApp.unlockOrientation = function () {
     WebApp.isOrientationLocked = false;
   };
-  WebApp.requestFullscreen = function() {
+  WebApp.requestFullscreen = function () {
     if (!versionAtLeast('8.0')) {
       console.error('[Telegram.WebApp] Method requestFullscreen is not supported in version ' + webAppVersion);
       throw Error('WebAppMethodUnsupported');
     }
     WebView.postEvent('web_app_request_fullscreen');
   };
-  WebApp.exitFullscreen = function() {
+  WebApp.exitFullscreen = function () {
     if (!versionAtLeast('8.0')) {
       console.error('[Telegram.WebApp] Method exitFullscreen is not supported in version ' + webAppVersion);
       throw Error('WebAppMethodUnsupported');
     }
     WebView.postEvent('web_app_exit_fullscreen');
   };
-  WebApp.addToHomeScreen = function() {
+  WebApp.addToHomeScreen = function () {
     if (!versionAtLeast('8.0')) {
       console.error('[Telegram.WebApp] Method addToHomeScreen is not supported in version ' + webAppVersion);
       throw Error('WebAppMethodUnsupported');
     }
     WebView.postEvent('web_app_add_to_home_screen');
   };
-  WebApp.checkHomeScreenStatus = function(callback) {
+  WebApp.checkHomeScreenStatus = function (callback) {
     if (!versionAtLeast('8.0')) {
       console.error('[Telegram.WebApp] Method checkHomeScreenStatus is not supported in version ' + webAppVersion);
       throw Error('WebAppMethodUnsupported');
@@ -2876,10 +3073,11 @@
     }
     WebView.postEvent('web_app_check_home_screen');
   };
-  WebApp.onEvent = function(eventType, callback) {
+  WebApp.onEvent = function (eventType, callback) {
     onWebViewEvent(eventType, callback);
   };
-  WebApp.offEvent = function(eventType, callback) {offWebViewEvent(eventType, callback);
+  WebApp.offEvent = function (eventType, callback) {
+    offWebViewEvent(eventType, callback);
   };
   WebApp.sendData = function (data) {
     if (!data || !data.length) {
@@ -2890,7 +3088,7 @@
       console.error('[Telegram.WebApp] Data is too long', data);
       throw Error('WebAppDataInvalid');
     }
-    WebView.postEvent('web_app_data_send', false, {data: data});
+    WebView.postEvent('web_app_data_send', false, { data: data });
   };
   WebApp.switchInlineQuery = function (query, choose_chat_types) {
     if (!versionAtLeast('6.6')) {
@@ -2898,7 +3096,9 @@
       throw Error('WebAppMethodUnsupported');
     }
     if (!initParams.tgWebAppBotInline) {
-      console.error('[Telegram.WebApp] Inline mode is disabled for this bot. Read more about inline mode: https://core.telegram.org/bots/inline');
+      console.error(
+        '[Telegram.WebApp] Inline mode is disabled for this bot. Read more about inline mode: https://core.telegram.org/bots/inline',
+      );
       throw Error('WebAppInlineModeDisabled');
     }
     query = query || '';
@@ -2912,7 +3112,7 @@
         console.error('[Telegram.WebApp] Choose chat types should be an array', choose_chat_types);
         throw Error('WebAppInlineChooseChatTypesInvalid');
       }
-      var good_types = {users: 1, bots: 1, groups: 1, channels: 1};
+      var good_types = { users: 1, bots: 1, groups: 1, channels: 1 };
       for (var i = 0; i < choose_chat_types.length; i++) {
         var chat_type = choose_chat_types[i];
         if (!good_types[chat_type]) {
@@ -2925,20 +3125,19 @@
         }
       }
     }
-    WebView.postEvent('web_app_switch_inline_query', false, {query: query, chat_types: chat_types});
+    WebView.postEvent('web_app_switch_inline_query', false, { query: query, chat_types: chat_types });
   };
   WebApp.openLink = function (url, options) {
     var a = document.createElement('A');
     a.href = url;
-    if (a.protocol != 'http:' &&
-        a.protocol != 'https:') {
+    if (a.protocol != 'http:' && a.protocol != 'https:') {
       console.error('[Telegram.WebApp] Url protocol is not supported', url);
       throw Error('WebAppTgUrlInvalid');
     }
     var url = a.href;
     options = options || {};
     if (versionAtLeast('6.1')) {
-      var req_params = {url: url};
+      var req_params = { url: url };
       if (versionAtLeast('6.4') && options.try_instant_view) {
         req_params.try_instant_view = true;
       }
@@ -2953,8 +3152,7 @@
   WebApp.openTelegramLink = function (url, options) {
     var a = document.createElement('A');
     a.href = url;
-    if (a.protocol != 'http:' &&
-        a.protocol != 'https:') {
+    if (a.protocol != 'http:' && a.protocol != 'https:') {
       console.error('[Telegram.WebApp] Url protocol is not supported', url);
       throw Error('WebAppTgUrlInvalid');
     }
@@ -2965,7 +3163,7 @@
     var path_full = a.pathname + a.search;
     options = options || {};
     if (isIframe || versionAtLeast('6.1')) {
-      var req_params = {path_full: path_full};
+      var req_params = { path_full: path_full };
       if (options.force_request) {
         req_params.force_request = true;
       }
@@ -2975,13 +3173,16 @@
     }
   };
   WebApp.openInvoice = function (url, callback) {
-    var a = document.createElement('A'), match, slug;
+    var a = document.createElement('A'),
+      match,
+      slug;
     a.href = url;
-    if (a.protocol != 'http:' &&
-        a.protocol != 'https:' ||
-        !isTmeHostname(a.hostname) ||
-        !(match = a.pathname.match(/^\/(\$|invoice\/)([A-Za-z0-9\-_=]+)$/)) ||
-        !(slug = match[2])) {
+    if (
+      (a.protocol != 'http:' && a.protocol != 'https:') ||
+      !isTmeHostname(a.hostname) ||
+      !(match = a.pathname.match(/^\/(\$|invoice\/)([A-Za-z0-9\-_=]+)$/)) ||
+      !(slug = match[2])
+    ) {
       console.error('[Telegram.WebApp] Invoice url is invalid', url);
       throw Error('WebAppInvoiceUrlInvalid');
     }
@@ -2995,9 +3196,9 @@
     }
     webAppInvoices[slug] = {
       url: url,
-      callback: callback
+      callback: callback,
     };
-    WebView.postEvent('web_app_open_invoice', false, {slug: slug});
+    WebView.postEvent('web_app_open_invoice', false, { slug: slug });
   };
   WebApp.showPopup = function (params, callback) {
     if (!versionAtLeast('6.2')) {
@@ -3057,12 +3258,9 @@
           button_type = 'default';
         }
         btn.type = button_type;
-        if (button_type == 'ok' ||
-            button_type == 'close' ||
-            button_type == 'cancel') {
+        if (button_type == 'ok' || button_type == 'close' || button_type == 'cancel') {
           // no params needed
-        } else if (button_type == 'default' ||
-                   button_type == 'destructive') {
+        } else if (button_type == 'default' || button_type == 'destructive') {
           var text = '';
           if (typeof button.text !== 'undefined') {
             text = strTrim(button.text);
@@ -3083,7 +3281,7 @@
         buttons.push(btn);
       }
     } else {
-      buttons.push({id: '', type: 'close'});
+      buttons.push({ id: '', type: 'close' });
     }
     if (buttons.length < 1) {
       console.error('[Telegram.WebApp] Popup should have at least one button');
@@ -3096,25 +3294,34 @@
     popup_params.buttons = buttons;
 
     webAppPopupOpened = {
-      callback: callback
+      callback: callback,
     };
     WebView.postEvent('web_app_open_popup', false, popup_params);
   };
   WebApp.showAlert = function (message, callback) {
-    WebApp.showPopup({
-      message: message
-    }, callback ? function(){ callback(); } : null);
+    WebApp.showPopup(
+      {
+        message: message,
+      },
+      callback
+        ? function () {
+            callback();
+          }
+        : null,
+    );
   };
   WebApp.showConfirm = function (message, callback) {
-    WebApp.showPopup({
-      message: message,
-      buttons: [
-        {type: 'ok', id: 'ok'},
-        {type: 'cancel'}
-      ]
-    }, callback ? function (button_id) {
-      callback(button_id == 'ok');
-    } : null);
+    WebApp.showPopup(
+      {
+        message: message,
+        buttons: [{ type: 'ok', id: 'ok' }, { type: 'cancel' }],
+      },
+      callback
+        ? function (button_id) {
+            callback(button_id == 'ok');
+          }
+        : null,
+    );
   };
   WebApp.showScanQrPopup = function (params, callback) {
     if (!versionAtLeast('6.4')) {
@@ -3139,7 +3346,7 @@
     }
 
     webAppScanQrPopupOpened = {
-      callback: callback
+      callback: callback,
     };
     WebView.postEvent('web_app_open_scan_qr_popup', false, popup_params);
   };
@@ -3158,9 +3365,9 @@
       throw Error('WebAppMethodUnsupported');
     }
     var req_id = generateCallbackId(16);
-    var req_params = {req_id: req_id};
+    var req_params = { req_id: req_id };
     webAppCallbacks[req_id] = {
-      callback: callback
+      callback: callback,
     };
     WebView.postEvent('web_app_read_text_from_clipboard', false, req_params);
   };
@@ -3174,7 +3381,7 @@
       throw Error('WebAppWriteAccessRequested');
     }
     WebAppWriteAccessRequested = {
-      callback: callback
+      callback: callback,
     };
     WebView.postEvent('web_app_request_write_access');
   };
@@ -3188,7 +3395,7 @@
       throw Error('WebAppContactRequested');
     }
     WebAppContactRequested = {
-      callback: callback
+      callback: callback,
     };
     WebView.postEvent('web_app_request_phone');
   };
@@ -3222,7 +3429,7 @@
     dl_params.file_name = params.file_name;
 
     webAppDownloadFileRequested = {
-      callback: callback
+      callback: callback,
     };
     WebView.postEvent('web_app_request_file_download', false, dl_params);
   };
@@ -3234,8 +3441,7 @@
     }
     var a = document.createElement('A');
     a.href = media_url;
-    if (a.protocol != 'http:' &&
-        a.protocol != 'https:') {
+    if (a.protocol != 'http:' && a.protocol != 'https:') {
       console.error('[Telegram.WebApp] Media url protocol is not supported', url);
       throw Error('WebAppMediaUrlInvalid');
     }
@@ -3254,13 +3460,12 @@
     if (typeof params.widget_link !== 'undefined') {
       params.widget_link = params.widget_link || {};
       a.href = params.widget_link.url;
-      if (a.protocol != 'http:' &&
-          a.protocol != 'https:') {
+      if (a.protocol != 'http:' && a.protocol != 'https:') {
         console.error('[Telegram.WebApp] Link protocol is not supported', url);
         throw Error('WebAppShareToStoryParamInvalid');
       }
       var widget_link = {
-        url: a.href
+        url: a.href,
       };
       if (typeof params.widget_link.name !== 'undefined') {
         var link_name = strTrim(params.widget_link.name);
@@ -3287,9 +3492,9 @@
       throw Error('WebAppShareMessageOpened');
     }
     WebAppShareMessageOpened = {
-      callback: callback
+      callback: callback,
     };
-    WebView.postEvent('web_app_send_prepared_message', false, {id: msg_id});
+    WebView.postEvent('web_app_send_prepared_message', false, { id: msg_id });
   };
   WebApp.requestChat = function (req_id, callback) {
     if (!versionAtLeast('9.6')) {
@@ -3301,9 +3506,9 @@
       throw Error('WebAppRequestChatOpened');
     }
     WebAppRequestChatOpened = {
-      callback: callback
+      callback: callback,
     };
-    WebView.postEvent('web_app_request_chat', false, {req_id: req_id});
+    WebView.postEvent('web_app_request_chat', false, { req_id: req_id });
   };
   WebApp.setEmojiStatus = function (custom_emoji_id, params, callback) {
     params = params || {};
@@ -3321,7 +3526,7 @@
       throw Error('WebAppEmojiStatusRequested');
     }
     WebAppEmojiStatusRequested = {
-      callback: callback
+      callback: callback,
     };
     WebView.postEvent('web_app_set_emoji_status', false, status_params);
   };
@@ -3335,7 +3540,7 @@
       throw Error('WebAppEmojiStatusAccessRequested');
     }
     WebAppEmojiStatusAccessRequested = {
-      callback: callback
+      callback: callback,
     };
     WebView.postEvent('web_app_request_emoji_status_access');
   };
@@ -3404,5 +3609,4 @@
   WebView.postEvent('web_app_request_viewport');
   WebView.postEvent('web_app_request_safe_area');
   WebView.postEvent('web_app_request_content_safe_area');
-
 })();

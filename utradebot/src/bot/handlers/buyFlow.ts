@@ -6,15 +6,22 @@ import logger from '../../logger';
 
 export function registerBuyFlow(bot: Bot) {
   bot.command('buy', async (ctx) => {
-    const parts = (ctx.match as string || '').trim().split(/\s+/);
+    const parts = ((ctx.match as string) || '').trim().split(/\s+/);
     if (parts.length < 1 || !parts[0]) {
-      await ctx.reply('Usage: /buy <tradeId>\n\nYou need trade id from seller. After seller confirms payment, you will receive phone and be asked to send login code.');
+      await ctx.reply(
+        'Usage: /buy <tradeId>\n\nYou need trade id from seller. After seller confirms payment, you will receive phone and be asked to send login code.',
+      );
       return;
     }
     const tradeId = Number(parts[0]);
     if (!Number.isInteger(tradeId)) return ctx.reply('Invalid tradeId');
 
-    const trade = (await db.getTrade(tradeId)) as unknown as { seller_telegram_id: number; buyer_telegram_id?: number; status: string; phone?: string } | null;
+    const trade = (await db.getTrade(tradeId)) as unknown as {
+      seller_telegram_id: number;
+      buyer_telegram_id?: number;
+      status: string;
+      phone?: string;
+    } | null;
     if (!trade) return ctx.reply('Trade not found');
 
     const from = ctx.from!.id;
@@ -29,7 +36,7 @@ export function registerBuyFlow(bot: Bot) {
     if (!updated.phone) {
       await ctx.reply(
         `You are now buyer for trade #${tradeId}. Seller has not yet confirmed payment and shared phone.\n\n` +
-          `Waiting for seller to press "Payment received". You will be notified when phone is shared.`
+          `Waiting for seller to press "Payment received". You will be notified when phone is shared.`,
       );
       return;
     }
@@ -41,7 +48,7 @@ export function registerBuyFlow(bot: Bot) {
       `✅ You are buyer for trade #${tradeId}.\n\n` +
         `Phone: \`${phone}\`\n\n` +
         `Please trigger Telegram login on your device (enter this phone in Telegram app) and send the login code you receive via SMS/Telegram to this chat. The tradebot will verify code, log you in, and log itself out.`,
-      { parse_mode: 'Markdown' }
+      { parse_mode: 'Markdown' },
     );
     try {
       await db.updateTradeStatus(tradeId, 'AWAITING_CODE');
@@ -53,10 +60,24 @@ export function registerBuyFlow(bot: Bot) {
     const rows = (await db.pool.query(
       `SELECT id, status, phone, seller_telegram_id, buyer_telegram_id, created_at FROM utrade_trades
        WHERE seller_telegram_id = $1 OR buyer_telegram_id = $1 ORDER BY id DESC LIMIT 20`,
-      [from]
-    )) as unknown as { rows: Array<{ id: number; status: string; phone?: string; seller_telegram_id: number; buyer_telegram_id?: number }> };
+      [from],
+    )) as unknown as {
+      rows: Array<{
+        id: number;
+        status: string;
+        phone?: string;
+        seller_telegram_id: number;
+        buyer_telegram_id?: number;
+      }>;
+    };
     // Fallback if above fails: use listTradesForSeller plus buyer trades
-    let trades: Array<{ id: number; status: string; phone?: string; seller_telegram_id: number; buyer_telegram_id?: number }> = [];
+    let trades: Array<{
+      id: number;
+      status: string;
+      phone?: string;
+      seller_telegram_id: number;
+      buyer_telegram_id?: number;
+    }> = [];
     try {
       trades = rows.rows;
     } catch (e) {

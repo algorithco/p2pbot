@@ -82,7 +82,9 @@
   function isAvailable() {
     try {
       return !!(window.crypto && window.crypto.subtle);
-    } catch (e) { return false; }
+    } catch (e) {
+      return false;
+    }
   }
 
   window.ChatCrypto = {
@@ -96,6 +98,6 @@
     clearCache: function (dealId) {
       if (dealId) delete keyCache[String(dealId)];
       else keyCache = {};
-    }
+    },
   };
 })();

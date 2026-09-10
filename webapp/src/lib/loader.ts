@@ -67,7 +67,11 @@ export function mountLoader(): Promise<void> {
       try {
         focus?.destroy();
       } catch {}
-      try { root.remove(); } catch { root.style.display = 'none'; }
+      try {
+        root.remove();
+      } catch {
+        root.style.display = 'none';
+      }
       doneResolve();
     }, 460);
   };

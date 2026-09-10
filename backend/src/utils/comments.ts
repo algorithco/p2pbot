@@ -44,8 +44,15 @@ export function releaseComment(deal: {
     item = 'deal';
   } else {
     // Take first line/sentence, strip trailing punctuation, limit to 40 chars
-    const first = rawTerms.split(/[\n\r]+/)[0].split(/[.]+/)[0].trim();
-    item = first.slice(0, 40).replace(/[,;:]+$/, '').trim() || 'deal';
+    const first = rawTerms
+      .split(/[\n\r]+/)[0]
+      .split(/[.]+/)[0]
+      .trim();
+    item =
+      first
+        .slice(0, 40)
+        .replace(/[,;:]+$/, '')
+        .trim() || 'deal';
     // If item is just a generic word like "deal", keep it lower, else capitalize first letter
     if (item.toLowerCase() === 'deal') item = 'deal';
   }

@@ -10,9 +10,17 @@ const wa: any = (typeof window !== 'undefined' && (window as any).Telegram?.WebA
 
 function isAtLeast(ver: string): boolean {
   if (!wa || typeof wa.isVersionAtLeast !== 'function') return false;
-  try { return !!wa.isVersionAtLeast(ver); } catch { return false; }
+  try {
+    return !!wa.isVersionAtLeast(ver);
+  } catch {
+    return false;
+  }
 }
-function safe(fn: () => void) { try { fn(); } catch {} }
+function safe(fn: () => void) {
+  try {
+    fn();
+  } catch {}
+}
 
 export const TG = {
   available: !!wa,
@@ -45,8 +53,12 @@ export const TG = {
     applyScheme();
     safe(() => wa.onEvent('themeChanged', applyScheme));
   },
-  version(): string { return wa ? String(wa.version || '0') : '0'; },
-  colorScheme(): string { return wa && wa.colorScheme === 'light' ? 'light' : 'dark'; },
+  version(): string {
+    return wa ? String(wa.version || '0') : '0';
+  },
+  colorScheme(): string {
+    return wa && wa.colorScheme === 'light' ? 'light' : 'dark';
+  },
   user(): TGUser {
     const u = wa?.initDataUnsafe?.user;
     if (u) return u;
@@ -55,17 +67,47 @@ export const TG = {
   realUser(): TGUser | null {
     return wa?.initDataUnsafe?.user ? wa.initDataUnsafe.user : null;
   },
-  initData(): string { return (wa && wa.initData) || ''; },
+  initData(): string {
+    return (wa && wa.initData) || '';
+  },
   startParam(): string {
-    try { return (wa?.initDataUnsafe?.start_param) || ''; } catch { return ''; }
+    try {
+      return wa?.initDataUnsafe?.start_param || '';
+    } catch {
+      return '';
+    }
   },
   haptic: {
-    tap() { safe(() => { if (isAtLeast('6.1')) wa.HapticFeedback.selectionChanged(); }); },
-    light() { safe(() => { if (isAtLeast('6.1')) wa.HapticFeedback.impactOccurred('light'); }); },
-    medium() { safe(() => { if (isAtLeast('6.1')) wa.HapticFeedback.impactOccurred('medium'); }); },
-    success() { safe(() => { if (isAtLeast('6.1')) wa.HapticFeedback.notificationOccurred('success'); }); },
-    error() { safe(() => { if (isAtLeast('6.1')) wa.HapticFeedback.notificationOccurred('error'); }); },
-    warning() { safe(() => { if (isAtLeast('6.1')) wa.HapticFeedback.notificationOccurred('warning'); }); },
+    tap() {
+      safe(() => {
+        if (isAtLeast('6.1')) wa.HapticFeedback.selectionChanged();
+      });
+    },
+    light() {
+      safe(() => {
+        if (isAtLeast('6.1')) wa.HapticFeedback.impactOccurred('light');
+      });
+    },
+    medium() {
+      safe(() => {
+        if (isAtLeast('6.1')) wa.HapticFeedback.impactOccurred('medium');
+      });
+    },
+    success() {
+      safe(() => {
+        if (isAtLeast('6.1')) wa.HapticFeedback.notificationOccurred('success');
+      });
+    },
+    error() {
+      safe(() => {
+        if (isAtLeast('6.1')) wa.HapticFeedback.notificationOccurred('error');
+      });
+    },
+    warning() {
+      safe(() => {
+        if (isAtLeast('6.1')) wa.HapticFeedback.notificationOccurred('warning');
+      });
+    },
   },
   showBack(cb: () => void) {
     safe(() => {
@@ -92,33 +134,83 @@ export const TG = {
         const mb = wa.MainButton;
         mb.setParams({ text, color: opts.color || '#3b82f6', is_active: true, is_visible: true });
         (TG.main as any)._off();
-        mb.onClick((TG.main as any)._cb = onClick);
+        mb.onClick(((TG.main as any)._cb = onClick));
         if (opts.progress) mb.showProgress(false);
         mb.show();
       });
     },
-    hideProgress() { safe(() => { if (wa?.MainButton) wa.MainButton.hideProgress(); }); },
-    hide() { safe(() => { if (wa?.MainButton) { (TG.main as any)._off(); wa.MainButton.hide(); } }); },
+    hideProgress() {
+      safe(() => {
+        if (wa?.MainButton) wa.MainButton.hideProgress();
+      });
+    },
+    hide() {
+      safe(() => {
+        if (wa?.MainButton) {
+          (TG.main as any)._off();
+          wa.MainButton.hide();
+        }
+      });
+    },
     _cb: null as any,
-    _off() { safe(() => { if (wa?.MainButton && (TG.main as any)._cb) wa.MainButton.offClick((TG.main as any)._cb); (TG.main as any)._cb = null; }); },
+    _off() {
+      safe(() => {
+        if (wa?.MainButton && (TG.main as any)._cb) wa.MainButton.offClick((TG.main as any)._cb);
+        (TG.main as any)._cb = null;
+      });
+    },
   },
   alert(message: string, cb?: () => void) {
     safe(() => {
-      if (isAtLeast('6.2') && wa.showAlert) { wa.showAlert(String(message)); if (cb) setTimeout(cb, 350); return; }
-      window.alert(String(message)); if (cb) cb();
+      if (isAtLeast('6.2') && wa.showAlert) {
+        wa.showAlert(String(message));
+        if (cb) setTimeout(cb, 350);
+        return;
+      }
+      window.alert(String(message));
+      if (cb) cb();
     });
   },
   confirm(message: string, onYes?: () => void) {
     safe(() => {
-      if (isAtLeast('6.2') && wa.showConfirm) { wa.showConfirm(String(message), (ok: boolean) => { if (ok && onYes) onYes(); }); return; }
+      if (isAtLeast('6.2') && wa.showConfirm) {
+        wa.showConfirm(String(message), (ok: boolean) => {
+          if (ok && onYes) onYes();
+        });
+        return;
+      }
       if (window.confirm(String(message)) && onYes) onYes();
     });
   },
-  preventClose(on: boolean) { safe(() => { if (isAtLeast('7.0') && wa.enableClosingConfirmation) { on ? wa.enableClosingConfirmation() : wa.disableClosingConfirmation(); } }); },
-  openLink(url: string) { safe(() => { if (wa?.openLink) wa.openLink(url); else window.open(url, '_blank'); }); },
-  openTelegramLink(url: string) { safe(() => { if (wa?.openTelegramLink) wa.openTelegramLink(url); else window.open(url, '_blank'); }); },
-  share(url: string, text?: string) { (TG as any).openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(url) + '&text=' + encodeURIComponent(text || '')); },
-  close() { safe(() => { if (wa) wa.close(); }); },
+  preventClose(on: boolean) {
+    safe(() => {
+      if (!isAtLeast('7.0')) return;
+      if (on) wa.enableClosingConfirmation?.();
+      else wa.disableClosingConfirmation?.();
+    });
+  },
+  openLink(url: string) {
+    safe(() => {
+      if (wa?.openLink) wa.openLink(url);
+      else window.open(url, '_blank');
+    });
+  },
+  openTelegramLink(url: string) {
+    safe(() => {
+      if (wa?.openTelegramLink) wa.openTelegramLink(url);
+      else window.open(url, '_blank');
+    });
+  },
+  share(url: string, text?: string) {
+    (TG as any).openTelegramLink(
+      'https://t.me/share/url?url=' + encodeURIComponent(url) + '&text=' + encodeURIComponent(text || ''),
+    );
+  },
+  close() {
+    safe(() => {
+      if (wa) wa.close();
+    });
+  },
   _backCb: null as any,
 };
 

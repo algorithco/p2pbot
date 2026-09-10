@@ -4,7 +4,12 @@ let tc: any = null;
 let restorePromise: Promise<any> | null = null;
 
 function getTonConnectClass(): any {
-  return (window as any).TonConnectUI || ((window as any).TON_CONNECT_UI && (window as any).TON_CONNECT_UI.TonConnectUI) || (window as any).TON_CONNECT_UI || null;
+  return (
+    (window as any).TonConnectUI ||
+    ((window as any).TON_CONNECT_UI && (window as any).TON_CONNECT_UI.TonConnectUI) ||
+    (window as any).TON_CONNECT_UI ||
+    null
+  );
 }
 let fallbackInjected = false;
 function injectFallbackSdk() {
@@ -17,7 +22,9 @@ function injectFallbackSdk() {
     s.onload = () => console.log('[Wallet] fallback CDN loaded');
     s.onerror = () => console.warn('[Wallet] fallback CDN failed');
     document.head.appendChild(s);
-  } catch (e) { console.warn('[Wallet] fallback inject error', e); }
+  } catch (e) {
+    console.warn('[Wallet] fallback inject error', e);
+  }
   setTimeout(() => {
     if (!getTonConnectClass()) {
       try {
@@ -35,7 +42,9 @@ function loadSdk(timeoutMs = 15000): Promise<any> {
     if (cls) return resolve(cls);
     const started = Date.now();
     const timeout = timeoutMs;
-    setTimeout(() => { if (!getTonConnectClass()) injectFallbackSdk(); }, 1500);
+    setTimeout(() => {
+      if (!getTonConnectClass()) injectFallbackSdk();
+    }, 1500);
     const poll = () => {
       const c = getTonConnectClass();
       if (c) return resolve(c);
@@ -46,12 +55,18 @@ function loadSdk(timeoutMs = 15000): Promise<any> {
   });
 }
 function getManifestUrl(): string {
-  const cfg = (window as any).TONCONNECT_MANIFEST_URL || ((window as any).APP_CONFIG && (window as any).APP_CONFIG.manifestUrl) || '';
+  const cfg =
+    (window as any).TONCONNECT_MANIFEST_URL ||
+    ((window as any).APP_CONFIG && (window as any).APP_CONFIG.manifestUrl) ||
+    '';
   if (typeof cfg === 'string' && cfg.trim() && cfg.indexOf('YOUR_USERNAME') === -1) return cfg.trim();
   return location.origin + '/tonconnect-manifest.json';
 }
 function getTwaReturnUrl(): string | undefined {
-  const cfg = (window as any).TONCONNECT_TWA_RETURN_URL || ((window as any).APP_CONFIG && (window as any).APP_CONFIG.twaReturnUrl) || '';
+  const cfg =
+    (window as any).TONCONNECT_TWA_RETURN_URL ||
+    ((window as any).APP_CONFIG && (window as any).APP_CONFIG.twaReturnUrl) ||
+    '';
   if (typeof cfg === 'string' && cfg.trim() && cfg.indexOf('YOUR_') === -1) return cfg.trim();
   try {
     if ((window as any).Telegram?.WebApp?.initData) return 'https://t.me/uzsavdochibot/app';
@@ -67,60 +82,104 @@ function getAccount(): any {
 }
 function ensure(): Promise<any> {
   if (restorePromise) return restorePromise;
-  restorePromise = loadSdk().then(TC => {
+  restorePromise = loadSdk().then((TC) => {
     if (!tc) {
       const opts: any = { manifestUrl: getManifestUrl() };
       const twa = getTwaReturnUrl();
       if (twa) opts.twaReturnUrl = twa;
       tc = new TC(opts);
-      if (tc.restoreConnection) { try { tc.restoreConnection(); } catch {} }
+      if (tc.restoreConnection) {
+        try {
+          tc.restoreConnection();
+        } catch {}
+      }
     }
     return tc;
   });
   return restorePromise;
 }
 setTimeout(() => {
-  if (getTonConnectClass()) { ensure().catch(()=>{}); }
-  else { loadSdk(8000).then(()=> ensure()).catch(()=>{}); }
+  if (getTonConnectClass()) {
+    ensure().catch(() => {});
+  } else {
+    loadSdk(8000)
+      .then(() => ensure())
+      .catch(() => {});
+  }
 }, 300);
 
 export const Wallet = {
-  available(): boolean { return !!getTonConnectClass(); },
+  available(): boolean {
+    return !!getTonConnectClass();
+  },
   whenReady: ensure,
-  connected(): boolean { return !!getAccount(); },
-  address(): string | null { const acc = getAccount(); return acc ? acc.address : null; },
+  connected(): boolean {
+    return !!getAccount();
+  },
+  address(): string | null {
+    const acc = getAccount();
+    return acc ? acc.address : null;
+  },
   addressFriendly(): string | null {
     const addr = (this as any).address();
     if (!addr) return null;
     try {
       const UI = (window as any).UI;
-      if (UI?.toFriendly) { const f = UI.toFriendly(addr); return f || addr; }
+      if (UI?.toFriendly) {
+        const f = UI.toFriendly(addr);
+        return f || addr;
+      }
     } catch {}
     return addr;
   },
   /* TON Connect reports chain as a string ("-239"); coerce once so every
    * `chain === -239` label check sees a number (previously fell through to "Chain -239"). */
-  chain(): number | null { const acc = getAccount(); const c = acc && (acc as any).chain != null ? Number((acc as any).chain) : NaN; return Number.isFinite(c) ? c : null; },
-  walletName(): string { return tc?.wallet ? (tc.wallet.name || tc.wallet.appName || '') : ''; },
-  walletInfo(): any { return tc ? tc.wallet : null; },
-  connect(): Promise<any> { return ensure().then(w => w.connectWallet()); },
-  disconnect(): Promise<any> { if (!tc) return Promise.resolve(); return tc.disconnect ? tc.disconnect() : Promise.resolve(); },
+  chain(): number | null {
+    const acc = getAccount();
+    const c = acc && (acc as any).chain != null ? Number((acc as any).chain) : NaN;
+    return Number.isFinite(c) ? c : null;
+  },
+  walletName(): string {
+    return tc?.wallet ? tc.wallet.name || tc.wallet.appName || '' : '';
+  },
+  walletInfo(): any {
+    return tc ? tc.wallet : null;
+  },
+  connect(): Promise<any> {
+    return ensure().then((w) => w.connectWallet());
+  },
+  disconnect(): Promise<any> {
+    if (!tc) return Promise.resolve();
+    return tc.disconnect ? tc.disconnect() : Promise.resolve();
+  },
   /** One-tap primitive: send prebuilt TON Connect messages (payload already includes encrypted memo). */
   sendTx(messages: { address: string; amount: string; payload?: string }[]): Promise<any> {
-    return ensure().then(w => w.sendTransaction({
-      validUntil: Math.floor(Date.now() / 1000) + 600,
-      messages,
-    }));
+    return ensure().then((w) =>
+      w.sendTransaction({
+        validUntil: Math.floor(Date.now() / 1000) + 600,
+        messages,
+      }),
+    );
   },
-  onStatus(cb: (acc: any)=>void) {
-    ensure().then(w => {
-      try { cb(getAccount()); } catch {}
-      const unsub = w.onStatusChange((wallet: any) => {
-        const acc = wallet?.account ? wallet.account : getAccount();
-        try { cb(acc || getAccount()); } catch {}
+  onStatus(cb: (acc: any) => void) {
+    ensure()
+      .then((w) => {
+        try {
+          cb(getAccount());
+        } catch {}
+        const unsub = w.onStatusChange((wallet: any) => {
+          const acc = wallet?.account ? wallet.account : getAccount();
+          try {
+            cb(acc || getAccount());
+          } catch {}
+        });
+        return unsub;
+      })
+      .catch(() => {
+        try {
+          cb(null);
+        } catch {}
       });
-      return unsub;
-    }).catch(()=> { try { cb(null); } catch {} });
   },
   getBalance(): Promise<any> {
     const addr = (this as any).address();
@@ -134,21 +193,29 @@ export const Wallet = {
     if (!c) return Promise.reject(new Error('memo_required'));
     if (c.length > 120) return Promise.reject(new Error('memo_too_long'));
     const url = '/api/ton/payload?comment=' + encodeURIComponent(c);
-    return fetch(url, { headers: { 'Accept': 'application/json' } as any }).then(r => {
-      if (!r.ok) throw new Error('payload_encode_failed');
-      return r.json();
-    }).then(j => { if (j?.payload) return j.payload; throw new Error('payload_encode_failed'); });
+    return fetch(url, { headers: { Accept: 'application/json' } as any })
+      .then((r) => {
+        if (!r.ok) throw new Error('payload_encode_failed');
+        return r.json();
+      })
+      .then((j) => {
+        if (j?.payload) return j.payload;
+        throw new Error('payload_encode_failed');
+      });
   },
   pay(to: string, amountTon: number, comment: string): Promise<any> {
-    return ensure().then(w => {
+    return ensure().then((w) => {
       const amt = Number(amountTon);
       if (!isFinite(amt) || amt <= 0) return Promise.reject(new Error('invalid_amount'));
-      if (!comment || !String(comment).trim()) return Promise.reject(new Error('memo_required: comment escrow# mandatory'));
+      if (!comment || !String(comment).trim())
+        return Promise.reject(new Error('memo_required: comment escrow# mandatory'));
       const nano = String(Math.round(amt * 1e9));
-      return (Wallet as any).commentPayload(comment).then((payload: string) => w.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [{ address: to, amount: nano, payload }],
-      }));
+      return (Wallet as any).commentPayload(comment).then((payload: string) =>
+        w.sendTransaction({
+          validUntil: Math.floor(Date.now() / 1000) + 600,
+          messages: [{ address: to, amount: nano, payload }],
+        }),
+      );
     });
   },
 };

@@ -11,9 +11,11 @@ FROM node:20-alpine
 ENV NODE_ENV=production
 ENV PORT=3001
 WORKDIR /app/signer
-RUN addgroup -S signer && adduser -S signer -G signer
+RUN apk upgrade --no-cache && addgroup -S signer && adduser -S signer -G signer
 COPY signer/package*.json ./
 RUN npm ci --omit=dev || npm install --omit=dev
+# Drop bundled npm/npx: unused at runtime, but ships vulnerable tar/brace-expansion copies that trip image scanners.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /app/signer/dist ./dist
 # Do NOT copy .env — injected via env_file at runtime
 EXPOSE 3001

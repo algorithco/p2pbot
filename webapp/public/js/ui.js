@@ -99,7 +99,9 @@
       var bin = '';
       for (var j = 0; j < bytes.length; j++) bin += String.fromCharCode(bytes[j]);
       return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    } catch (e) { return String(raw || ''); }
+    } catch (e) {
+      return String(raw || '');
+    }
   };
 
   UI.shortAddr = function (a) {
@@ -110,12 +112,12 @@
   /* ---------- Domain meta ---------- */
 
   var STATUSES = {
-    AWAITING_DEPOSIT:  { label: "To'lov kutilmoqda",       cls: 'st-awaiting',  step: 0 },
-    DEPOSIT_CONFIRMED: { label: "Mablag' tushdi — mahsulotni yuboring",     cls: 'st-funded',    step: 1 },
-    ITEM_SENT:         { label: 'Yuborildi — xaridor tasdiqlaydi',cls: 'st-sent',      step: 2 },
-    BUYER_CONFIRMED:   { label: 'Xaridor tasdiqladi',        cls: 'st-confirmed', step: 2 },
-    RELEASED:          { label: 'Yakunlandi',               cls: 'st-released',  step: 3 },
-    REFUNDED:          { label: 'Qaytarildi',               cls: 'st-refunded',  step: 3 }
+    AWAITING_DEPOSIT: { label: "To'lov kutilmoqda", cls: 'st-awaiting', step: 0 },
+    DEPOSIT_CONFIRMED: { label: "Mablag' tushdi — mahsulotni yuboring", cls: 'st-funded', step: 1 },
+    ITEM_SENT: { label: 'Yuborildi — xaridor tasdiqlaydi', cls: 'st-sent', step: 2 },
+    BUYER_CONFIRMED: { label: 'Xaridor tasdiqladi', cls: 'st-confirmed', step: 2 },
+    RELEASED: { label: 'Yakunlandi', cls: 'st-released', step: 3 },
+    REFUNDED: { label: 'Qaytarildi', cls: 'st-refunded', step: 3 },
   };
 
   UI.statusMeta = function (status) {
@@ -130,8 +132,8 @@
 
   UI.assetMeta = function (asset) {
     var a = String(asset || '').toUpperCase();
-    if (a === 'TON')  return { name: 'Toncoin', symbol: 'TON',  glyph: '\u25C8', cls: 'asset-ton' };
-    if (a === 'USDT') return { name: 'Tether',  symbol: 'USDT', glyph: '\u20AE', cls: 'asset-usdt' };
+    if (a === 'TON') return { name: 'Toncoin', symbol: 'TON', glyph: '\u25C8', cls: 'asset-ton' };
+    if (a === 'USDT') return { name: 'Tether', symbol: 'USDT', glyph: '\u20AE', cls: 'asset-usdt' };
     return { name: a || 'Aktiv', symbol: a || '?', glyph: '\u25C6', cls: 'asset-any' };
   };
 
@@ -146,7 +148,9 @@
       var uid = Number(window.TG && TG.user().id);
       if (Number(deal.buyer_telegram_id) === uid) return 'Siz xaridorsiz';
       if (Number(deal.seller_telegram_id) === uid) return 'Siz sotuvchisiz';
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
     return '';
   };
 
@@ -155,13 +159,18 @@
   UI.toast = function (message, type) {
     var root = document.getElementById('toast-root');
     while (root.children.length > 2) root.removeChild(root.firstChild);
-    var cls = type === 'ok' ? 'ok' : (type === 'err' ? 'err' : '');
+    var cls = type === 'ok' ? 'ok' : type === 'err' ? 'err' : '';
     var t = UI.h('div', { class: 'toast ' + cls, text: String(message) });
     root.appendChild(t);
-    setTimeout(function () {
-      t.classList.add('out');
-      setTimeout(function () { t.remove(); }, 260);
-    }, type === 'err' ? 3400 : 2200);
+    setTimeout(
+      function () {
+        t.classList.add('out');
+        setTimeout(function () {
+          t.remove();
+        }, 260);
+      },
+      type === 'err' ? 3400 : 2200,
+    );
   };
 
   /* ---------- Clipboard ---------- */
@@ -174,12 +183,22 @@
       ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
       document.body.appendChild(ta);
       ta.select();
-      try { document.execCommand('copy'); } catch (e) { /* ignore */ }
+      try {
+        document.execCommand('copy');
+      } catch (e) {
+        /* ignore */
+      }
       ta.remove();
     }
-    function done() { UI.toast(label, 'ok'); if (window.TG) TG.haptic.success(); }
+    function done() {
+      UI.toast(label, 'ok');
+      if (window.TG) TG.haptic.success();
+    }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text); done(); });
+      navigator.clipboard.writeText(text).then(done, function () {
+        fallbackCopy(text);
+        done();
+      });
     } else {
       fallbackCopy(text);
       done();
@@ -208,13 +227,12 @@
     var root = document.getElementById('sheet-root');
     root.innerHTML = '';
 
-    var sheet = UI.h('div', { class: 'sheet' }, [
-      UI.h('div', { class: 'sheet-grabber' }),
-      contentEl
-    ]);
+    var sheet = UI.h('div', { class: 'sheet' }, [UI.h('div', { class: 'sheet-grabber' }), contentEl]);
     var backdrop = UI.h('div', {
       class: 'sheet-backdrop',
-      onclick: function () { if (!opts.locked) UI.sheetClose(); }
+      onclick: function () {
+        if (!opts.locked) UI.sheetClose();
+      },
     });
 
     root.appendChild(backdrop);
@@ -222,7 +240,9 @@
     root.classList.add('open');
 
     if (window.TG && TG.available) {
-      TG.showBack(function () { if (!opts.locked) UI.sheetClose(); });
+      TG.showBack(function () {
+        if (!opts.locked) UI.sheetClose();
+      });
       TG.preventClose(!!opts.locked);
     }
     return { close: UI.sheetClose, el: sheet };

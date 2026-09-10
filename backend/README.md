@@ -5,40 +5,40 @@ TypeScript service that runs the Telegram bot (grammY), the REST API
 
 ## Scripts
 
-| Script | Command | What it does |
-|--------|---------|--------------|
-| build | `npm run build` | Compile `src/` → `dist/` with tsc |
-| start | `npm start` | Run compiled `node dist/index.js` |
-| dev | `npm run dev` | Run in-place with ts-node (no build) |
+| Script | Command         | What it does                         |
+| ------ | --------------- | ------------------------------------ |
+| build  | `npm run build` | Compile `src/` → `dist/` with tsc    |
+| start  | `npm start`     | Run compiled `node dist/index.js`    |
+| dev    | `npm run dev`   | Run in-place with ts-node (no build) |
 
 ## Environment variables
 
 Copy `.env.example` to `.env`. Names match `src/config.ts` exactly.
 
-| Variable | Default (code) | Description |
-|----------|----------------|-------------|
-| `BOT_TOKEN` | — | BotFather token; without it polling is disabled and `/api/notify` returns 503 |
-| `ADMIN_TELEGRAM_IDS` | empty | Comma-separated admin Telegram user ids |
-| `DATABASE_URL` | — | Postgres connection string |
-| `PORT` | `3000` | HTTP port (`src/index.ts`) |
-| `TON_API_ENDPOINT` | derived from `TON_NETWORK` | Optional verbatim override, e.g. `https://toncenter.com/api/v2/jsonRPC` |
-| `TON_NETWORK` | `mainnet` | `testnet` or `mainnet`; selects the matching toncenter endpoint |
-| `TONCENTER_API_KEY` | empty | Optional API key for toncenter (recommended in prod) |
-| `SIGNER_URL` | `http://signer:3001` | URL of the isolated W5 signer microservice |
-| `SIGNER_API_KEY` | empty | Must match `SIGNER_API_KEY` in `signer/.env` (32+ chars) |
-| `ESCROW_CONTRACT_CODE_HEX` | empty | Compiled Escrow code hex (see contracts/README.md) |
-| `JETTON_MASTER_ADDRESS` | unset | Jetton master used for jetton deals |
-| `USDT_JETTON_ADDRESS` | empty | Canonical USDT jetton address on TON |
-| `JETTON_WALLET_CODE_HASH` | `0` | Decimal string of jetton wallet code hash |
-| `FEE_ADDRESS` | empty | Fee collector address |
-| `FEE_BPS` | `100` | Fee in basis points (100 = 1%) |
-| `FEE_PERCENTAGE` | `1` | Legacy percent alias; prefer `FEE_BPS` |
-| `MIN_CONFIRMATIONS` | `3` | Confirmations before a deposit is trusted |
-| `ADMIN_ADDRESS` | empty | On-chain arbiter/admin address |
-| `WALLET_ADDRESS` | empty | W5 signer address (auto-derived from signer; set manually to override) |
-| `REQUIRE_ONCHAIN` | `false` | `true` = refuse to operate without deployed contract |
-| `WEBAPP_URL` | empty | Public HTTPS Mini App URL (menu button + join links) |
-| `API_KEY` | unset | Shared API secret; **unset = all protected routes are open** |
+| Variable                   | Default (code)             | Description                                                                   |
+| -------------------------- | -------------------------- | ----------------------------------------------------------------------------- |
+| `BOT_TOKEN`                | —                          | BotFather token; without it polling is disabled and `/api/notify` returns 503 |
+| `ADMIN_TELEGRAM_IDS`       | empty                      | Comma-separated admin Telegram user ids                                       |
+| `DATABASE_URL`             | —                          | Postgres connection string                                                    |
+| `PORT`                     | `3000`                     | HTTP port (`src/index.ts`)                                                    |
+| `TON_API_ENDPOINT`         | derived from `TON_NETWORK` | Optional verbatim override, e.g. `https://toncenter.com/api/v2/jsonRPC`       |
+| `TON_NETWORK`              | `mainnet`                  | `testnet` or `mainnet`; selects the matching toncenter endpoint               |
+| `TONCENTER_API_KEY`        | empty                      | Optional API key for toncenter (recommended in prod)                          |
+| `SIGNER_URL`               | `http://signer:3001`       | URL of the isolated W5 signer microservice                                    |
+| `SIGNER_API_KEY`           | empty                      | Must match `SIGNER_API_KEY` in `signer/.env` (32+ chars)                      |
+| `ESCROW_CONTRACT_CODE_HEX` | empty                      | Compiled Escrow code hex (see contracts/README.md)                            |
+| `JETTON_MASTER_ADDRESS`    | unset                      | Jetton master used for jetton deals                                           |
+| `USDT_JETTON_ADDRESS`      | empty                      | Canonical USDT jetton address on TON                                          |
+| `JETTON_WALLET_CODE_HASH`  | `0`                        | Decimal string of jetton wallet code hash                                     |
+| `FEE_ADDRESS`              | empty                      | Fee collector address                                                         |
+| `FEE_BPS`                  | `100`                      | Fee in basis points (100 = 1%)                                                |
+| `FEE_PERCENTAGE`           | `1`                        | Legacy percent alias; prefer `FEE_BPS`                                        |
+| `MIN_CONFIRMATIONS`        | `3`                        | Confirmations before a deposit is trusted                                     |
+| `ADMIN_ADDRESS`            | empty                      | On-chain arbiter/admin address                                                |
+| `WALLET_ADDRESS`           | empty                      | W5 signer address (auto-derived from signer; set manually to override)        |
+| `REQUIRE_ONCHAIN`          | `false`                    | `true` = refuse to operate without deployed contract                          |
+| `WEBAPP_URL`               | empty                      | Public HTTPS Mini App URL (menu button + join links)                          |
+| `API_KEY`                  | unset                      | Shared API secret; **unset = all protected routes are open**                  |
 
 ## REST API
 
@@ -50,7 +50,7 @@ Auth legend (see `src/auth/guard.ts`):
   authenticated user id is attached as `req.user`.
 - **API key** — `x-api-key: <API_KEY>` header only (never in query strings), intended for
   server-to-server callers. Compared timing-safely.
-- **Dev fallback** — only when *both* `BOT_TOKEN` and `API_KEY` are unset:
+- **Dev fallback** — only when _both_ `BOT_TOKEN` and `API_KEY` are unset:
   trusts `x-telegram-user-id` (logs a one-time warning). Never happens with a
   configured deployment.
 - **Admin** — Telegram identity whose id is in `ADMIN_TELEGRAM_IDS`, or any
@@ -59,22 +59,22 @@ Auth legend (see `src/auth/guard.ts`):
 Rate limits (sliding window, per IP+route): create deal 10/min · join 20/min ·
 chat post 60/min · notify 5/min.
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/api/info` | public | Admin ids + `feeBps` — also the health probe target |
-| GET | `/api/deals` | Identity (party or admin) | Private: only deals where caller is buyer/seller (admin sees all 100) |
-| GET | `/api/deals/:id` | Identity (party or admin, token preview) | Single deal — only buyer/seller/admin or valid `?token=` invite |
-| GET | `/api/deals/:id/chat` | Identity (party or admin) | Deal chat messages (ciphertext only) |
-| GET | `/api/deals/:id/payload` | Identity (party or admin, token preview) | Deal TON payloads — party/admin or `?token=` |
-| GET | `/api/status/:address` | public | On-chain `getStatus()` for an escrow address |
-| GET | `/api/deals/mine` | Identity | Alias for `GET /api/deals` — deals where caller is buyer or seller |
-| POST | `/api/deals` | Identity | Create deal `{sellerId, asset, amount[, terms, deadline]}`; `buyerId` forced to caller; returns one-time join link |
-| POST | `/api/deals/:id/join/:token` | Identity | Consume one-time link, assign missing role (caller id used) |
-| POST | `/api/deals/:id/chat` | Identity (party or admin) | Post `{content}`; sender forced to caller |
-| POST | `/api/notify` | Admin | Send a bot message `{chatId, message}` |
-| GET | `/api/notifications` | Admin | Last 200 notifications |
-| POST | `/api/withdraw` | Admin | Release wrapper (guarded DB transition; on-chain send stubbed until wallet configured) |
-| POST | `/api/refund` | Admin | Refund wrapper (same caveat as withdraw) |
+| Method | Path                         | Auth                                     | Description                                                                                                        |
+| ------ | ---------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/api/info`                  | public                                   | Admin ids + `feeBps` — also the health probe target                                                                |
+| GET    | `/api/deals`                 | Identity (party or admin)                | Private: only deals where caller is buyer/seller (admin sees all 100)                                              |
+| GET    | `/api/deals/:id`             | Identity (party or admin, token preview) | Single deal — only buyer/seller/admin or valid `?token=` invite                                                    |
+| GET    | `/api/deals/:id/chat`        | Identity (party or admin)                | Deal chat messages (ciphertext only)                                                                               |
+| GET    | `/api/deals/:id/payload`     | Identity (party or admin, token preview) | Deal TON payloads — party/admin or `?token=`                                                                       |
+| GET    | `/api/status/:address`       | public                                   | On-chain `getStatus()` for an escrow address                                                                       |
+| GET    | `/api/deals/mine`            | Identity                                 | Alias for `GET /api/deals` — deals where caller is buyer or seller                                                 |
+| POST   | `/api/deals`                 | Identity                                 | Create deal `{sellerId, asset, amount[, terms, deadline]}`; `buyerId` forced to caller; returns one-time join link |
+| POST   | `/api/deals/:id/join/:token` | Identity                                 | Consume one-time link, assign missing role (caller id used)                                                        |
+| POST   | `/api/deals/:id/chat`        | Identity (party or admin)                | Post `{content}`; sender forced to caller                                                                          |
+| POST   | `/api/notify`                | Admin                                    | Send a bot message `{chatId, message}`                                                                             |
+| GET    | `/api/notifications`         | Admin                                    | Last 200 notifications                                                                                             |
+| POST   | `/api/withdraw`              | Admin                                    | Release wrapper (guarded DB transition; on-chain send stubbed until wallet configured)                             |
+| POST   | `/api/refund`                | Admin                                    | Refund wrapper (same caveat as withdraw)                                                                           |
 
 ### Headers sent by the webapp
 

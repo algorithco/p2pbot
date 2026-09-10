@@ -1,0 +1,2 @@
+# Enforce Conventional Commits (feat:/fix:/docs:/chore:/...). Same rule runs in CI.
+npx --no -- commitlint --edit "$1"

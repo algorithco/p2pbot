@@ -1,6 +1,16 @@
 import winston from 'winston';
 
-const SENSITIVE_KEYS = ['session', 'UBOT_SESSION_STRING', 'ENCRYPTION_KEY', 'API_HASH', 'TWO_FA_PASSWORD', 'password', 'passwd', 'api_key', 'x-api-key'];
+const SENSITIVE_KEYS = [
+  'session',
+  'UBOT_SESSION_STRING',
+  'ENCRYPTION_KEY',
+  'API_HASH',
+  'TWO_FA_PASSWORD',
+  'password',
+  'passwd',
+  'api_key',
+  'x-api-key',
+];
 
 function redact(obj: unknown): unknown {
   if (!obj || typeof obj !== 'object') return obj;
@@ -17,7 +27,11 @@ function redact(obj: unknown): unknown {
   for (const k of SENSITIVE_KEYS) {
     for (const key of Object.keys(copy)) {
       if (key.toLowerCase().includes(k.toLowerCase())) copy[key] = '[REDACTED]';
-      if (typeof copy[key] === 'string' && String(copy[key]).length > 100 && /^[A-Za-z0-9+/=]+$/.test(String(copy[key]))) {
+      if (
+        typeof copy[key] === 'string' &&
+        String(copy[key]).length > 100 &&
+        /^[A-Za-z0-9+/=]+$/.test(String(copy[key]))
+      ) {
         // Long base64 string likely session — redact partially
         const s = String(copy[key]);
         copy[key] = s.slice(0, 8) + '...[REDACTED]...' + s.slice(-8);
@@ -35,24 +49,31 @@ const baseFormat = winston.format.combine(
   winston.format.errors({ stack: true }),
   winston.format.printf(({ level, message, timestamp, stack, ...meta }) => {
     const metaStr = Object.keys(meta).length ? ' ' + JSON.stringify(redact(meta)) : '';
-    const msgStr = typeof message === 'string' ? message : JSON.stringify(redact(message as unknown as Record<string, unknown>));
+    const msgStr =
+      typeof message === 'string' ? message : JSON.stringify(redact(message as unknown as Record<string, unknown>));
     const stackStr = stack ? `\n${String(stack).slice(0, 800)}` : '';
     return `${timestamp} ${level}: ${msgStr}${metaStr}${stackStr}`;
-  })
+  }),
 );
 
-const jsonFormat = winston.format.combine(winston.format.timestamp(), winston.format.errors({ stack: true }), winston.format.json());
+const jsonFormat = winston.format.combine(
+  winston.format.timestamp(),
+  winston.format.errors({ stack: true }),
+  winston.format.json(),
+);
 
 const transports: winston.transport[] = [
   new winston.transports.Console({
-    format: isProd ? jsonFormat : winston.format.combine(winston.format.colorize(), winston.format.simple(), baseFormat),
+    format: isProd
+      ? jsonFormat
+      : winston.format.combine(winston.format.colorize(), winston.format.simple(), baseFormat),
   }),
 ];
 
 // In production try to add file transport if available (winston-daily-rotate-file)
 if (isProd) {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const DailyRotateFile = require('winston-daily-rotate-file');
     transports.push(
       new DailyRotateFile({
@@ -62,7 +83,7 @@ if (isProd) {
         maxFiles: '14d',
         format: jsonFormat,
         level: logLevel,
-      })
+      }),
     );
   } catch {
     // fallback: no file transport
@@ -94,8 +115,14 @@ export function sanitizeLogValue(v: unknown, max = 200): string {
   if (typeof v === 'string') s = v;
   else if (v === null || v === undefined) s = '';
   else {
-    try { s = JSON.stringify(v); } catch { s = String(v); }
+    try {
+      s = JSON.stringify(v);
+    } catch {
+      s = String(v);
+    }
   }
+  // Control-char class is intentional here: this IS the log-injection sanitizer.
+  // eslint-disable-next-line no-control-regex
   const escaped = s.replace(/[\x00-\x1F\x7F]/g, (c) => {
     if (c === '\n') return '\\n';
     if (c === '\r') return '\\r';

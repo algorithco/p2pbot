@@ -1,7 +1,7 @@
 const ALGO = 'AES-GCM';
 const keyCache: Record<string, { key: CryptoKey; _b64: string }> = {};
 
-function b64ToBytes(b64: string): Uint8Array {
+function b64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
@@ -53,7 +53,11 @@ async function decrypt(b64Cipher: string, b64Key: string): Promise<string> {
   return new TextDecoder().decode(plainBuf);
 }
 function isAvailable(): boolean {
-  try { return !!(window.crypto && (window.crypto as any).subtle); } catch { return false; }
+  try {
+    return !!(window.crypto && (window.crypto as any).subtle);
+  } catch {
+    return false;
+  }
 }
 export const ChatCrypto = {
   isAvailable,

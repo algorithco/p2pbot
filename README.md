@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/algorithco/p2pbot/actions/workflows/ci.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/algorithco/p2pbot/actions/workflows/codeql.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/codeql.yml)
+[![Secret scan](https://github.com/algorithco/p2pbot/actions/workflows/gitleaks.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/gitleaks.yml)
 [![Docker Publish](https://github.com/algorithco/p2pbot/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/algorithco/p2pbot/actions/workflows/docker-publish.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Telegram Mini App](https://img.shields.io/badge/Telegram-Mini_App-2CA5E0?logo=telegram)](https://core.telegram.org/bots/webapps)
@@ -141,17 +142,35 @@ Minimum for off-chain: `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL` (backen
 
 ## Status & roadmap
 
-| Status | Item |
-|--------|------|
-| ✅ | Bot commands and admin flows |
-| ✅ | Deal lifecycle tracked off-chain (create → deposit → confirm → release/refund) |
-| ✅ | Telegram Mini App UI |
-| ✅ | One-time join links + per-deal chat |
-| ✅ | W5 signer microservice (`signer/`) — isolated `SIGNER_MNEMONIC` (24 words) |
-| ⚠️ | Compile the Tact contract and deploy it (see [contracts/README.md](contracts/README.md)) |
-| ⚠️ | Set `REQUIRE_ONCHAIN=true` once deployed to enforce on-chain mode |
-| ⚠️ | Fund the W5 deployer wallet (`SIGNER_MNEMONIC` in `signer/.env`, V5R1) with TON for gas |
-| ❌ | Jetton master verification pending (`USDT_JETTON_ADDRESS` not yet validated on-chain) |
+| Status | Item                                                                                     |
+| ------ | ---------------------------------------------------------------------------------------- |
+| ✅     | Bot commands and admin flows                                                             |
+| ✅     | Deal lifecycle tracked off-chain (create → deposit → confirm → release/refund)           |
+| ✅     | Telegram Mini App UI                                                                     |
+| ✅     | One-time join links + per-deal chat                                                      |
+| ✅     | W5 signer microservice (`signer/`) — isolated `SIGNER_MNEMONIC` (24 words)               |
+| ⚠️     | Compile the Tact contract and deploy it (see [contracts/README.md](contracts/README.md)) |
+| ⚠️     | Set `REQUIRE_ONCHAIN=true` once deployed to enforce on-chain mode                        |
+| ⚠️     | Fund the W5 deployer wallet (`SIGNER_MNEMONIC` in `signer/.env`, V5R1) with TON for gas  |
+| ❌     | Jetton master verification pending (`USDT_JETTON_ADDRESS` not yet validated on-chain)    |
+
+## Contributing — branching, commits, releases
+
+- **No direct pushes to `main`.** Work on a short-lived branch, open a PR,
+  wait for green CI, then squash-merge. Branch protection enforces this.
+- **Conventional Commits** (`feat:`, `fix:`, `docs:`, `chore:`, …) — enforced
+  locally by the commit-msg hook and in CI. They drive the changelog.
+- **Local gates** (installed via `npm install` at the repo root): pre-commit
+  runs prettier + eslint on staged files and a secret scan if `gitleaks` is
+  installed. Run the full suite any time with `npm run verify`
+  (typecheck + lint + format check).
+- **CI gates every PR**: commitlint, ESLint, prettier, `tsc --noEmit` and
+  `npm run build` per package, blocking `npm audit`, Gitleaks, CodeQL, and a
+  Docker build + Trivy scan (images push only from `main`/`v*`, never PRs).
+- **Releases are automatic** (release-please): merging `feat:`/`fix:` to
+  `main` opens a release PR; merging it tags `v*`, publishes GitHub Release
+  notes, and ships `semver` + `latest` GHCR images with provenance
+  attestation. Deploy releases, not floating `main`.
 
 ## Security notes
 
@@ -175,4 +194,4 @@ Minimum for off-chain: `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS`, `DATABASE_URL` (backen
 
 This is the strictest official OSI-approved license. It ensures anyone who runs a modified version over a network (e.g., as a Telegram bot / Mini App backend) must make the complete Corresponding Source available to all remote users via a network server at no charge (Section 13). Includes strong copyleft and explicit patent grant. Commercial use without source disclosure is not permitted — use the network clause to preserve user freedom for SaaS.
 
-*Other strict official alternatives:* `GPL-3.0` (copyleft without network clause) and `Apache-2.0` (permissive, patent grant, commercial-friendly). This project uses `AGPL-3.0` for maximum strictness.
+_Other strict official alternatives:_ `GPL-3.0` (copyleft without network clause) and `Apache-2.0` (permissive, patent grant, commercial-friendly). This project uses `AGPL-3.0` for maximum strictness.

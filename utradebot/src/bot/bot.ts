@@ -31,7 +31,7 @@ export async function startBot(): Promise<Bot> {
         '• Buyer: /buy <tradeId> — bind as buyer, receive phone, send login code\n' +
         '• I verify code, log buyer in, and log out (seller session revoked)\n\n' +
         'Commands: /sell, /buy, /mytrades, /setbuyer, /setphone, /cancel',
-      { parse_mode: 'Markdown', reply_markup: mainKeyboard() }
+      { parse_mode: 'Markdown', reply_markup: mainKeyboard() },
     );
   });
 
@@ -60,7 +60,7 @@ export async function startBot(): Promise<Bot> {
         '/setbuyer <id> <buyerId> — bind buyer\n' +
         '/buy <id> — become buyer\n' +
         '/mytrades — list your trades\n' +
-        '/cancel — cancel current step'
+        '/cancel — cancel current step',
     );
   });
 
@@ -79,9 +79,15 @@ export async function startBot(): Promise<Bot> {
   });
 
   // Skip setMyCommands for placeholder token to avoid 401 spam
-  const isPlaceholder = !config.botToken || config.botToken.includes('123456:ABC') || config.botToken.includes('change_me') || config.botToken.length < 20;
+  const isPlaceholder =
+    !config.botToken ||
+    config.botToken.includes('123456:ABC') ||
+    config.botToken.includes('change_me') ||
+    config.botToken.length < 20;
   if (isPlaceholder) {
-    logger.warn('UTRADE_BOT_TOKEN is placeholder/invalid — bot polling disabled, HTTP API only. Set real token from @BotFather to enable Telegram.');
+    logger.warn(
+      'UTRADE_BOT_TOKEN is placeholder/invalid — bot polling disabled, HTTP API only. Set real token from @BotFather to enable Telegram.',
+    );
   } else {
     try {
       await b.api.setMyCommands([

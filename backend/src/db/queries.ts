@@ -93,7 +93,7 @@ export async function ensureTables() {
   await ensureColumn('deals', 'tx_hash TEXT');
   await ensureColumn('deals', 'resolved_at TIMESTAMPTZ');
   await ensureColumn('deals', 'updated_at TIMESTAMPTZ');
-  await ensureColumn("deals", "confirmations JSONB DEFAULT '{}'::jsonb");
+  await ensureColumn('deals', "confirmations JSONB DEFAULT '{}'::jsonb");
   // Encrypted seller-buyer channel: per-deal symmetric key (base64 32B encrypted at rest if ENCRYPTION_KEY set)
   await ensureColumn('deals', 'chat_key TEXT');
   await ensureColumn('deals', 'chat_key_created_at TIMESTAMPTZ');
@@ -104,7 +104,7 @@ export async function ensureTables() {
   await ensureColumn('deals', 'channel_username TEXT');
   await ensureColumn('deals', 'channel_id TEXT');
   await ensureColumn('deals', 'channel_title TEXT');
-  await ensureColumn('deals', 'channel_snapshot JSONB DEFAULT \'{}\'::jsonb');
+  await ensureColumn('deals', "channel_snapshot JSONB DEFAULT '{}'::jsonb");
   await ensureColumn('deals', 'channel_verified BOOLEAN DEFAULT false');
   await ensureColumn('deals', 'channel_verified_at TIMESTAMPTZ');
   await ensureColumn('deals', 'escrow_holder_id BIGINT');
@@ -119,8 +119,8 @@ export async function ensureTables() {
   await ensureColumn('deals', 'fee_payout_failed BOOLEAN DEFAULT false');
   await ensureColumn('deals', 'fee_payout_error TEXT');
   await pool.query("UPDATE deals SET deal_type='P2P' WHERE deal_type IS NULL");
-  await pool.query("CREATE INDEX IF NOT EXISTS idx_deals_type ON deals(deal_type)");
-  await pool.query("CREATE INDEX IF NOT EXISTS idx_deals_channel_id ON deals(channel_id) WHERE channel_id IS NOT NULL");
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_deals_type ON deals(deal_type)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_deals_channel_id ON deals(channel_id) WHERE channel_id IS NOT NULL');
 
   // Messages E2E: ciphertext-only at rest, plus legacy content for migration
   await ensureColumn('messages', 'encrypted_content TEXT');
@@ -144,7 +144,9 @@ export async function ensureTables() {
   // One pending join request per (deal, requester): closes the select-then-insert
   // race in createJoinRequest — the unique violation is caught and mapped to the
   // existing row (see dealService.createJoinRequest).
-  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_join_requests_pending ON deal_join_requests(deal_id, requester_telegram_id) WHERE status = 'pending'`);
+  await pool.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_join_requests_pending ON deal_join_requests(deal_id, requester_telegram_id) WHERE status = 'pending'`,
+  );
   // Join-request requester photo: Telegram file_id only (file URLs embed the bot
   // token and must never be stored — the photo proxy resolves file_id server-side).
   await ensureColumn('deal_join_requests', 'requester_photo_file_id TEXT');
@@ -170,7 +172,7 @@ export async function ensureTables() {
     const msg = String((e as Error).message || '');
     if (!msg.includes('already exists') && !msg.includes('chk_deals_amount_pos')) {
       // If existing rows violate (e.g. NaN), log but don't crash boot
-      console.warn('Could not add chk_deals_amount_pos (existing bad rows?)', msg.slice(0,300));
+      console.warn('Could not add chk_deals_amount_pos (existing bad rows?)', msg.slice(0, 300));
     }
   }
 
@@ -185,13 +187,16 @@ export async function ensureTables() {
   } catch (e) {
     const msg = String((e as Error).message || '');
     if (!msg.includes('already exists') && !msg.includes('chk_deals_status')) {
-      console.warn('Could not add chk_deals_status (existing bad rows?)', msg.slice(0,300));
+      console.warn('Could not add chk_deals_status (existing bad rows?)', msg.slice(0, 300));
     }
   }
 }
 
 export async function saveNotification(chatId: number, message: string) {
-  const res = await pool.query('INSERT INTO notifications (chat_id, message) VALUES ($1,$2) RETURNING *', [chatId, message]);
+  const res = await pool.query('INSERT INTO notifications (chat_id, message) VALUES ($1,$2) RETURNING *', [
+    chatId,
+    message,
+  ]);
   return res.rows[0];
 }
 
@@ -202,10 +207,17 @@ export async function listNotifications(limit = 100) {
 
 export async function saveAdminAlert(kind: string, text: string, meta: Record<string, unknown> = {}) {
   try {
-    const res = await pool.query('INSERT INTO admin_alerts (kind, text, meta) VALUES ($1,$2,$3::jsonb) RETURNING *', [kind, text, JSON.stringify(meta || {})]);
+    const res = await pool.query('INSERT INTO admin_alerts (kind, text, meta) VALUES ($1,$2,$3::jsonb) RETURNING *', [
+      kind,
+      text,
+      JSON.stringify(meta || {}),
+    ]);
     return res.rows[0];
   } catch (e) {
-    console.warn('[db] saveAdminAlert failed', String((e as Error).message || e).slice(0,300), { kind, text: text.slice(0,100) });
+    console.warn('[db] saveAdminAlert failed', String((e as Error).message || e).slice(0, 300), {
+      kind,
+      text: text.slice(0, 100),
+    });
     return null;
   }
 }
@@ -231,7 +243,7 @@ export async function createUserIfNotExists(telegramId: number, username?: strin
     `INSERT INTO users (telegram_id, username) VALUES ($1, $2)
      ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username
      RETURNING *`,
-    [telegramId, username || null]
+    [telegramId, username || null],
   );
   return res.rows[0];
 }
@@ -269,7 +281,7 @@ export async function getMonthlyBuyerRating(asset: string, limit = 50): Promise<
       GROUP BY d.buyer_telegram_id, UPPER(d.asset)
       ORDER BY COALESCE(SUM(d.amount), 0) DESC, COUNT(*) DESC
       LIMIT $2`,
-    [a, n]
+    [a, n],
   );
   return res.rows as BuyerRatingRow[];
 }

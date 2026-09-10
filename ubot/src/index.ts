@@ -53,7 +53,9 @@ async function main() {
       }
       if (secs !== null && secs > 30) {
         setGlobalFloodUntil(secs);
-        logger.warn(`Startup FloodWait ${secs}s — global flood until ${new Date(Date.now() + secs * 1000).toISOString()}`);
+        logger.warn(
+          `Startup FloodWait ${secs}s — global flood until ${new Date(Date.now() + secs * 1000).toISOString()}`,
+        );
         // Don't tight-loop; wait a bit but not full 24h at startup — just break and let API handle
         break;
       }
@@ -113,7 +115,9 @@ async function main() {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   server = app.listen(port, () => {
-    logger.info(`ubot listening on http://localhost:${port} (apiId=${config.apiId ? 'set' : 'missing'}, health at /health, ready at /ready, metrics at /metrics, verified at /health/verified)`);
+    logger.info(
+      `ubot listening on http://localhost:${port} (apiId=${config.apiId ? 'set' : 'missing'}, health at /health, ready at /ready, metrics at /metrics, verified at /health/verified)`,
+    );
     if (config.apiKey) logger.info('UBOT_API_KEY auth enabled (timing-safe, header only)');
     else logger.warn('UBOT_API_KEY not set — internal API is OPEN (dev only) — set a 32+ char random key');
     // Periodic auth check with jitter 60-75s to avoid bot signature; attempt auto-reconnect if disconnected (NAT idle close)
@@ -136,7 +140,7 @@ async function main() {
           }
         } catch {}
       },
-      60_000 + Math.random() * 15000
+      60_000 + Math.random() * 15000,
     );
     // Unref so interval doesn't block shutdown
     periodicTimer.unref?.();

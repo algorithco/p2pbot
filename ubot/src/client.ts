@@ -22,23 +22,25 @@ let ChannelsTooMuchErrorCtor: (new (...args: any[]) => Error) | null = null;
 let AuthKeyDuplicatedErrorCtor: (new (...args: any[]) => Error) | null = null;
 
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const errs = require('teleproto/errors') as Record<string, unknown>;
   FloodWaitErrorCtor = (errs['FloodWaitError'] as typeof FloodWaitErrorCtor) ?? null;
   SlowModeWaitErrorCtor = (errs['SlowModeWaitError'] as typeof SlowModeWaitErrorCtor) ?? null;
   TakeoutInitDelayErrorCtor = (errs['TakeoutInitDelayError'] as typeof TakeoutInitDelayErrorCtor) ?? null;
-  FreshChangeAdminsForbiddenErrorCtor = (errs['FreshChangeAdminsForbiddenError'] as typeof FreshChangeAdminsForbiddenErrorCtor) ?? null;
+  FreshChangeAdminsForbiddenErrorCtor =
+    (errs['FreshChangeAdminsForbiddenError'] as typeof FreshChangeAdminsForbiddenErrorCtor) ?? null;
   PeerFloodErrorCtor = (errs['PeerFloodError'] as typeof PeerFloodErrorCtor) ?? null;
   ChannelsTooMuchErrorCtor = (errs['ChannelsTooMuchError'] as typeof ChannelsTooMuchErrorCtor) ?? null;
   AuthKeyDuplicatedErrorCtor = (errs['AuthKeyDuplicatedError'] as typeof AuthKeyDuplicatedErrorCtor) ?? null;
   // Fallback to RPCErrorList if needed
   if (!FloodWaitErrorCtor) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const list = require('teleproto/errors/RPCErrorList') as Record<string, unknown>;
       FloodWaitErrorCtor = (list['FloodWaitError'] as typeof FloodWaitErrorCtor) ?? FloodWaitErrorCtor;
       SlowModeWaitErrorCtor = (list['SlowModeWaitError'] as typeof SlowModeWaitErrorCtor) ?? SlowModeWaitErrorCtor;
-      TakeoutInitDelayErrorCtor = (list['TakeoutInitDelayError'] as typeof TakeoutInitDelayErrorCtor) ?? TakeoutInitDelayErrorCtor;
+      TakeoutInitDelayErrorCtor =
+        (list['TakeoutInitDelayError'] as typeof TakeoutInitDelayErrorCtor) ?? TakeoutInitDelayErrorCtor;
     } catch {}
   }
 } catch {
@@ -132,12 +134,32 @@ function parseFloodSeconds(e: unknown): number | null {
   }
 
   // Fresh admin forbidden => 24h hard block
-  if (msg.includes('FRESH_CHANGE_ADMINS_FORBIDDEN') || (FreshChangeAdminsForbiddenErrorCtor && (() => { try { return e instanceof FreshChangeAdminsForbiddenErrorCtor; } catch { return false; } })())) {
+  if (
+    msg.includes('FRESH_CHANGE_ADMINS_FORBIDDEN') ||
+    (FreshChangeAdminsForbiddenErrorCtor &&
+      (() => {
+        try {
+          return e instanceof FreshChangeAdminsForbiddenErrorCtor;
+        } catch {
+          return false;
+        }
+      })())
+  ) {
     return 86400;
   }
 
   // Peer flood => no seconds, map to 86400 to avoid ban (conservative)
-  if (msg.includes('PEER_FLOOD') || (PeerFloodErrorCtor && (() => { try { return e instanceof PeerFloodErrorCtor; } catch { return false; } })())) {
+  if (
+    msg.includes('PEER_FLOOD') ||
+    (PeerFloodErrorCtor &&
+      (() => {
+        try {
+          return e instanceof PeerFloodErrorCtor;
+        } catch {
+          return false;
+        }
+      })())
+  ) {
     // try to extract seconds if present, else hard 24h for safety
     const m = msg.match(/PEER_FLOOD_\d+|PEER_FLOOD/i);
     if (m) {
@@ -166,7 +188,9 @@ function parseFloodSeconds(e: unknown): number | null {
   }
 
   // Generic FLOOD_WAIT parsing
-  const floodMatch = msg.match(/FLOOD_WAIT_(\d+)|FLOOD_PREMIUM_WAIT_(\d+)|retry after (\d+) seconds|wait of (\d+) seconds/i);
+  const floodMatch = msg.match(
+    /FLOOD_WAIT_(\d+)|FLOOD_PREMIUM_WAIT_(\d+)|retry after (\d+) seconds|wait of (\d+) seconds/i,
+  );
   if (floodMatch) {
     const v = floodMatch[1] || floodMatch[2] || floodMatch[3] || floodMatch[4];
     if (v) return parseInt(v, 10);
@@ -179,7 +203,11 @@ function parseFloodSeconds(e: unknown): number | null {
 }
 
 function isChannelsTooMuch(e: unknown): boolean {
-  const msg = String((e as { message?: unknown; errorMessage?: unknown })?.message ?? (e as { errorMessage?: unknown })?.errorMessage ?? e);
+  const msg = String(
+    (e as { message?: unknown; errorMessage?: unknown })?.message ??
+      (e as { errorMessage?: unknown })?.errorMessage ??
+      e,
+  );
   if (msg.includes('CHANNELS_TOO_MUCH') || msg.includes('ChannelsTooMuch')) return true;
   try {
     if (ChannelsTooMuchErrorCtor && e instanceof ChannelsTooMuchErrorCtor) return true;
@@ -188,7 +216,11 @@ function isChannelsTooMuch(e: unknown): boolean {
 }
 
 function isAuthKeyDuplicated(e: unknown): boolean {
-  const msg = String((e as { message?: unknown; errorMessage?: unknown })?.message ?? (e as { errorMessage?: unknown })?.errorMessage ?? e);
+  const msg = String(
+    (e as { message?: unknown; errorMessage?: unknown })?.message ??
+      (e as { errorMessage?: unknown })?.errorMessage ??
+      e,
+  );
   if (msg.includes('AUTH_KEY_DUPLICATED') || msg.includes('AuthKeyDuplicated')) return true;
   try {
     if (AuthKeyDuplicatedErrorCtor && e instanceof AuthKeyDuplicatedErrorCtor) return true;
@@ -202,7 +234,9 @@ export async function ensureClient(): Promise<TelegramClient> {
   // Global flood gate — never hammer during FloodWait
   if (globalFloodUntil && now < globalFloodUntil) {
     const secs = Math.ceil((globalFloodUntil - now) / 1000);
-    const err = new Error(`FLOOD_WAIT_${secs}: global flood active until ${new Date(globalFloodUntil).toISOString()} (wait ${secs}s)`) as Error & { seconds: number };
+    const err = new Error(
+      `FLOOD_WAIT_${secs}: global flood active until ${new Date(globalFloodUntil).toISOString()} (wait ${secs}s)`,
+    ) as Error & { seconds: number };
     (err as unknown as { seconds: number }).seconds = secs;
     (err as unknown as { errorMessage: string }).errorMessage = `FLOOD_WAIT_${secs}`;
     throw err;
@@ -222,7 +256,13 @@ export async function ensureClient(): Promise<TelegramClient> {
       await disconnect();
     } catch (e) {
       const msg = String((e as Error).message || e);
-      if (msg.includes('AuthKeyUnregistered') || msg.includes('AuthKeyNotFound') || msg.includes('SESSION_REVOKED') || msg.includes('USER_DEACTIVATED') || msg.includes('AUTH_KEY_UNREGISTERED')) {
+      if (
+        msg.includes('AuthKeyUnregistered') ||
+        msg.includes('AuthKeyNotFound') ||
+        msg.includes('SESSION_REVOKED') ||
+        msg.includes('USER_DEACTIVATED') ||
+        msg.includes('AUTH_KEY_UNREGISTERED')
+      ) {
         lastAuthFailureAt = Date.now();
         logger.warn('Userbot session revoked/unregistered — regenerate via npm run login:qr', e);
         await disconnect().catch(() => undefined);
@@ -241,7 +281,9 @@ export async function ensureClient(): Promise<TelegramClient> {
   const requiredGap = expDelay + Math.random() * 1200;
   if (sinceLast < requiredGap) {
     const waitMs = Math.ceil(requiredGap - sinceLast);
-    logger.info(`Throttling connect attempt — waiting ${waitMs}ms (attempt ${connectAttempts + 1}, gap ${Math.round(requiredGap)}ms)`);
+    logger.info(
+      `Throttling connect attempt — waiting ${waitMs}ms (attempt ${connectAttempts + 1}, gap ${Math.round(requiredGap)}ms)`,
+    );
     await sleep(waitMs);
   }
   lastConnectAttemptAt = Date.now();
@@ -250,7 +292,9 @@ export async function ensureClient(): Promise<TelegramClient> {
     const sessionStr = loadEncryptedSession() || '';
     if (!sessionStr) {
       lastAuthFailureAt = Date.now();
-      throw new Error('not_authorized: UBOT_SESSION_STRING empty — run npm run login:qr (teleproto) or set ENCRYPTION_KEY correctly');
+      throw new Error(
+        'not_authorized: UBOT_SESSION_STRING empty — run npm run login:qr (teleproto) or set ENCRYPTION_KEY correctly',
+      );
     }
     if (!config.apiId || !config.apiHash) {
       throw new Error('API_ID / API_HASH not configured — set in ubot/.env');
@@ -269,7 +313,9 @@ export async function ensureClient(): Promise<TelegramClient> {
         } else {
           // Generic SOCKS5/HTTP proxy not natively handled by teleproto TCP layer; log and use without proxy
           // Teleproto will attempt direct connection; recommend running a SOCKS5 wrapper (e.g. tun2socks) if needed
-          logger.warn(`PROXY_URL set (${u.protocol}//${u.hostname}) but teleproto supports only MTProxy natively — attempting direct connection; set MTProxy or use sidecar`);
+          logger.warn(
+            `PROXY_URL set (${u.protocol}//${u.hostname}) but teleproto supports only MTProxy natively — attempting direct connection; set MTProxy or use sidecar`,
+          );
         }
       } catch {
         logger.warn(`Invalid PROXY_URL ${config.proxyUrl} — ignoring`);
@@ -302,7 +348,10 @@ export async function ensureClient(): Promise<TelegramClient> {
       const secs = parseFloodSeconds(e);
       if (secs !== null) {
         globalFloodUntil = Date.now() + secs * 1000 + 1000;
-        logger.warn(`Telegram connect FloodWait ${secs}s — global flood until ${new Date(globalFloodUntil).toISOString()}`, e);
+        logger.warn(
+          `Telegram connect FloodWait ${secs}s — global flood until ${new Date(globalFloodUntil).toISOString()}`,
+          e,
+        );
         // Set breaker for FRESH if applicable
         if (msg.includes('FRESH_CHANGE_ADMINS_FORBIDDEN')) {
           channelBreakers.set('FRESH_CHANGE_ADMINS_FORBIDDEN', Date.now() + 86400 * 1000);
@@ -320,7 +369,12 @@ export async function ensureClient(): Promise<TelegramClient> {
       const msg = String((e as Error).message || e);
       logger.warn('checkAuthorization failed', e);
       await c.disconnect().catch(() => undefined);
-      if (msg.includes('AuthKeyUnregistered') || msg.includes('AuthKeyNotFound') || msg.includes('SESSION_REVOKED') || msg.includes('AUTH_KEY_UNREGISTERED')) {
+      if (
+        msg.includes('AuthKeyUnregistered') ||
+        msg.includes('AuthKeyNotFound') ||
+        msg.includes('SESSION_REVOKED') ||
+        msg.includes('AUTH_KEY_UNREGISTERED')
+      ) {
         lastAuthFailureAt = Date.now();
         throw new Error(`not_authorized: ${msg} — session invalid, regenerate via npm run login:qr`);
       }
@@ -336,13 +390,17 @@ export async function ensureClient(): Promise<TelegramClient> {
 
     try {
       const me = await c.getMe();
-      logger.info(`Userbot connected as ${(me as unknown as { username?: string })?.username || (me as unknown as { id: number })?.id}`);
+      logger.info(
+        `Userbot connected as ${(me as unknown as { username?: string })?.username || (me as unknown as { id: number })?.id}`,
+      );
     } catch {}
 
     // Warmup: iterDialogs to ensure session is fully ready and avoid cold-start flood (skippable via WARMUP=false)
     if (config.warmupEnabled) {
       try {
-        const iter = (c as unknown as { iterDialogs: (p: unknown) => AsyncIterable<unknown> }).iterDialogs({ limit: 5 });
+        const iter = (c as unknown as { iterDialogs: (p: unknown) => AsyncIterable<unknown> }).iterDialogs({
+          limit: 5,
+        });
         let count = 0;
         for await (const _ of iter) {
           count += 1;
@@ -396,7 +454,11 @@ export async function withFloodWait<T>(fn: () => Promise<T>, retries = 3): Promi
       // Queue through bottleneck to respect global rate limits
       return await telegramQueue(fn);
     } catch (e) {
-      const msg = String((e as { message?: unknown; errorMessage?: unknown })?.message ?? (e as { errorMessage?: unknown })?.errorMessage ?? e);
+      const msg = String(
+        (e as { message?: unknown; errorMessage?: unknown })?.message ??
+          (e as { errorMessage?: unknown })?.errorMessage ??
+          e,
+      );
       const secs = parseFloodSeconds(e);
 
       if (secs !== null) {
@@ -425,14 +487,18 @@ export async function withFloodWait<T>(fn: () => Promise<T>, retries = 3): Promi
         if (isFinal) {
           // Final retry: respect EXACT secs (no cap) to avoid ban
           const waitMs = secs * 1000 + jitter;
-          logger.warn(`FloodWait ${secs}s (final ${i + 1}/${retries}) — sleeping exact ${Math.round(waitMs / 1000)}s + jitter, global flood until ${new Date(globalFloodUntil).toISOString()}`);
+          logger.warn(
+            `FloodWait ${secs}s (final ${i + 1}/${retries}) — sleeping exact ${Math.round(waitMs / 1000)}s + jitter, global flood until ${new Date(globalFloodUntil).toISOString()}`,
+          );
           await sleep(waitMs);
           // After final wait, try one last time outside loop? We'll continue to throw below, but spec says respect exact on final
           // To honour spec, we sleep full then throw if still failing; caller will see lastErr with proper seconds
           continue;
         } else {
           const waitMs = capped * 1000 + jitter + exponential;
-          logger.warn(`FloodWait — sleeping ${secs}s (capped ${capped}s + jitter ${Math.round(jitter)}ms + exp ${Math.round(exponential)}ms, attempt ${i + 1}/${retries}) global until ${new Date(globalFloodUntil).toISOString()}`);
+          logger.warn(
+            `FloodWait — sleeping ${secs}s (capped ${capped}s + jitter ${Math.round(jitter)}ms + exp ${Math.round(exponential)}ms, attempt ${i + 1}/${retries}) global until ${new Date(globalFloodUntil).toISOString()}`,
+          );
           await sleep(waitMs);
           continue;
         }
@@ -441,7 +507,9 @@ export async function withFloodWait<T>(fn: () => Promise<T>, retries = 3): Promi
       // Known non-retryable / breaker errors
       if (msg.includes('CHANNELS_TOO_MUCH') || msg.includes('ChannelsTooMuch')) {
         channelBreakers.set('CHANNELS_TOO_MUCH', Date.now() + 6 * 60 * 60 * 1000);
-        throw new Error('CHANNELS_TOO_MUCH: bot has joined too many channels/supergroups — leave some or use another account');
+        throw new Error(
+          'CHANNELS_TOO_MUCH: bot has joined too many channels/supergroups — leave some or use another account',
+        );
       }
       if (msg.includes('AUTH_KEY_DUPLICATED') || msg.includes('AuthKeyDuplicated')) {
         channelBreakers.set('AUTH_KEY_DUPLICATED', Date.now() + 24 * 60 * 60 * 1000);
@@ -450,7 +518,9 @@ export async function withFloodWait<T>(fn: () => Promise<T>, retries = 3): Promi
       // Also handle via instanceof fallback
       if (isChannelsTooMuch(e)) {
         channelBreakers.set('CHANNELS_TOO_MUCH', Date.now() + 6 * 60 * 60 * 1000);
-        throw new Error('CHANNELS_TOO_MUCH: bot has joined too many channels/supergroups — leave some or use another account');
+        throw new Error(
+          'CHANNELS_TOO_MUCH: bot has joined too many channels/supergroups — leave some or use another account',
+        );
       }
       if (isAuthKeyDuplicated(e)) {
         channelBreakers.set('AUTH_KEY_DUPLICATED', Date.now() + 24 * 60 * 60 * 1000);

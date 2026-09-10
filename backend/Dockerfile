@@ -22,10 +22,13 @@ ENV PORT=3000
 
 WORKDIR /app/backend
 
-RUN addgroup -S backend && adduser -S backend -G backend
+RUN apk upgrade --no-cache && addgroup -S backend && adduser -S backend -G backend
 
 COPY backend/package*.json ./
 RUN npm ci --omit=dev || npm install --omit=dev
+
+# Drop bundled npm/npx: unused at runtime, but ships vulnerable tar/brace-expansion copies that trip image scanners.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 COPY --from=build /app/backend/dist ./dist
 

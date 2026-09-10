@@ -41,11 +41,7 @@ export function parseInitData(initData: string): Map<string, string> {
  *  3. computed   = hex(HMAC_SHA256(key=secret_key, msg=data_check_string))
  *  4. timing-safe compare, then enforce auth_date freshness (maxAgeSec)
  */
-export function validateInitData(
-  initData: string,
-  botToken: string,
-  maxAgeSec = 86400
-): InitDataValidation {
+export function validateInitData(initData: string, botToken: string, maxAgeSec = 86400): InitDataValidation {
   if (!initData) return { ok: false, reason: 'empty_init_data' };
   if (!botToken) return { ok: false, reason: 'bot_token_not_configured' };
 
@@ -82,11 +78,7 @@ export function validateInitData(
   if (rawUser) {
     try {
       const parsed: unknown = JSON.parse(rawUser);
-      if (
-        parsed &&
-        typeof parsed === 'object' &&
-        typeof (parsed as Record<string, unknown>).id !== 'undefined'
-      ) {
+      if (parsed && typeof parsed === 'object' && typeof (parsed as Record<string, unknown>).id !== 'undefined') {
         const obj = parsed as Record<string, unknown>;
         user = {
           id: Number(obj.id),

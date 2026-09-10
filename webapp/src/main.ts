@@ -34,8 +34,9 @@ import { mountLoader } from './lib/loader';
 };
 
 // TON Connect config (GitHub raw, no cloudflared)
-(window as any).TONCONNECT_MANIFEST_URL = "https://raw.githubusercontent.com/Hamroqulovv/raw-ton-m/main/tonconnect-manifest.json";
-(window as any).TONCONNECT_TWA_RETURN_URL = "https://t.me/uzsavdochibot/app";
+(window as any).TONCONNECT_MANIFEST_URL =
+  'https://raw.githubusercontent.com/Hamroqulovv/raw-ton-m/main/tonconnect-manifest.json';
+(window as any).TONCONNECT_TWA_RETURN_URL = 'https://t.me/uzsavdochibot/app';
 (window as any).APP_CONFIG = {
   manifestUrl: (window as any).TONCONNECT_MANIFEST_URL,
   twaReturnUrl: (window as any).TONCONNECT_TWA_RETURN_URL,
@@ -62,12 +63,18 @@ try {
     loaderDone.then(() => {
       appEl.style.opacity = '1';
       // trigger hero entrance after loader
-      setTimeout(() => { try { (window as any).FX?.fadeUp?.(document.querySelector('.hero') as any); } catch {} }, 80);
+      setTimeout(() => {
+        try {
+          (window as any).FX?.fadeUp?.(document.querySelector('.hero') as any);
+        } catch {}
+      }, 80);
     });
   } else {
     await loaderDone;
   }
-} catch { await loaderDone; }
+} catch {
+  await loaderDone;
+}
 
 // Join intent resolution — the bot button carries the invite THREE ways
 // (hash route, ?startapp= query, Telegram start_param) because some clients
@@ -96,7 +103,7 @@ function parseJoinParam(sp: string): { id: string; token: string } | null {
 function resolveJoinIntent(): { id: string; token: string } | null {
   try {
     // 1. Canonical hash route #/deal/<id>/join/<token> (already where we need to be)
-    const hm = (location.hash || '').match(/^#\/deal\/(\d+)\/join\/([A-Za-z0-9_\-]+)/);
+    const hm = (location.hash || '').match(/^#\/deal\/(\d+)\/join\/([A-Za-z0-9_-]+)/);
     if (hm) return { id: hm[1], token: hm[2] };
     // 2. Query redundancy from the bot button: ?startapp=join_<id>_<token>
     const qs = new URLSearchParams(location.search || '');
@@ -109,7 +116,7 @@ function resolveJoinIntent(): { id: string; token: string } | null {
     const qj = parseJoinParam(qs.get('join') || '');
     if (qj) return qj;
     // 4. Path form /join/<id>/<token> or /deal/<id>/join/<token> (nginx SPA fallback)
-    const pm = location.pathname.match(/^\/(?:join\/(\d+)\/([A-Za-z0-9_\-]+)|deal\/(\d+)\/join\/([A-Za-z0-9_\-]+))\/?$/);
+    const pm = location.pathname.match(/^\/(?:join\/(\d+)\/([A-Za-z0-9_-]+)|deal\/(\d+)\/join\/([A-Za-z0-9_-]+))\/?$/);
     if (pm) {
       const id = pm[1] || pm[3];
       const token = pm[2] || pm[4];
@@ -135,5 +142,9 @@ function applyJoinIntent(): boolean {
 // Apply immediately (before the legacy router boots) so the first paint is the
 // join page, then re-check late (Telegram can inject start_param after load).
 applyJoinIntent();
-setTimeout(() => { applyJoinIntent(); }, 600);
-setTimeout(() => { applyJoinIntent(); }, 2500);
+setTimeout(() => {
+  applyJoinIntent();
+}, 600);
+setTimeout(() => {
+  applyJoinIntent();
+}, 2500);

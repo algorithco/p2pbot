@@ -12,7 +12,11 @@ export async function saveAndNotify(chatId: number, message: string) {
   try {
     const notify = await import('../bot/notify');
     // Generic party notice via hub (UZBEK latin, short).
-    await notify.adminDecisionToParty(Number(chatId), { id: 0, amount: 0, asset: 'TON' }, String(message).slice(0, 200));
+    await notify.adminDecisionToParty(
+      Number(chatId),
+      { id: 0, amount: 0, asset: 'TON' },
+      String(message).slice(0, 200),
+    );
   } catch (e) {
     logger.warn('saveAndNotify hub send failed', e);
   }
