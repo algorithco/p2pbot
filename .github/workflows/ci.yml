@@ -16,7 +16,9 @@ concurrency:
 jobs:
   commitlint:
     name: Commitlint
-    if: github.event_name == 'pull_request'
+    # Dependabot commit bodies embed upstream changelogs (long lines) that always
+    # violate body-max-line-length — lint human PRs only, not dependabot.
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
