@@ -1,5 +1,6 @@
-# Secret scanning with Gitleaks. Fails the run on any new finding.
-# Historical placeholder findings are allowlisted in `.gitleaksignore`.
+# Secret scanning with the open-source Gitleaks binary (pinned version).
+# Fails the run on any new finding. Historical placeholder findings are
+# allowlisted in `.gitleaksignore`; rules are extended via `.gitleaks.toml`.
 name: Secret scan
 
 on:
@@ -15,6 +16,9 @@ concurrency:
   group: gitleaks-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GITLEAKS_VERSION: 8.28.0
+
 jobs:
   gitleaks:
     name: Gitleaks
@@ -25,5 +29,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Scan with Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+      - name: Download Gitleaks
+        run: |
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks version
+
+      - name: Scan git history
+        run: /tmp/gitleaks detect --source . --redact --verbose

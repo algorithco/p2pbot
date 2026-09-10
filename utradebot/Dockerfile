@@ -13,9 +13,11 @@ FROM node:20-alpine
 ENV NODE_ENV=production
 ENV PORT=3003
 WORKDIR /app/utradebot
-RUN addgroup -S utrade && adduser -S utrade -G utrade
+RUN apk upgrade --no-cache && addgroup -S utrade && adduser -S utrade -G utrade
 COPY utradebot/package*.json ./
 RUN npm ci --omit=dev || npm install --omit=dev
+# Drop bundled npm/npx: unused at runtime, but ships vulnerable tar/brace-expansion copies that trip image scanners.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /app/utradebot/dist ./dist
 # Do NOT copy .env
 RUN mkdir -p /app/utradebot/sessions && chown utrade:utrade /app/utradebot/sessions

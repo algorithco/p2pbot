@@ -9,6 +9,8 @@ COPY webapp/ ./
 RUN npm run build || (echo "vite build failed, falling back to public" && mkdir -p dist && cp -r public/* dist/ 2>/dev/null || true)
 
 FROM nginx:alpine
+# Patch OS CVEs at build time so image scans stay green.
+RUN apk upgrade --no-cache
 # Built Vite output
 COPY --from=build /app/dist /usr/share/nginx/html
 # Fallback: if dist missing, will be empty — but public copy ensures minimal
