@@ -95,6 +95,8 @@ services:
       DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/escrow
       PORT: '3000'
       SIGNER_URL: http://signer:3001
+      UBOT_URL: http://ubot:3002
+      UTRADE_URL: http://utradebot:3003
       SERVE_STATIC: 'false'
       # WEBAPP_URL / FRONTEND_URL come from backend/.env (env_file) — set to https://<cloudflare> for TON Connect + bot
     ports:
@@ -166,6 +168,8 @@ services:
     restart: unless-stopped
     env_file:
       - ubot/.env
+    environment:
+      DATABASE_URL: postgres://escrow:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/escrow
     expose:
       - '3002'
     ports:

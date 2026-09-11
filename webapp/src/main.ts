@@ -36,7 +36,7 @@ import { mountLoader } from './lib/loader';
 // TON Connect config (GitHub raw, no cloudflared)
 (window as any).TONCONNECT_MANIFEST_URL =
   'https://raw.githubusercontent.com/Hamroqulovv/raw-ton-m/main/tonconnect-manifest.json';
-(window as any).TONCONNECT_TWA_RETURN_URL = 'https://t.me/uzsavdochibot/app';
+(window as any).TONCONNECT_TWA_RETURN_URL = 'https://t.me/savdochi_uzbot/app';
 (window as any).APP_CONFIG = {
   manifestUrl: (window as any).TONCONNECT_MANIFEST_URL,
   twaReturnUrl: (window as any).TONCONNECT_TWA_RETURN_URL,
@@ -87,7 +87,10 @@ function parseJoinParam(sp: string): { id: string; token: string } | null {
   try {
     if (!sp) return null;
     if (sp.indexOf('.') !== -1) {
-      const [id, token] = sp.split('.');
+      // Split on FIRST dot only — tokens may legally contain dots.
+      const dot = sp.indexOf('.');
+      const id = sp.slice(0, dot);
+      const token = sp.slice(dot + 1);
       if (id && /^\d+$/.test(id) && token) return { id, token };
       return null;
     }
@@ -106,7 +109,7 @@ function parseJoinParam(sp: string): { id: string; token: string } | null {
 function resolveJoinIntent(): { id: string; token: string } | null {
   try {
     // 1. Canonical hash route #/deal/<id>/join/<token> (already where we need to be)
-    const hm = (location.hash || '').match(/^#\/deal\/(\d+)\/join\/([A-Za-z0-9_-]+)/);
+    const hm = (location.hash || '').match(/^#\/deal\/(\d+)\/join\/([A-Za-z0-9_\-=~.]+)/);
     if (hm) return { id: hm[1], token: hm[2] };
     // 2. Query redundancy from the bot button: ?startapp=join_<id>_<token>
     const qs = new URLSearchParams(location.search || '');

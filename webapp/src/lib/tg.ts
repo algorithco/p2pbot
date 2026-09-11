@@ -6,9 +6,16 @@ declare global {
   }
 }
 
-const wa: any = (typeof window !== 'undefined' && (window as any).Telegram?.WebApp) || null;
+function getWA(): any {
+  try {
+    return (typeof window !== 'undefined' && (window as any).Telegram?.WebApp) || null;
+  } catch {
+    return null;
+  }
+}
 
 function isAtLeast(ver: string): boolean {
+  const wa = getWA();
   if (!wa || typeof wa.isVersionAtLeast !== 'function') return false;
   try {
     return !!wa.isVersionAtLeast(ver);
@@ -22,10 +29,24 @@ function safe(fn: () => void) {
   } catch {}
 }
 
+let inited = false;
+
 export const TG = {
-  available: !!wa,
+  get available(): boolean {
+    return !!getWA();
+  },
   init() {
-    if (!wa) return;
+    const wa = getWA();
+    if (!wa || inited) {
+      // Retry once if Telegram injects WebApp late (slow CDN / cached bundle).
+      if (!wa) {
+        setTimeout(() => {
+          if (!inited) TG.init();
+        }, 800);
+      }
+      return;
+    }
+    inited = true;
     safe(() => wa.ready());
     safe(() => wa.expand());
     safe(() => {
@@ -52,25 +73,34 @@ export const TG = {
     safe(() => wa.onEvent('themeChanged', applyScheme));
   },
   version(): string {
+    const wa = getWA();
     return wa ? String(wa.version || '0') : '0';
   },
   colorScheme(): string {
+    const wa = getWA();
     return wa && wa.colorScheme === 'light' ? 'light' : 'dark';
   },
   user(): TGUser {
+    const wa = getWA();
     const u = wa?.initDataUnsafe?.user;
     if (u) return u;
     return { id: 777000001, first_name: 'Preview', username: 'preview_user' };
   },
   realUser(): TGUser | null {
+    const wa = getWA();
     return wa?.initDataUnsafe?.user ? wa.initDataUnsafe.user : null;
   },
   initData(): string {
+    const wa = getWA();
     return (wa && wa.initData) || '';
   },
   startParam(): string {
     try {
-      return wa?.initDataUnsafe?.start_param || '';
+      const wa = getWA();
+      if (wa?.initDataUnsafe?.start_param) return wa.initDataUnsafe.start_param;
+      // Fallback: Telegram may also expose startapp via URL for direct opens.
+      const qs = new URLSearchParams(window.location.search || '');
+      return qs.get('startapp') || qs.get('start_param') || '';
     } catch {
       return '';
     }
@@ -78,37 +108,38 @@ export const TG = {
   haptic: {
     tap() {
       safe(() => {
-        if (isAtLeast('6.1')) wa.HapticFeedback.selectionChanged();
+        if (isAtLeast('6.1')) getWA().HapticFeedback.selectionChanged();
       });
     },
     light() {
       safe(() => {
-        if (isAtLeast('6.1')) wa.HapticFeedback.impactOccurred('light');
+        if (isAtLeast('6.1')) getWA().HapticFeedback.impactOccurred('light');
       });
     },
     medium() {
       safe(() => {
-        if (isAtLeast('6.1')) wa.HapticFeedback.impactOccurred('medium');
+        if (isAtLeast('6.1')) getWA().HapticFeedback.impactOccurred('medium');
       });
     },
     success() {
       safe(() => {
-        if (isAtLeast('6.1')) wa.HapticFeedback.notificationOccurred('success');
+        if (isAtLeast('6.1')) getWA().HapticFeedback.notificationOccurred('success');
       });
     },
     error() {
       safe(() => {
-        if (isAtLeast('6.1')) wa.HapticFeedback.notificationOccurred('error');
+        if (isAtLeast('6.1')) getWA().HapticFeedback.notificationOccurred('error');
       });
     },
     warning() {
       safe(() => {
-        if (isAtLeast('6.1')) wa.HapticFeedback.notificationOccurred('warning');
+        if (isAtLeast('6.1')) getWA().HapticFeedback.notificationOccurred('warning');
       });
     },
   },
   showBack(cb: () => void) {
     safe(() => {
+      const wa = getWA();
       if (isAtLeast('6.1') && wa.BackButton) {
         (TG as any)._backCb = cb;
         wa.BackButton.onClick(cb);
@@ -118,6 +149,7 @@ export const TG = {
   },
   hideBack() {
     safe(() => {
+      const wa = getWA();
       if (isAtLeast('6.1') && wa.BackButton) {
         if ((TG as any)._backCb) wa.BackButton.offClick((TG as any)._backCb);
         (TG as any)._backCb = null;
@@ -128,6 +160,7 @@ export const TG = {
   main: {
     show(text: string, onClick: () => void, opts: any = {}) {
       safe(() => {
+        const wa = getWA();
         if (!wa || !wa.MainButton || !isAtLeast('6.0')) return;
         const mb = wa.MainButton;
         mb.setParams({ text, color: opts.color || '#3b82f6', is_active: true, is_visible: true });
@@ -139,11 +172,13 @@ export const TG = {
     },
     hideProgress() {
       safe(() => {
+        const wa = getWA();
         if (wa?.MainButton) wa.MainButton.hideProgress();
       });
     },
     hide() {
       safe(() => {
+        const wa = getWA();
         if (wa?.MainButton) {
           (TG.main as any)._off();
           wa.MainButton.hide();
@@ -153,6 +188,7 @@ export const TG = {
     _cb: null as any,
     _off() {
       safe(() => {
+        const wa = getWA();
         if (wa?.MainButton && (TG.main as any)._cb) wa.MainButton.offClick((TG.main as any)._cb);
         (TG.main as any)._cb = null;
       });
@@ -160,6 +196,7 @@ export const TG = {
   },
   alert(message: string, cb?: () => void) {
     safe(() => {
+      const wa = getWA();
       if (isAtLeast('6.2') && wa.showAlert) {
         wa.showAlert(String(message));
         if (cb) setTimeout(cb, 350);
@@ -171,6 +208,7 @@ export const TG = {
   },
   confirm(message: string, onYes?: () => void) {
     safe(() => {
+      const wa = getWA();
       if (isAtLeast('6.2') && wa.showConfirm) {
         wa.showConfirm(String(message), (ok: boolean) => {
           if (ok && onYes) onYes();
@@ -182,6 +220,7 @@ export const TG = {
   },
   preventClose(on: boolean) {
     safe(() => {
+      const wa = getWA();
       if (!isAtLeast('7.0')) return;
       if (on) wa.enableClosingConfirmation?.();
       else wa.disableClosingConfirmation?.();
@@ -189,12 +228,14 @@ export const TG = {
   },
   openLink(url: string) {
     safe(() => {
+      const wa = getWA();
       if (wa?.openLink) wa.openLink(url);
       else window.open(url, '_blank');
     });
   },
   openTelegramLink(url: string) {
     safe(() => {
+      const wa = getWA();
       if (wa?.openTelegramLink) wa.openTelegramLink(url);
       else window.open(url, '_blank');
     });
@@ -206,6 +247,7 @@ export const TG = {
   },
   close() {
     safe(() => {
+      const wa = getWA();
       if (wa) wa.close();
     });
   },

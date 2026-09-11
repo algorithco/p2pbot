@@ -5,7 +5,7 @@ import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import type { Server } from 'http';
 import { config } from './config';
-import { db, connectDB, listDeals } from './db/queries';
+import { db, connectDB, listDeals, getDealLinks } from './db/queries';
 import { Address, openContract } from '@ton/core';
 import { Escrow } from './contracts/wrappers/Escrow';
 import { client } from './blockchain/tonClient';
@@ -51,13 +51,14 @@ import {
 } from './auth/guard';
 
 const app = express();
-// Trust X-Forwarded-* from nginx (needed for https detection behind TLS proxy)
-app.set('trust proxy', 1);
+// Only trust loopback proxy (nginx on same host/network) — trusting any
+// first hop lets direct clients spoof X-Forwarded-For and bypass rate limits.
+app.set('trust proxy', 'loopback');
 
 // Security headers — encrypted seller-buyer channel must not be sniffed/framed
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   if (req.secure || req.get('x-forwarded-proto') === 'https') {
@@ -87,12 +88,15 @@ function buildAllowedOrigins(): string[] {
       origins.add(new URL(u).origin);
     } catch {} // best-effort: skip malformed configured URLs.
   }
-  // Local dev + docker internal
-  origins.add('http://localhost:8080');
-  origins.add('http://127.0.0.1:8080');
-  origins.add('http://frontend:80');
-  origins.add('http://frontend');
-  origins.add('http://localhost:3000');
+  // Local dev + docker internal — only outside production to avoid
+  // accepting http://localhost origins in prod.
+  if (process.env.NODE_ENV !== 'production') {
+    origins.add('http://localhost:8080');
+    origins.add('http://127.0.0.1:8080');
+    origins.add('http://frontend:80');
+    origins.add('http://frontend');
+    origins.add('http://localhost:3000');
+  }
   return Array.from(origins);
 }
 const allowedOrigins = buildAllowedOrigins();
@@ -145,17 +149,12 @@ function isAdminTelegramId(id: number): boolean {
 }
 
 /**
- * Caller telegram id for a route:
- * verified identity wins; body value only trusted from api-key callers.
+ * Caller telegram id for a route — verified identity only.
+ * (Removed legacy body.telegramId fallback: getIdentityId already gates
+ * body override to api-key callers; duplicating it here was a latent spoof.)
  */
 function callerTelegramId(req: Request): number | null {
-  const identity = getIdentityId(req);
-  if (identity !== null) return identity;
-  if (req.body && typeof req.body === 'object') {
-    const bodyVal = Number((req.body as Record<string, unknown>).telegramId);
-    if (isValidPositiveInt(bodyVal)) return bodyVal;
-  }
-  return null;
+  return getIdentityId(req);
 }
 
 /**
@@ -229,10 +228,17 @@ app.get(
 );
 
 // Public: webapp boot info (feeBps lets the frontend show exact fees)
-const ADDR_RE = /^(EQ|UQ)[A-Za-z0-9_-]{46}$|^0:-1?[0-9a-fA-F]{64}$/;
+function isValidTonAddress(a: string): boolean {
+  try {
+    Address.parse(a.trim());
+    return true;
+  } catch {
+    return false;
+  }
+}
 function resolvePaymentAddress(): string | null {
-  if (config.walletAddress && ADDR_RE.test(config.walletAddress.trim())) return config.walletAddress.trim();
-  if (config.adminAddress && ADDR_RE.test(config.adminAddress.trim())) return config.adminAddress.trim();
+  if (config.walletAddress && isValidTonAddress(config.walletAddress)) return config.walletAddress.trim();
+  if (config.adminAddress && isValidTonAddress(config.adminAddress)) return config.adminAddress.trim();
   return null;
 }
 
@@ -260,7 +266,12 @@ app.get('/tonconnect-manifest.json', (req, res) => {
     );
   }
   res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // Reflect the request origin only if it is in our allowlist; never '*'
+  // (prevents any site from reading the manifest as a phishing template).
+  const reqOrigin = req.get('origin');
+  if (reqOrigin && allowedOrigins.includes(reqOrigin)) {
+    res.setHeader('Access-Control-Allow-Origin', reqOrigin);
+  }
   res.json({
     url: origin,
     name: 'TonEscrow',
@@ -272,7 +283,6 @@ app.get('/tonconnect-manifest.json', (req, res) => {
 
 app.get('/api/info', (_req, res) => {
   res.json({
-    adminTelegramIds: config.adminTelegramIds,
     feeBps: config.feeBps,
     paymentAddress: resolvePaymentAddress(),
     network: config.tonNetwork,
@@ -410,6 +420,55 @@ app.get(
   }),
 );
 
+// Mint a fresh one-time invite link for a deal (deal-view share button).
+// Join tokens are single-use + expiring, so the view cannot reuse the
+// creation-time link — it requests a new one here (party only).
+app.post(
+  '/api/deals/:id/invite',
+  joinLimiter,
+  requireIdentity,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid_id' });
+    const caller = getIdentityId(req);
+    if (caller === null) return res.status(401).json({ error: 'identity_required' });
+    const check = await checkDealAccess(req, id);
+    if (!check) return res.status(404).json({ error: 'deal_not_found' });
+    // Invite mint requires actual party membership — token-preview holders
+    // (hasAccess via ?token=) must NOT be able to mint fresh links.
+    if (!check.isParty && (req as any).authMode !== 'api-key')
+      return res.status(403).json({ error: 'not_a_party_to_deal' });
+    const deal = check.deal as unknown as Record<string, unknown>;
+    const status = String(deal.status || '').toUpperCase();
+    if (status === 'RELEASED' || status === 'REFUNDED') return res.status(400).json({ error: 'deal_finished' });
+    if (status === 'RELEASE_PENDING' || status === 'REFUND_PENDING')
+      return res.status(409).json({ error: 'deal_locked: payout in progress' });
+    const buyerId = (deal.buyer_telegram_id ?? (deal as Record<string, unknown>).buyerTelegramId) as
+      number | null | undefined;
+    const sellerId = (deal.seller_telegram_id ?? (deal as Record<string, unknown>).sellerTelegramId) as
+      number | null | undefined;
+    if (buyerId != null && sellerId != null) return res.status(400).json({ error: 'deal_full' });
+    // 15-minute window: reuse the latest still-live link instead of minting a
+    // new URL on every tap. A new token is created only when none is unexpired.
+    const INVITE_TTL_SECONDS = 15 * 60;
+    const existingLinks = await getDealLinks(id);
+    const liveLink = (existingLinks || []).find((l: { expires_at?: unknown; token?: unknown }) => {
+      try {
+        return new Date(l.expires_at as string).getTime() > Date.now();
+      } catch {
+        return false;
+      }
+    });
+    const linkToken =
+      liveLink && liveLink.token ? String(liveLink.token) : await generateDealLink(id, INVITE_TTL_SECONDS);
+    const baseUrl = config.webappUrl || config.frontendUrl || `${req.protocol}://${req.get('host')}`;
+    const webappLink = `${baseUrl.replace(/\/$/, '')}/#/deal/${id}/join/${linkToken}`;
+    const apiLink = `${req.protocol}://${req.get('host')}/api/deals/${id}/join/${linkToken}`;
+    const botLink = getBotDeepLink(id, linkToken, config.botUsername);
+    return res.json({ dealId: id, link: botLink, botLink, webappLink, apiLink });
+  }),
+);
+
 // Create a new deal (buyer optional for api-key callers, returns generated link)
 app.post(
   '/api/deals',
@@ -417,11 +476,19 @@ app.post(
   requireIdentity,
   asyncHandler(async (req, res) => {
     const { asset, amount, terms, deadline } = req.body;
-    if (!asset || !amount) return res.status(400).json({ error: 'sellerId, asset, amount required' });
+    if (!asset || !amount) return res.status(400).json({ error: 'asset_and_amount_required' });
     // Fix 3.1: validate amount is finite positive decimal with sane bounds
     const assetUpperPre = String(asset).toUpperCase();
     if (!['TON', 'USDT'].includes(assetUpperPre))
       return res.status(400).json({ error: 'asset_unsupported, use TON or USDT' });
+    if (terms != null && String(terms).length > 2000)
+      return res.status(400).json({ error: 'terms_too_long', max: 2000 });
+    let deadlineDate: Date | null = null;
+    if (deadline) {
+      deadlineDate = new Date(deadline);
+      if (Number.isNaN(deadlineDate.getTime())) return res.status(400).json({ error: 'invalid_deadline' });
+      if (deadlineDate.getTime() <= Date.now()) return res.status(400).json({ error: 'deadline_must_be_future' });
+    }
     const amtStrRaw = String(amount).trim();
     if (
       !amtStrRaw ||
@@ -512,22 +579,30 @@ app.post(
           error: 'channel_username_required: enter @username or t.me link (CHANNEL/GROUP deals require channel)',
         });
       // escrow holder is @gramchioka (ubot) for custodial flow
-      escrowHolderId = Number(process.env.ESCROW_HOLDER_ID || 8992814642);
+      const holderRaw = Number(process.env.ESCROW_HOLDER_ID || 8992814642);
+      if (!isValidPositiveInt(holderRaw)) return res.status(500).json({ error: 'escrow_holder_misconfigured' });
+      escrowHolderId = holderRaw;
     }
 
+    const resolvedPayAddr = resolvePaymentAddress();
+    if (!resolvedPayAddr) {
+      return res.status(503).json({
+        error: 'payment_address_not_configured: set WALLET_ADDRESS or ADMIN_ADDRESS to a valid TON address',
+      });
+    }
     const deal = await createDealRecord({
       buyerId,
       sellerId,
       buyerTelegramId: buyerId,
       sellerTelegramId: sellerId,
-      asset,
-      amount,
+      asset: assetUpperPre,
+      amount: amtStrRaw,
       feeBps: config.feeBps,
       status: 'AWAITING_DEPOSIT',
       contractAddress: '',
-      paymentAddress: resolvePaymentAddress() || '',
+      paymentAddress: resolvedPayAddr,
       terms: terms || '',
-      deadline: deadline ? new Date(deadline) : null,
+      deadline: deadlineDate,
       dealType,
       channelUsername: channelUsername as any,
       channelId,
@@ -910,6 +985,10 @@ app.post(
         return res
           .status(402)
           .json({ error: result.message, needSellerAddress: true, code: 'seller_ton_address_required' });
+      const msg = String(result.message || '');
+      if (msg.includes('not_seller') || msg.includes('forbidden')) return res.status(403).json({ error: msg });
+      if (msg.includes('already') || msg.includes('wrong_status') || msg.includes('concurrent'))
+        return res.status(409).json({ error: msg });
       return res.status(400).json({ error: result.message });
     }
     return res.json(result);
@@ -938,6 +1017,9 @@ app.post(
       if (result.needItemSent) {
         return res.status(409).json({ error: result.message, needItemSent: true, code: 'item_not_sent' });
       }
+      const msg = String(result.message || '');
+      if (msg.includes('payout_in_progress') || msg.includes('pending')) return res.status(409).json({ error: msg });
+      if (msg.includes('not_buyer') || msg.includes('forbidden')) return res.status(403).json({ error: msg });
       return res.status(400).json({ error: result.message });
     }
     return res.json(result);
@@ -970,6 +1052,7 @@ app.get(
 
 app.post(
   '/api/deals/:id/join-requests/:requestId/approve',
+  rateLimit({ windowMs: 60_000, max: 20, name: 'join-approve' }),
   requireIdentity,
   asyncHandler(async (req, res) => {
     const dealId = Number(req.params.id);
@@ -979,7 +1062,7 @@ app.post(
     if (caller === null) return res.status(401).json({ error: 'identity_required' });
     const { approveJoinRequest } = await import('./services/dealService');
     try {
-      const { role, autoRejected } = await approveJoinRequest(requestId, caller);
+      const { role, autoRejected } = await approveJoinRequest(requestId, caller, dealId);
       // The deal is full now — tell the losers their invite is dead (best-effort each).
       if (Array.isArray(autoRejected) && autoRejected.length > 0) {
         for (const loser of autoRejected) {
@@ -1062,6 +1145,8 @@ app.post(
     } catch (e) {
       const msg = String((e as Error).message || 'approve_failed');
       if (msg === 'request_not_found') return res.status(404).json({ error: msg });
+      if (msg.includes('deal_mismatch')) return res.status(400).json({ error: msg });
+      if (msg.includes('deal_finished')) return res.status(409).json({ error: msg });
       if (msg.includes('not_authorized')) return res.status(403).json({ error: msg });
       if (msg.includes('already_handled')) return res.status(409).json({ error: msg });
       if (msg.includes('link_expired')) return res.status(410).json({ error: msg });
@@ -1073,6 +1158,7 @@ app.post(
 
 app.post(
   '/api/deals/:id/join-requests/:requestId/reject',
+  rateLimit({ windowMs: 60_000, max: 20, name: 'join-reject' }),
   requireIdentity,
   asyncHandler(async (req, res) => {
     const dealId = Number(req.params.id);
@@ -1090,7 +1176,7 @@ app.post(
         if (jr && jr.requester_telegram_id != null) partnerId = Number(jr.requester_telegram_id);
         dealForReject = await getDealById(dealId);
       } catch {}
-      await rejectJoinRequest(requestId, caller);
+      await rejectJoinRequest(requestId, caller, dealId);
       try {
         if (partnerId != null && dealForReject) {
           await notify.joinRejected(partnerId, {
@@ -1107,6 +1193,7 @@ app.post(
     } catch (e) {
       const msg = String((e as Error).message || 'reject_failed');
       if (msg === 'request_not_found') return res.status(404).json({ error: msg });
+      if (msg.includes('deal_mismatch')) return res.status(400).json({ error: msg });
       if (msg.includes('not_authorized')) return res.status(403).json({ error: msg });
       return res.status(400).json({ error: msg });
     }
@@ -1146,6 +1233,7 @@ app.get(
 // The token stays server-side: we fetch upstream and stream bytes, never redirect.
 app.get(
   '/api/deals/:id/join-requests/:requestId/photo',
+  rateLimit({ windowMs: 60_000, max: 30, name: 'photo' }),
   requireIdentity,
   asyncHandler(async (req, res) => {
     const dealId = Number(req.params.id);
@@ -1583,7 +1671,7 @@ app.post(
     // Fix 3.4: encrypt phone at rest via phone_enc; phone column kept null (plaintext removed)
     const r = await db.query(
       `INSERT INTO utrade_trades (seller_telegram_id, buyer_telegram_id, phone, phone_enc, session_encrypted, status, expires_at, meta)
-     VALUES ($1,$2,$3,$4,$5, now() + interval '24 hours', '{}'::jsonb) RETURNING id, status, created_at`,
+      VALUES ($1,$2,$3,$4,$5,$6, now() + interval '24 hours', '{}'::jsonb) RETURNING id, status, created_at`,
       [caller, null, null, phEnc, enc, 'SELLER_REMOVED'],
     );
     try {
@@ -1751,10 +1839,10 @@ app.post(
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
     const trade = r.rows[0];
     const caller = getIdentityId(req);
-    // Only buyer or seller can submit code; if no buyer yet, bind caller as buyer
-    if (!trade.buyer_telegram_id && caller !== null) {
-      await db.query('UPDATE utrade_trades SET buyer_telegram_id = $1 WHERE id = $2', [caller, id]);
-      trade.buyer_telegram_id = caller;
+    // Buyer slot must already be assigned (via explicit trade flow) — never
+    // auto-bind the first caller to submit a code (prevents buyer hijack).
+    if (!trade.buyer_telegram_id) {
+      return res.status(403).json({ error: 'buyer_not_set: trade has no buyer yet' });
     }
     const isBuyer = caller !== null && Number(trade.buyer_telegram_id) === caller;
     if (!isBuyer && (req as any).authMode !== 'api-key') return res.status(403).json({ error: 'not_buyer' });
@@ -1850,12 +1938,17 @@ app.get(
   '/api/status/:address',
   publicTonLimiter,
   asyncHandler(async (req, res) => {
+    // Off-chain ledger mode (no escrow contracts deployed): there is nothing
+    // on-chain to query. Answer locally — calling Escrow.getStatus on a
+    // non-escrow address (e.g. the signer W5 wallet) always fails with
+    // exit_code 11 and only spams the log + wastes TON API quota.
+    if (!config.requireOnchain) return res.json({ status: null, onchain: false, mode: 'offchain' });
     try {
       const addr = Address.parse(String(req.params.address));
       const escrow = new Escrow(addr as any);
       const opened = openContract(escrow, ({ address: a }) => client.provider(a, null as any));
       const status = await opened.getStatus();
-      return res.json({ status });
+      return res.json({ status, onchain: true });
     } catch (err) {
       logger.warn('/api/status error', err);
       return res.status(500).json({ error: String(err) });
@@ -1897,9 +1990,10 @@ app.get(
   }),
 );
 
-// TON payload helpers — memo is ENCRYPTED and auto-injected (not shown to user)
+// TON payload helpers — require identity (chosen-plaintext encryption oracle otherwise)
 app.get(
   '/api/ton/payload',
+  requireIdentity,
   publicTonLimiter,
   asyncHandler(async (req, res) => {
     const comment = String(req.query.comment || '').trim();
@@ -2021,6 +2115,12 @@ const API_DOCS = {
       path: '/api/deals/:id/join/:token',
       auth: 'Identity',
       desc: 'Request to join via link — creates pending request for creator approval in deal chat (joiner fills empty slot)',
+    },
+    {
+      method: 'POST',
+      path: '/api/deals/:id/invite',
+      auth: 'Identity (party)',
+      desc: 'Mint or reuse a 15-minute one-time invite link — for the deal-view share button',
     },
     {
       method: 'POST',
@@ -2358,7 +2458,8 @@ function startSchedulers() {
           if (isDisputedDeal(d)) continue;
           if (String(d.status) === 'RELEASED' || String(d.status) === 'REFUNDED') continue;
           try {
-            await updateDealStatus(Number(d.id), 'REFUNDED');
+            const closed = await updateDealStatus(Number(d.id), 'REFUNDED', undefined, ['AWAITING_DEPOSIT']);
+            if (!closed) continue;
             try {
               await db.query(
                 `UPDATE deals SET confirmations = COALESCE(confirmations,'{}'::jsonb) || '{"autoClosed":true}'::jsonb, updated_at = now() WHERE id = $1`,

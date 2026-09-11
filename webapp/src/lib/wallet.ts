@@ -69,7 +69,7 @@ function getTwaReturnUrl(): string | undefined {
     '';
   if (typeof cfg === 'string' && cfg.trim() && cfg.indexOf('YOUR_') === -1) return cfg.trim();
   try {
-    if ((window as any).Telegram?.WebApp?.initData) return 'https://t.me/uzsavdochibot/app';
+    if ((window as any).Telegram?.WebApp?.initData) return 'https://t.me/savdochi_uzbot/app';
   } catch {}
   return undefined;
 }

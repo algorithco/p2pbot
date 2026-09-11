@@ -3,8 +3,27 @@ import { TG } from './tg';
 
 let BASE = '';
 try {
-  BASE = window.localStorage.getItem('tonescrow:apiBase') || '';
-  if (BASE && BASE.charAt(BASE.length - 1) === '/') BASE = BASE.slice(0, -1);
+  const raw = window.localStorage.getItem('tonescrow:apiBase') || '';
+  if (raw) {
+    // Validate custom base: only allow same-origin or https hosts to prevent
+    // credential exfiltration (x-init-data) to an attacker origin.
+    try {
+      const u = new URL(raw, window.location.origin);
+      if (u.origin === window.location.origin || u.protocol === 'https:') {
+        BASE = raw.charAt(raw.length - 1) === '/' ? raw.slice(0, -1) : raw;
+        if (u.origin !== window.location.origin) {
+          console.warn('[api] using custom apiBase', u.origin);
+        } else if (raw.startsWith('http')) {
+          BASE = '';
+        }
+      } else {
+        console.warn('[api] ignoring unsafe apiBase (must be same-origin or https)');
+      }
+    } catch {
+      // relative path like '/api-v2' is safe
+      if (raw.startsWith('/')) BASE = raw.charAt(raw.length - 1) === '/' ? raw.slice(0, -1) : raw;
+    }
+  }
 } catch {}
 
 export class ApiError extends Error {
@@ -21,14 +40,16 @@ export class ApiError extends Error {
 function authHeaders(): Record<string, string> {
   const h: Record<string, string> = {};
   try {
-    if ((TG as any).initData && TG.initData()) h['x-init-data'] = TG.initData();
-    let uid = 0;
-    try {
-      uid = TG.realUser && TG.realUser() ? TG.realUser()!.id : TG.user().id || 0;
-    } catch {
-      uid = 0;
+    const initData = (TG as any).initData ? TG.initData() : '';
+    if (initData) h['x-init-data'] = initData;
+    // Never send the preview fallback id (777000001) without a signature —
+    // it would look like ID spoofing to the backend and pollutes logs.
+    const real = TG.realUser ? TG.realUser() : null;
+    if (real && real.id) {
+      h['x-telegram-user-id'] = String(real.id);
+    } else if (initData) {
+      h['x-telegram-user-id'] = String(TG.user().id || 0);
     }
-    h['x-telegram-user-id'] = String(uid || TG.user().id || 0);
   } catch {}
   return h;
 }
@@ -119,6 +140,16 @@ export const Api = {
   },
   joinDeal(id: number | string, token: string): Promise<any> {
     return request('POST', '/api/deals/' + encodeURIComponent(String(id)) + '/join/' + encodeURIComponent(token), {});
+  },
+  inviteLink(id: number | string): Promise<{ link: string; botLink: string; webappLink: string }> {
+    return request('POST', '/api/deals/' + encodeURIComponent(String(id)) + '/invite', {}).then((d) => {
+      d = d || {};
+      return {
+        link: d.botLink || d.link || d.webappLink || '',
+        botLink: d.botLink || d.link || '',
+        webappLink: d.webappLink || d.link || '',
+      };
+    });
   },
   dealKey(dealId: number | string): Promise<string | null> {
     return request('GET', '/api/deals/' + encodeURIComponent(String(dealId)) + '/key').then((d) =>
