@@ -34,12 +34,9 @@ export async function startBot(): Promise<Bot> {
   await b.api.setMyCommands([
     { command: 'start', description: 'Ilovani ochish' },
     { command: 'reyting', description: 'Oylik savdo reytingi' },
-    { command: 'admin_release', description: 'Admin: pulni chiqarish' },
-    { command: 'admin_refund', description: 'Admin: pulni qaytarish' },
-    { command: 'disputes', description: 'Admin: nizolar' },
   ]);
 
-  if (config.webappUrl) {
+  if (config.webappUrl && /^https:\/\//.test(config.webappUrl)) {
     try {
       await b.api.setChatMenuButton({
         menu_button: {
@@ -51,6 +48,8 @@ export async function startBot(): Promise<Bot> {
     } catch (err) {
       logger.warn('setChatMenuButton failed — check WEBAPP_URL is https and bot has rights', err);
     }
+  } else if (config.webappUrl) {
+    logger.warn(`WEBAPP_URL "${config.webappUrl}" is not https — menu button skipped (Telegram requires HTTPS)`);
   }
 
   bot = b;

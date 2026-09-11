@@ -95,7 +95,7 @@ export async function createDealRecord(params: {
   buyerTelegramId?: number | null;
   sellerTelegramId?: number | null;
   asset: string;
-  amount: number;
+  amount: number | string;
   feeBps: number;
   status: string;
   contractAddress?: string;
@@ -246,8 +246,16 @@ export async function ensureDealChatKey(dealId: number | string): Promise<string
   return k;
 }
 
-/** Update deal status; writes tx_hash when provided and stamps resolved_at on final statuses. */
-export async function updateDealStatus(dealId: number | string, status: string, txHash?: string) {
+/** Update deal status; writes tx_hash when provided and stamps resolved_at on final statuses.
+ *  When `onlyFrom` is given, the write is guarded: it only applies if the current
+ *  status is one of `onlyFrom` (prevents resurrecting RELEASED/REFUNDED deals).
+ *  Returns true if a row was updated. */
+export async function updateDealStatus(
+  dealId: number | string,
+  status: string,
+  txHash?: string,
+  onlyFrom?: string[],
+): Promise<boolean> {
   const id = Number(dealId);
   const sets: string[] = ['status = $1'];
   const params: unknown[] = [status];
@@ -260,7 +268,13 @@ export async function updateDealStatus(dealId: number | string, status: string, 
   }
   sets.push('updated_at = now()');
   params.push(id);
-  await db.query(`UPDATE deals SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
+  let sql = `UPDATE deals SET ${sets.join(', ')} WHERE id = $${params.length}`;
+  if (onlyFrom && onlyFrom.length > 0) {
+    params.push(onlyFrom);
+    sql += ` AND status = ANY($${params.length}::text[])`;
+  }
+  const res = await db.query(sql, params);
+  return (res.rowCount ?? 0) > 0;
 }
 
 /** Generate a one-time link token for a deal */
@@ -314,11 +328,14 @@ export async function atomicJoinDeal(dealId: number, token: string, telegramId: 
     await client.query('BEGIN');
     // Lock deal row
     const dealRes = await client.query(
-      'SELECT buyer_telegram_id, seller_telegram_id FROM deals WHERE id = $1 FOR UPDATE',
+      'SELECT buyer_telegram_id, seller_telegram_id, status FROM deals WHERE id = $1 FOR UPDATE',
       [dealId],
     );
     if (dealRes.rows.length === 0) throw new Error('deal_not_found');
     const deal = dealRes.rows[0];
+    const dealStatus = String(deal.status || '').toUpperCase();
+    if (['RELEASED', 'REFUNDED', 'RELEASE_PENDING', 'REFUND_PENDING'].includes(dealStatus))
+      throw new Error('deal_finished: cannot join a closed or locked deal');
     if (
       (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === Number(telegramId)) ||
       (deal.seller_telegram_id != null && Number(deal.seller_telegram_id) === Number(telegramId))
@@ -362,11 +379,13 @@ export async function setConfirmation(
   ]);
 }
 
-/** Retrieve chat messages for a deal — returns ciphertext-aware rows */
+/** Retrieve chat messages for a deal — returns newest N in chronological order */
 export async function getDealMessages(dealId: number, limit: number = 100) {
   const res = await db.query(
-    `SELECT id, deal_id, sender_telegram_id, content, encrypted_content, is_encrypted, created_at
-     FROM messages WHERE deal_id = $1 ORDER BY created_at ASC LIMIT $2`,
+    `SELECT * FROM (
+       SELECT id, deal_id, sender_telegram_id, content, encrypted_content, is_encrypted, created_at
+       FROM messages WHERE deal_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2
+     ) sub ORDER BY created_at ASC, id ASC`,
     [dealId, limit],
   );
   return res.rows;
@@ -528,12 +547,18 @@ export async function rejectOtherPendingRequests(dealId: number, exceptId: numbe
 export async function approveJoinRequest(
   requestId: number,
   approverTelegramId: number,
+  expectedDealId?: number,
 ): Promise<{ role: 'buyer' | 'seller'; autoRejected: any[] }> {
   const req = await getJoinRequestById(requestId);
   if (!req) throw new Error('request_not_found');
+  if (expectedDealId != null && Number(req.deal_id) !== Number(expectedDealId))
+    throw new Error('deal_mismatch: request does not belong to this deal');
   if (req.status !== 'pending') throw new Error('request_already_handled');
   const deal = await getDealById(req.deal_id);
   if (!deal) throw new Error('deal_not_found');
+  const st = String((deal as any).status || '').toUpperCase();
+  if (['RELEASED', 'REFUNDED', 'RELEASE_PENDING', 'REFUND_PENDING'].includes(st))
+    throw new Error('deal_finished: cannot join a closed or locked deal');
   // Only the creator (the already-joined party) can approve.
   const isCreator =
     (deal.buyer_telegram_id != null && Number(deal.buyer_telegram_id) === approverTelegramId) ||
@@ -553,9 +578,11 @@ export async function approveJoinRequest(
   return { role, autoRejected };
 }
 
-export async function rejectJoinRequest(requestId: number, approverTelegramId: number) {
+export async function rejectJoinRequest(requestId: number, approverTelegramId: number, expectedDealId?: number) {
   const req = await getJoinRequestById(requestId);
   if (!req) throw new Error('request_not_found');
+  if (expectedDealId != null && Number(req.deal_id) !== Number(expectedDealId))
+    throw new Error('deal_mismatch: request does not belong to this deal');
   if (req.status !== 'pending') throw new Error('request_already_handled');
   const deal = await getDealById(req.deal_id);
   if (!deal) throw new Error('deal_not_found');

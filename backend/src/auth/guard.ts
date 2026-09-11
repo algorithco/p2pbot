@@ -77,7 +77,13 @@ export const identityAuth: RequestHandler = (req, _res, next) => {
   }
 
   // Fix 3.3: dev auth only if explicitly allowed via ALLOW_DEV_AUTH=true
-  if (!config.botToken && !config.apiKey && config.allowDevAuth) {
+  // — and NEVER in production, even if the flag is set.
+  if (process.env.NODE_ENV === 'production' && config.allowDevAuth) {
+    if (!devWarned) {
+      devWarned = true;
+      logger.warn('AUTH: ALLOW_DEV_AUTH=true ignored in production (fail-closed)');
+    }
+  } else if (!config.botToken && !config.apiKey && config.allowDevAuth) {
     if (!devWarned) {
       devWarned = true;
       logger.warn('AUTH DEV MODE — ALLOW_DEV_AUTH=true, trusting x-telegram-user-id (never enable in prod)');

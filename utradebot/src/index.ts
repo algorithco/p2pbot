@@ -1,5 +1,6 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
+import { timingSafeEqual } from 'node:crypto';
 import { config, validateConfig } from './config';
 import logger from './logger';
 import { pool, ensureTables } from './db/queries';
@@ -50,12 +51,20 @@ app.use((req, res, next) => {
   // Allow /health without auth
   if (req.path === '/health') return next();
   if (!config.apiKey) return next();
-  const key =
-    (req.headers['x-api-key'] as string) ||
-    (req.headers['x-utrade-key'] as string) ||
-    (req.query.api_key as string) ||
-    '';
-  if (key !== config.apiKey) return res.status(401).json({ error: 'unauthorized' });
+  // Header-only: query api_key removed (leaks in logs/history/Referer).
+  const key = (req.headers['x-api-key'] as string) || (req.headers['x-utrade-key'] as string) || '';
+  if (!key) return res.status(401).json({ error: 'unauthorized' });
+  const ba = Buffer.from(key, 'utf8');
+  const bb = Buffer.from(config.apiKey, 'utf8');
+  let ok = false;
+  if (ba.length === bb.length) {
+    try {
+      ok = timingSafeEqual(ba, bb);
+    } catch {
+      ok = false;
+    }
+  }
+  if (!ok) return res.status(401).json({ error: 'unauthorized' });
   next();
 });
 
