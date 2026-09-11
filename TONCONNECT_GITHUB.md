@@ -112,7 +112,7 @@ docker compose down
 docker compose up --build -d --remove-orphans
 # --remove-orphans deletes the old cloudflared containers
 docker compose ps # should show 6 services, no cloudflared
-docker compose logs backend --tail 20 # Bot @uzsavdochibot started
+docker compose logs backend --tail 20 # Bot @savdochi_uzbot started
 ```
 
 No more `trycloudflare.com` URLs in logs.

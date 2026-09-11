@@ -937,6 +937,18 @@
     setTabbar(true);
     setTopbar('TonEscrow');
 
+    // Home has no header: hide the global topbar while this view is mounted.
+    // router() runs cleanup() before every view change, which restores it,
+    // so other views are unaffected.
+    var topbarEl = document.getElementById('topbar');
+    var prevTopbarDisplay = topbarEl ? topbarEl.style.display : '';
+    if (topbarEl) topbarEl.style.display = 'none';
+    App.cleanupFns.push(function () {
+      try {
+        if (topbarEl) topbarEl.style.display = prevTopbarDisplay;
+      } catch (e) {}
+    });
+
     var s = App.state;
     var name = (s.user && (s.user.first_name || s.user.username)) || 'there';
 
@@ -993,7 +1005,7 @@
 
     var root = UI.h(
       'div',
-      {},
+      { class: 'home' },
       [
         ptr,
         !TG.realUser()
@@ -2197,6 +2209,28 @@
       var iAmBuyer = Number(deal.buyer_telegram_id) === uid;
       var iAmSeller = Number(deal.seller_telegram_id) === uid;
       var link = App.state.createdLinks[deal.id] || '';
+      // Shared invite flow (used by the header fab + the actions button):
+      // always resolve a live link via the backend — it reuses the current
+      // 15-minute link and mints a new one only after expiry.
+      function shareFreshInvite(btn) {
+        if (btn && btn.disabled) return;
+        if (btn) btn.disabled = true;
+        TG.haptic.tap();
+        Api.inviteLink(deal.id)
+          .then(function (r) {
+            var url = (r && (r.botLink || r.link || r.webappLink)) || '';
+            if (!url) throw new Error('no_link');
+            App.state.createdLinks[deal.id] = url;
+            TG.share(url, "Escrow bitimimga qo'shiling #" + deal.id);
+          })
+          .catch(function () {
+            UI.toast("Havola yaratilmadi — qayta urinib ko'ring", 'err');
+            TG.haptic.error();
+          })
+          .then(function () {
+            if (btn) btn.disabled = false;
+          });
+      }
 
       var head = UI.h('div', { class: 'deal-head' }, [
         UI.h('div', { class: 'asset-glyph ' + am.cls, text: am.glyph }),
@@ -2230,6 +2264,22 @@
       var curStep = sm.step;
       var refunded = deal.status === 'REFUNDED';
       var finalState = UI.isFinalStatus(deal.status);
+      // Circular share button (top-right of the header): mints a FRESH one-time
+      // invite link via the backend — creation-time links are single-use and may
+      // already be consumed or expired. Shown only while a partner is awaited.
+      var needPartner = !deal.buyer_telegram_id || !deal.seller_telegram_id;
+      if (needPartner && !finalState) {
+        head.appendChild(
+          UI.h('button', {
+            class: 'deal-share-fab',
+            'aria-label': 'Taklif havolasini ulashish',
+            html: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-4M8.6 13.4l6.8 4"/></svg>',
+            onclick: function (e) {
+              shareFreshInvite(e && e.currentTarget);
+            },
+          }),
+        );
+      }
       var timeline = UI.h('div', { class: 'timeline' });
       steps.forEach(function (st, idx) {
         var cls = 'tl-step ';
@@ -2296,8 +2346,8 @@
             'button',
             {
               class: 'btn btn-primary',
-              onclick: function () {
-                TG.share(link, "Escrow bitimimga qo'shiling #" + deal.id);
+              onclick: function (e) {
+                shareFreshInvite(e && e.currentTarget);
               },
             },
             ['Taklif havolasini ulashish'],

@@ -36,8 +36,9 @@ function parseToScaled(input: string | number, decimals: number): bigint {
   let value = BigInt((intPart || '0') + fracPart);
   const scaleDelta = fracPart.length - exp - decimals;
   if (scaleDelta > 0) {
-    // Truncate digits beyond target precision.
-    value /= 10n ** BigInt(scaleDelta);
+    // Reject silent truncation: 1.1234567899 TON would otherwise settle
+    // less than displayed. Caller must round/trim explicitly.
+    throw new Error(`Too many decimals for ${decimals}-decimal asset: ${raw}`);
   } else if (scaleDelta < 0) {
     value *= 10n ** BigInt(-scaleDelta);
   }

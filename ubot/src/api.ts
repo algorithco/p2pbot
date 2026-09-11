@@ -281,15 +281,22 @@ export function createApi() {
   }
   app.use(helmetMw);
 
-  // cors: allow frontend origin if set, otherwise reflect origin but no credentials (internal)
+  // cors: allow configured frontend origin(s); fail-closed (no reflect-all)
+  // when unset — reflecting any origin exposes the internal API surface.
   let corsMw: (req: Request, res: Response, next: NextFunction) => void = (_req, _res, next) => next();
   try {
     const fn = cors?.default || cors;
     if (typeof fn === 'function') {
-      const allowed = process.env.FRONTEND_URL || process.env.WEBAPP_URL;
-      corsMw = allowed
-        ? fn({ origin: [allowed, 'http://localhost:8080', 'http://127.0.0.1:8080'], credentials: false })
-        : fn({ origin: true, credentials: false });
+      const raw = process.env.FRONTEND_URL || process.env.WEBAPP_URL || '';
+      const allowed = raw
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (process.env.NODE_ENV !== 'production') {
+        allowed.push('http://localhost:8080', 'http://127.0.0.1:8080');
+      }
+      corsMw =
+        allowed.length > 0 ? fn({ origin: allowed, credentials: false }) : fn({ origin: false, credentials: false });
     }
   } catch {
     corsMw = (_req, _res, next) => next();

@@ -3,7 +3,7 @@ dotenv.config();
 
 export const config = {
   botToken: process.env.BOT_TOKEN || '',
-  botUsername: process.env.BOT_USERNAME || 'uzsavdochibot',
+  botUsername: process.env.BOT_USERNAME || 'savdochi_uzbot',
   adminTelegramIds: (process.env.ADMIN_TELEGRAM_IDS || '')
     .split(',')
     .map((s) => Number(s.trim()))
@@ -24,10 +24,18 @@ export const config = {
     }
   })(),
   feeAddress: process.env.FEE_ADDRESS || '',
-  feeBps: Number(process.env.FEE_BPS || 100),
+  feeBps: (() => {
+    const n = Number(process.env.FEE_BPS ?? 100);
+    if (!Number.isFinite(n)) return 100;
+    return Math.min(10000, Math.max(0, Math.floor(n)));
+  })(),
   feePercentage: Number(process.env.FEE_PERCENTAGE || 1), // percent
   usdtJettonAddress: process.env.USDT_JETTON_ADDRESS || '',
-  minConfirmations: Number(process.env.MIN_CONFIRMATIONS || 3),
+  minConfirmations: (() => {
+    const n = Number(process.env.MIN_CONFIRMATIONS ?? 3);
+    if (!Number.isFinite(n)) return 3;
+    return Math.min(30, Math.max(1, Math.floor(n)));
+  })(),
   adminAddress: process.env.ADMIN_ADDRESS || '',
   apiKey: process.env.API_KEY || undefined,
   webappUrl: process.env.WEBAPP_URL || '',
@@ -51,6 +59,9 @@ export const config = {
 // Startup validation (fix: config.ts ! assertions had no runtime effect, enabling 3.3)
 if (!config.databaseUrl) {
   console.warn('[config] DATABASE_URL not set — backend will fail to connect to Postgres');
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('[config] DATABASE_URL is required in production — refusing to boot fail-open');
+  }
 }
 if (
   config.encryptionKey &&

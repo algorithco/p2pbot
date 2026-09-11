@@ -69,12 +69,11 @@ async function resolvePayoutAddress(
 /** Valid transitions for guarded release/refund. */
 function isValidTransition(currentStatus: string, nextStatus: string): boolean {
   if (nextStatus === DEAL_STATUS.REFUNDED) {
-    return [
-      DEAL_STATUS.AWAITING_DEPOSIT,
-      DEAL_STATUS.DEPOSIT_CONFIRMED,
-      DEAL_STATUS.ITEM_SENT,
-      DEAL_STATUS.BUYER_CONFIRMED,
-    ].includes(currentStatus as any);
+    // AWAITING_DEPOSIT excluded: refunding before any deposit would pay out
+    // from the signer hot wallet with no backing funds.
+    return [DEAL_STATUS.DEPOSIT_CONFIRMED, DEAL_STATUS.ITEM_SENT, DEAL_STATUS.BUYER_CONFIRMED].includes(
+      currentStatus as any,
+    );
   }
   if (nextStatus === DEAL_STATUS.RELEASED) {
     return [DEAL_STATUS.DEPOSIT_CONFIRMED, DEAL_STATUS.ITEM_SENT, DEAL_STATUS.BUYER_CONFIRMED].includes(
@@ -384,7 +383,7 @@ async function guardedTransition(
 
     plan = {
       assetUpper,
-      principalHuman: isRelease ? payoutHuman : amountStr,
+      principalHuman: payoutHuman,
       amountStr,
       feeHuman,
       feeBase,

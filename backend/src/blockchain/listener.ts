@@ -238,7 +238,11 @@ async function processTonDeposit(
   }
 
   if (value === expected) {
-    await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
+    const ok = await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash, ['AWAITING_DEPOSIT']);
+    if (!ok) {
+      logger.warn(`Deal #${deal.id}: deposit arrived but deal no longer AWAITING_DEPOSIT — ignoring (no resurrect)`);
+      return;
+    }
     logger.info(`Deal #${deal.id}: TON deposit exact ${value} confirmed`);
     await notifySellerDeposit(deal);
     return;
@@ -246,7 +250,11 @@ async function processTonDeposit(
 
   if (value > expected) {
     const excess = value - expected;
-    await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
+    const ok = await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash, ['AWAITING_DEPOSIT']);
+    if (!ok) {
+      logger.warn(`Deal #${deal.id}: overpay arrived but deal no longer AWAITING_DEPOSIT — ignoring (no resurrect)`);
+      return;
+    }
     logger.info(
       `Deal #${deal.id}: TON overpay got ${value} expected ${expected}, excess ${excess} — confirming + refunding`,
     );
@@ -392,7 +400,11 @@ async function processJettonDeposit(
   }
 
   if (note.amount === expected) {
-    await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
+    const ok = await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash, ['AWAITING_DEPOSIT']);
+    if (!ok) {
+      logger.warn(`Deal #${deal.id}: USDT deposit arrived but deal no longer AWAITING_DEPOSIT — ignoring`);
+      return;
+    }
     logger.info(`Deal #${deal.id}: USDT deposit exact ${note.amount} confirmed`);
     await notifySellerDeposit(deal);
     return;
@@ -400,7 +412,11 @@ async function processJettonDeposit(
 
   if (note.amount > expected) {
     const excess = note.amount - expected;
-    await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash);
+    const ok = await updateDealStatus(deal.id, 'DEPOSIT_CONFIRMED', txHash, ['AWAITING_DEPOSIT']);
+    if (!ok) {
+      logger.warn(`Deal #${deal.id}: USDT overpay arrived but deal no longer AWAITING_DEPOSIT — ignoring`);
+      return;
+    }
     logger.info(`Deal #${deal.id}: USDT overpay got ${note.amount} expected ${expected}, excess ${excess}`);
     const senderAddr = note.sender ? note.sender.toString() : null;
     if (senderAddr) {
@@ -508,7 +524,19 @@ async function handleTransaction(addr: string, tx: Transaction) {
 }
 
 async function pollAddress(addr: string) {
-  const txs = await client.getTransactions(Address.parse(addr), { limit: 10 });
+  // Validate address before polling — prevents a poisoned monitoredAddresses
+  // entry from spamming Address.parse errors every tick.
+  try {
+    Address.parse(addr);
+  } catch {
+    logger.warn(`Listener: skipping invalid monitored address ${addr}`);
+    monitoredAddresses.delete(addr);
+    return;
+  }
+  // Limit 30 (still a single API call): the payment address is one shared
+  // signer wallet for all deals, so a tight window could skip deposits and the
+  // cursor would jump past them forever.
+  const txs = await client.getTransactions(Address.parse(addr), { limit: 30 });
 
   const cursor = cursors.get(addr);
   let maxSeen: { lt: string; hash: string } | null = cursor ? { ...cursor } : null;
@@ -518,9 +546,13 @@ async function pollAddress(addr: string) {
     const entry = { lt, hash: tx.hash().toString('hex') };
     if (!maxSeen || BigInt(lt) > BigInt(maxSeen.lt)) maxSeen = entry;
 
-    // First observation of this address only seeds the cursor.
-    if (!cursor) continue;
-    if (BigInt(lt) <= BigInt(cursor.lt)) continue;
+    // First observation: process (don't skip) so fast deposits landing
+    // between deal creation and the first tick are not lost forever.
+    // Subsequent polls skip already-seen lt (and same-lt same-hash replays).
+    if (cursor) {
+      if (BigInt(lt) < BigInt(cursor.lt)) continue;
+      if (BigInt(lt) === BigInt(cursor.lt) && entry.hash === cursor.hash) continue;
+    }
 
     try {
       await handleTransaction(addr, tx);
