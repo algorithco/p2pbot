@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/algorithco/p2pbot/compare/v1.0.1...v1.1.0) (2026-09-10)
+
+
+### Features
+
+* username, home polish, deal share links, offchain status ([#46](https://github.com/algorithco/p2pbot/issues/46)) ([e4d9530](https://github.com/algorithco/p2pbot/commit/e4d953001a014ac60d29be7241e17120c67d8373))
+
 ## [1.0.1](https://github.com/algorithco/p2pbot/compare/v1.0.0...v1.0.1) (2026-09-10)
 
 
