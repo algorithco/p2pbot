@@ -22,13 +22,23 @@ app.use(cors({ origin: corsOrigin as any, credentials: false }));
 app.use(express.json({ limit: '256kb' }));
 
 // Internal API key auth — if SIGNER_API_KEY is set, require x-api-key or Authorization Bearer
+function timingSafeEq(a: string, b: string): boolean {
+  const ba = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ba.length !== bb.length) return false;
+  try {
+    return crypto.timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
+}
 function authMiddleware(req: Request, res: Response, next: NextFunction) {
   if (!config.apiKey) return next(); // open only if no key configured (dev)
   const headerKey = (req.headers['x-api-key'] as string) || (req.headers['x-signer-key'] as string) || '';
   const bearer = (req.headers['authorization'] as string) || '';
   const bearerKey = bearer.startsWith('Bearer ') ? bearer.slice(7) : '';
   const provided = headerKey || bearerKey;
-  if (provided !== config.apiKey) {
+  if (!timingSafeEq(provided, config.apiKey)) {
     return res.status(401).json({ error: 'unauthorized', hint: 'x-api-key required' });
   }
   return next();

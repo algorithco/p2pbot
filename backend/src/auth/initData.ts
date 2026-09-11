@@ -70,7 +70,10 @@ export function validateInitData(initData: string, botToken: string, maxAgeSec =
   if (!Number.isFinite(authDateSec) || authDateSec <= 0) {
     return { ok: false, reason: 'missing_auth_date' };
   }
-  const ageSec = Math.floor(Date.now() / 1000) - authDateSec;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const ageSec = nowSec - authDateSec;
+  // Reject future auth_date beyond 5min clock skew (prevents indefinite replay).
+  if (ageSec < -300) return { ok: false, reason: 'future_auth_date' };
   if (ageSec > maxAgeSec) return { ok: false, reason: 'stale_auth_date' };
 
   let user: TgUser | undefined;

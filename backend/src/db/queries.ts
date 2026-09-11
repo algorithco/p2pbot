@@ -1,7 +1,15 @@
 import { Pool } from 'pg';
 import { config } from '../config';
 
-const pool = new Pool({ connectionString: config.databaseUrl });
+const pool = new Pool({
+  connectionString: config.databaseUrl,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
+pool.on('error', (err) => {
+  console.error('[db] pool idle client error', String((err as Error).message || err).slice(0, 300));
+});
 
 export const db = pool;
 
